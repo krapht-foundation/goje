@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb xauth libx11-6 libgl1 libglx-mesa0 libgl1-mesa-dri
       - name: Run Go checks
-        run: make check test-race vuln
+        run: make check test-race vuln check-example
       - name: Run desktop smoke
         run: xvfb-run -a make smoke-desktop
       - name: Install Chromium

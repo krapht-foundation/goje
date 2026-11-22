@@ -47,7 +47,7 @@ docs-check: ## Check local Markdown links and heading anchors
 
 check: fmt-check lint test docs-check ## Run the read-only quality gate
 
-.PHONY: build-desktop run-desktop smoke-desktop build-web serve-web setup-web smoke-web
+.PHONY: build-desktop run-desktop smoke-desktop build-web serve-web setup-web smoke-web check-example
 build-desktop: ## Build the native playground
 	mkdir -p "$(BUILD_DIR)"
 	$(GO) build -o "$(PLAYGROUND)" ./cmd/playground
@@ -55,7 +55,7 @@ build-desktop: ## Build the native playground
 run-desktop: build-desktop ## Open the native playground window
 	"$(PLAYGROUND)"
 
-smoke-desktop: build-desktop ## Check movement and rendered pixels in a native window
+smoke-desktop: build-desktop ## Check movement, pickup, and reset in a native window
 	$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1], "-smoke"], check=True, timeout=20)' "$(PLAYGROUND)"
 
 build-web: ## Build the playground Wasm and browser files
@@ -72,3 +72,17 @@ setup-web: ## Install pinned browser smoke dependencies and Chromium
 
 smoke-web: build-web ## Drive the Wasm playground in Chromium and check canvas pixels
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-web.mjs
+
+check-example: ## Build the reference playground from a separate module on desktop and web
+	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		cp cmd/playground/*.go "$$tmp/"; \
+		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
+		cd "$$tmp"; export GOWORK=off; \
+		$(GO) mod init example.com/playground; \
+		$(GO) mod edit -go="$$go_version" \
+			-require=github.com/krapht-foundation/goje@v0.0.0 \
+			-replace=github.com/krapht-foundation/goje="$(CURDIR)"; \
+		$(GO) mod tidy; \
+		$(GO) build .; \
+		GOOS=js GOARCH=wasm $(GO) build -o playground.wasm .; \
+		echo "External reference builds passed: desktop and Wasm"

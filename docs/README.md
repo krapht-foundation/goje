@@ -4,7 +4,7 @@ Goje is a Go game framework and toolchain in development. The project is focused
 
 ## What Goje aims to provide
 
-- A game framework and reusable tools for building a playground inside your own game. See the [game-owned playground proposal](../rfcs/0001-game-owned-playgrounds.md).
+- A game framework and reusable tools for building a playground inside your own game. The first [playground prototype](playground.md#use-the-playground-in-your-game) supports replaying a configured encounter.
 - A level builder and tools for creating pixel art and tiles.
 - Tools for making sounds and authoring animations, video, and sprites.
 

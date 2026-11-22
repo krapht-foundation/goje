@@ -143,8 +143,8 @@ linters:
           deny:
             - pkg: github.com/hajimehoshi/ebiten/v2
               desc: Keep the public package independent of the playground graphics backend.
-            - pkg: github.com/krapht-foundation/goje/internal/playground
-              desc: The playground consumes the public package, not the other way around.
+            - pkg: github.com/krapht-foundation/goje/cmd
+              desc: Commands consume the public package, not the other way around.
     godot:
       scope: declarations
       period: true
