@@ -20,7 +20,7 @@ For the browser, start `make serve-web` and open `http://127.0.0.1:8080/`. Set `
 
 ## Use the playground in your game
 
-Pass your game's scene loader to `goje.NewPlayground`. Configure the starting encounter in that loader, and have it create fresh mutable state each time it runs. Keep reusable assets outside the scene. In your normal game loop, use `Scene()` to update and render the current scene, and call `Reset()` when the player requests a restart. Get the current scene again after resetting instead of retaining references from the previous run.
+Import `github.com/krapht-foundation/goje/engine` and pass your game's scene loader to `engine.NewPlayground`. Configure the starting encounter in that loader, and have it create fresh mutable state each time it runs. Keep reusable assets outside the scene. In your normal game loop, use `Scene()` to update and render the current scene, and call `Reset()` when the player requests a restart. Get the current scene again after resetting instead of retaining references from the previous run.
 
 See the [reference command](../cmd/playground/) for a working integration. It uses Ebitengine for input, drawing, and the game loop; those are not dependencies of the playground API. To try the reference in another module before a Goje release, run the following from this repository:
 

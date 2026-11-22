@@ -4,7 +4,7 @@ This specification covers the experimental playground API and the in-repository 
 
 ## Behavior
 
-- `goje.NewPlayground` takes a game-defined loader and calls it to create the initial scene. `Reset` calls the same loader and replaces the current scene. The game is responsible for supplying fresh mutable state, retaining reusable assets separately, and driving input, updates, and rendering.
+- `engine.NewPlayground` takes a game-defined loader and calls it to create the initial scene. `Reset` calls the same loader and replaces the current scene. The game is responsible for supplying fresh mutable state, retaining reusable assets separately, and driving input, updates, and rendering.
 - The reference encounter begins with a player marker at the center of the board and a cyan token to its right. Moving through the token collects it. Pressing **R** restores both to their initial positions without restarting the game and skips movement for that tick.
 - The same playground command builds a desktop window and a browser game. Both present an isometric grid, an elevated marker and its ground shadow, and keyboard controls.
 - Arrow keys or WASD move the marker in screen-relative directions. The marker stays on the board. The game advances movement during simulation ticks, not draws.

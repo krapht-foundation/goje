@@ -8,7 +8,7 @@ Goje needs to prove that a single Go game can run on desktop and in a browser be
 
 ## Decision
 
-Use one module, `github.com/krapht-foundation/goje`, with Go 1.27 or newer. Put the consumer-facing package at the root, implementation under `internal/`, and thin executable entry points under `cmd/`. Keep the public projection math independent of graphics. Use Ebitengine in the playground for the frame loop, keyboard input, rendering, and platform integration; it is not part of the public API.
+Use one module, `github.com/krapht-foundation/goje`, with Go 1.27 or newer. Keep private implementation under `internal/` and thin executable entry points under `cmd/`. The first slice put the public package at the module root; [ADR 0002](0002-runtime-host-and-diagnostics.md) moves it to `engine/`. Keep the public projection math independent of graphics. Use Ebitengine in the playground for the frame loop, keyboard input, rendering, and platform integration; it is not part of the public API.
 
 Use Make for shared commands and pin developer tool versions in `tools.mk`. Use the portable parts of SuperEngine's `golangci-lint` policy: `gci`, `gofumpt`, `goimports`, and `golines`, with additional correctness, security, and maintainability checks. Goje owns its dependency rules and does not inherit backend-specific build tags or exclusions. Formatting is an explicit mutation; `make check` must not rewrite source. Use native and browser smoke checks for the [playground contract](../specs/playground.md).
 

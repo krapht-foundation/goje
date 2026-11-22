@@ -137,14 +137,19 @@ linters:
       replace-allow-list: []
     depguard:
       rules:
-        public-package:
+        engine-package:
           files:
-            - '${base-path}/*.go'
+            - '${base-path}/engine/*.go'
+            - '${base-path}/engine/**/*.go'
           deny:
             - pkg: github.com/hajimehoshi/ebiten/v2
-              desc: Keep the public package independent of the playground graphics backend.
+              desc: Keep the engine independent of the playground graphics backend.
             - pkg: github.com/krapht-foundation/goje/cmd
-              desc: Commands consume the public package, not the other way around.
+              desc: Commands consume the engine, not the other way around.
+            - pkg: github.com/krapht-foundation/goje/platform
+              desc: The platform hosts the engine, not the other way around.
+            - pkg: github.com/krapht-foundation/goje/internal/platform
+              desc: Keep platform implementation out of the engine.
     godot:
       scope: declarations
       period: true

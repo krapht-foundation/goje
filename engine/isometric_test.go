@@ -1,13 +1,13 @@
-package goje_test
+package engine_test
 
 import (
 	"testing"
 
-	"github.com/krapht-foundation/goje"
+	"github.com/krapht-foundation/goje/engine"
 )
 
 func TestIsometricProject(t *testing.T) {
-	projection := goje.Isometric{HalfTileWidth: 16, HalfTileHeight: 8}
+	projection := engine.Isometric{HalfTileWidth: 16, HalfTileHeight: 8}
 	for _, tc := range []struct {
 		name                    string
 		x, y, elevation, sx, sy float64

@@ -15,7 +15,7 @@ Phaser's [Game](https://docs.phaser.io/phaser/concepts/game) and [Scenes](https:
 | Scope | Build the runtime foundation. Reuse the current encounter as the acceptance scenario. | Camera, depth sorting, and picking follow M1. |
 | Backend | Own the desktop and web hosts in Goje. Do not build new runtime work on Ebitengine or another game framework. Remove Ebitengine when the reference playground switches hosts. | Use low-level libraries for windowing, graphics bindings, and other primitives. Goje owns the integration and game-facing behavior. |
 | Clock | The host schedules fixed ticks. The core executes one tick when asked and never reads wall time. | Running a scene headlessly does not require a window, a browser, or a second scheduler. |
-| Repository | Keep the single Go module from [ADR 0001](../decisions/0001-first-runtime-and-tooling.md). | Keep backend-specific dependencies out of the root package's import graph, even if the module lists them. |
+| Repository | Keep the single Go module and put the public core in `engine/`, per [ADR 0002](../decisions/0002-runtime-host-and-diagnostics.md). | Keep backend-specific dependencies out of the engine's import graph, even if the module lists them. |
 
 ## Design priorities
 
@@ -27,7 +27,7 @@ Phaser's [Game](https://docs.phaser.io/phaser/concepts/game) and [Scenes](https:
 
 | Location | Owns |
 | --- | --- |
-| Root `goje` package | The game lifecycle, one active scene, single-tick stepping, neutral input and drawing contracts, and the existing isometric projection. No OS handles, GPU handles, JavaScript, cgo, or graphics bindings. |
+| Public `engine/` package | The game lifecycle, one active scene, single-tick stepping, neutral input and drawing contracts, and the existing isometric projection. No OS handles, GPU handles, JavaScript, cgo, or graphics bindings. |
 | Public `platform/` package | One launch entry point for consumers. It selects the desktop or web implementation using Go build constraints; game code does not branch by OS. |
 | `internal/platform/` | Platform loops, a shared host-side tick scheduler, input buffering, window or canvas setup, rendering, and native resource cleanup. |
 | `cmd/playground/` and `web/playground/` | The reference encounter and browser bootstrap. The example calls public Goje packages; smoke assertions remain outside the runtime API. |

@@ -10,7 +10,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
-	"github.com/krapht-foundation/goje"
+	"github.com/krapht-foundation/goje/engine"
 )
 
 const (
@@ -50,9 +50,9 @@ func (s *scene) move(horizontal, vertical int) {
 }
 
 type game struct {
-	projection goje.Isometric
+	projection engine.Isometric
 	grid       *ebiten.Image
-	playground *goje.Playground[scene]
+	playground *engine.Playground[scene]
 }
 
 func run(smoke bool) error {
@@ -60,8 +60,8 @@ func run(smoke bool) error {
 	ebiten.SetWindowTitle("Goje Playground")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	g := &game{
-		projection: goje.Isometric{HalfTileWidth: 16, HalfTileHeight: 8},
-		playground: goje.NewPlayground(func() scene {
+		projection: engine.Isometric{HalfTileWidth: 16, HalfTileHeight: 8},
+		playground: engine.NewPlayground(func() scene {
 			return scene{player: point{0, 0}, token: point{1, -1}}
 		}),
 	}

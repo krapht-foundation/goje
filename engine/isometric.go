@@ -1,5 +1,4 @@
-// Package goje provides building blocks for 2.5D games.
-package goje
+package engine
 
 // Isometric projects a square ground grid onto a diamond grid. HalfTileWidth
 // and HalfTileHeight are the positive screen-pixel half-extents of a tile.

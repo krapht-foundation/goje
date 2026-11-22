@@ -1,4 +1,4 @@
-package goje
+package engine
 
 // Playground runs one game-owned scenario at a time. The game owns ticking,
 // input, rendering, and resources that outlive a scenario. Use it on the game
