@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goje Playground</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; background: #141c29; color: #fff; }
+    #status { position: fixed; z-index: 1; top: 1rem; left: 1rem; font: 1rem system-ui; }
+  </style>
+</head>
+<body>
+  <p id="status" role="status">Loading Goje Playground…</p>
+  <script src="wasm_exec.js"></script>
+  <script>
+    /** @file Load the compiled Go playground and show startup or runtime failures. */
+
+    const statusLine = document.querySelector("#status");
+    /**
+     * Fetch and instantiate the playground with the Go WebAssembly runtime.
+     * @returns {Promise<void>} A promise kept pending while the playground runs.
+     * @throws {Error} The returned promise rejects if startup fails or the runtime exits.
+     */
+    async function start() {
+      const go = new Go();
+      const response = await fetch("playground.wasm");
+      if (!response.ok) throw new Error(`Wasm download failed: HTTP ${response.status}`);
+      const { instance } = await WebAssembly.instantiateStreaming(response, go.importObject);
+      statusLine.hidden = true;
+      await go.run(instance);
+      throw new Error("The playground stopped.");
+    }
+    start().catch(error => {
+      statusLine.hidden = false;
+      statusLine.textContent = error.message;
+      console.error(error);
+    });
+  </script>
+</body>
+</html>

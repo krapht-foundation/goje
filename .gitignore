@@ -32,3 +32,11 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local agent settings and worktrees
+/.claude/settings.local.json
+/.claude/worktrees/
+
+# Local builds, developer tools, and browser smoke dependencies
+/.build/
+/node_modules/

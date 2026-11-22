@@ -1,0 +1,178 @@
+# golangci-lint v2; version pinned in tools.mk.
+version: "2"
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+    - goimports
+    - golines
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/krapht-foundation/goje)
+    gofumpt:
+      extra:
+        group-params: true
+      module-path: github.com/krapht-foundation/goje
+    goimports:
+      local-prefixes:
+        - github.com/krapht-foundation/goje
+    golines:
+      max-len: 100
+      tab-len: 2
+      shorten-comments: true
+      reformat-tags: true
+      chain-split-dots: true
+  exclusions:
+    generated: lax
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - contextcheck
+    - errorlint
+    - exhaustive
+    - noctx
+    - wrapcheck
+    - nilerr
+    - gosec
+    - revive
+    - nolintlint
+    - gocritic
+    - misspell
+    - unconvert
+    - unparam
+    - prealloc
+    - perfsprint
+    - usestdlibvars
+    - modernize
+    - godot
+    - gochecknoinits
+    - forbidigo
+    - gomoddirectives
+    - depguard
+    - thelper
+    - tparallel
+    - paralleltest
+    - testpackage
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    staticcheck:
+      checks: ["all"]
+    errcheck:
+      check-blank: true
+      check-type-assertions: true
+    govet:
+      enable:
+        - nilness
+        - reflectvaluecompare
+        - sortslice
+        - unusedwrite
+        - shadow
+    nolintlint:
+      allow-no-explanation: []
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: use-any
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: errorf
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: empty-block
+        - name: early-return
+        - name: unused-parameter
+          disabled: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - whyNoLint # nolintlint already checks this.
+        - hugeParam
+        - rangeValCopy
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+      ignore-package-globs:
+        - github.com/krapht-foundation/goje/*
+    forbidigo:
+      forbid:
+        - pattern: '^fmt\.Print.*$'
+          msg: Write user-facing output at the command boundary; use log/slog for diagnostics.
+        - pattern: '^log\.Print.*$'
+          msg: Use log/slog for diagnostics.
+        - pattern: '^panic$'
+          msg: Return an error instead of panicking.
+        - pattern: '^os\.Exit$'
+          msg: Return an error; only the command should exit.
+    gomoddirectives:
+      replace-local: false
+      replace-allow-list: []
+    depguard:
+      rules:
+        public-package:
+          files:
+            - '${base-path}/*.go'
+          deny:
+            - pkg: github.com/hajimehoshi/ebiten/v2
+              desc: Keep the public package independent of the playground graphics backend.
+            - pkg: github.com/krapht-foundation/goje/internal/playground
+              desc: The playground consumes the public package, not the other way around.
+    godot:
+      scope: declarations
+      period: true
+    perfsprint:
+      strconcat: false
+  exclusions:
+    generated: lax
+    rules:
+      - path: '_test\.go$'
+        linters:
+          - wrapcheck
+          - gosec
+          - forbidigo
+          - paralleltest
+          - tparallel
+          - testpackage
+          - errcheck
+      - path: '^cmd/'
+        linters:
+          - forbidigo
+
+run:
+  timeout: 5m
+  go: "1.27"
+  tests: true
+  modules-download-mode: readonly
+  relative-path-mode: gomod
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

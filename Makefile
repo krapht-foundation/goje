@@ -1,0 +1,74 @@
+.DEFAULT_GOAL := help
+
+GO ?= go
+NODE ?= node
+NPM ?= npm
+PYTHON ?= python3
+PORT ?= 8080
+PLAYWRIGHT_INSTALL_FLAGS ?=
+BUILD_DIR := $(CURDIR)/.build
+TOOLBIN := $(BUILD_DIR)/tools
+WEB_DIR := $(BUILD_DIR)/web
+PLAYWRIGHT_CACHE := $(BUILD_DIR)/playwright
+PLAYGROUND := $(BUILD_DIR)/playground$(if $(filter windows,$(shell $(GO) env GOOS)),.exe)
+
+include tools.mk
+
+.PHONY: help doctor setup-tools fmt fmt-check lint test test-race vuln docs-check check
+help: ## List available targets
+	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z-]*:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+doctor: ## Report the effective Go toolchain and module requirement
+	@$(GO) list -m -f 'Go module minimum: {{.GoVersion}}'
+	@$(GO) version
+
+setup-tools: $(GOLANGCI) $(GOVULNCHECK) ## Install pinned Go developer tools
+
+fmt: $(GOLANGCI) ## Format Go source in place
+	"$(GOLANGCI)" fmt ./...
+
+fmt-check: $(GOLANGCI) ## Check Go formatting without rewriting files
+	"$(GOLANGCI)" fmt --diff ./...
+
+lint: $(GOLANGCI) ## Run the Go lint policy in .golangci.yml
+	"$(GOLANGCI)" run ./...
+
+test: ## Run headless Go tests
+	$(GO) test ./...
+
+test-race: ## Run Go tests with the native race detector
+	$(GO) test -race ./...
+
+vuln: $(GOVULNCHECK) ## Scan Go dependencies on the current target
+	"$(GOVULNCHECK)" ./...
+
+docs-check: ## Check local Markdown links and heading anchors
+	$(PYTHON) scripts/check-docs.py
+
+check: fmt-check lint test docs-check ## Run the read-only quality gate
+
+.PHONY: build-desktop run-desktop smoke-desktop build-web serve-web setup-web smoke-web
+build-desktop: ## Build the native playground
+	mkdir -p "$(BUILD_DIR)"
+	$(GO) build -o "$(PLAYGROUND)" ./cmd/playground
+
+run-desktop: build-desktop ## Open the native playground window
+	"$(PLAYGROUND)"
+
+smoke-desktop: build-desktop ## Check movement and rendered pixels in a native window
+	$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1], "-smoke"], check=True, timeout=20)' "$(PLAYGROUND)"
+
+build-web: ## Build the playground Wasm and browser files
+	mkdir -p "$(WEB_DIR)"
+	GOOS=js GOARCH=wasm $(GO) build -o "$(WEB_DIR)/playground.wasm" ./cmd/playground
+	install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(WEB_DIR)/"
+
+serve-web: build-web ## Serve the playground on loopback (PORT=8080 by default)
+	$(NODE) scripts/playground-server.mjs "$(PORT)"
+
+setup-web: ## Install pinned browser smoke dependencies and Chromium
+	$(NPM) ci
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NPM) exec -- playwright install --only-shell $(PLAYWRIGHT_INSTALL_FLAGS) chromium
+
+smoke-web: build-web ## Drive the Wasm playground in Chromium and check canvas pixels
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-web.mjs
