@@ -36,7 +36,8 @@ func runAuthoredSmoke(shortcut bool) error {
 		}
 	}
 	spawn := func(v image.Rectangle) bool {
-		return pixelIs(v, 144, 64, markerColor) && wallAndLookout(v) && !pixelIs(v, 144, 53, selectionColor)
+		return pixelIs(v, 144, 64, markerColor) && wallAndLookout(v) &&
+			!pixelIs(v, 144, 53, selectionColor)
 	}
 	checks := []courtyardCheckpoint{
 		{name: "authored spawn", check: spawn},
