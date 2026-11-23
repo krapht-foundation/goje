@@ -19,13 +19,12 @@ func readRows(d *json.Decoder) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("row %d: %w", len(rows), err)
 		}
-		if row == "" || len(row) > maxSide || (len(rows) != 0 && len(row) != len(rows[0])) {
-			return nil, fmt.Errorf("row %d must have the common width of 1–%d cells", len(rows), maxSide)
+		width := len(row)
+		if len(rows) != 0 {
+			width = len(rows[0])
 		}
-		for x := range len(row) {
-			if row[x] != '.' && row[x] != '#' {
-				return nil, fmt.Errorf("cell (%d, %d): expected '.' or '#'", x, len(rows))
-			}
+		if err := checkRow(row, len(rows), width); err != nil {
+			return nil, err
 		}
 		rows = append(rows, row)
 	}
@@ -36,6 +35,18 @@ func readRows(d *json.Decoder) ([]string, error) {
 		return nil, errors.New("board must have at least one row")
 	}
 	return rows, nil
+}
+
+func checkRow(row string, y, width int) error {
+	if row == "" || len(row) > maxSide || len(row) != width {
+		return fmt.Errorf("row %d must have the common width of 1–%d cells", y, maxSide)
+	}
+	for x := range len(row) {
+		if row[x] != '.' && row[x] != '#' {
+			return fmt.Errorf("cell (%d, %d): expected '.' or '#'", x, y)
+		}
+	}
+	return nil
 }
 
 func readPlacements(d *json.Decoder) ([]Placement, error) {
@@ -64,9 +75,6 @@ func readPlacement(d *json.Decoder) (Placement, error) {
 			if err != nil {
 				return err
 			}
-			if !validKind(kind) {
-				return errors.New("expected a 1–32 byte identifier matching [a-z][a-z0-9_]*")
-			}
 			p.Kind = kind
 			return nil
 		}
@@ -80,9 +88,6 @@ func readPlacement(d *json.Decoder) (Placement, error) {
 		}
 		switch field {
 		case "id":
-			if n == 0 {
-				return errors.New("must be positive")
-			}
 			p.ID = uint32(n) // #nosec G115 -- readUint enforced 32 bits for ID.
 		case "x":
 			p.X = int(n) // #nosec G115 -- readUint enforced seven bits for X.
@@ -112,7 +117,13 @@ func (b Board) checkPlacements() error {
 	ids := make(map[uint32]struct{}, len(b.placements))
 	occupied := make(map[int]struct{}, len(b.placements))
 	for _, p := range b.placements {
-		if p.X >= width || p.Y >= height {
+		if p.ID == 0 {
+			return errors.New("placement ID must be positive")
+		}
+		if !validKind(p.Kind) {
+			return fmt.Errorf("placement ID %d: invalid kind identifier", p.ID)
+		}
+		if p.X < 0 || p.Y < 0 || p.X >= width || p.Y >= height {
 			return fmt.Errorf("placement ID %d: cell (%d, %d) is outside the board", p.ID, p.X, p.Y)
 		}
 		if !b.Walkable(p.X, p.Y) {

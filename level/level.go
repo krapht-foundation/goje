@@ -1,4 +1,4 @@
-// Package level decodes Goje level documents without accessing the file system
+// Package level reads and writes Goje level documents without accessing the file system
 // or depending on a graphics host. Games resolve placement kinds themselves.
 package level
 
@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	maxBytes      = 256 << 10
+	// MaxBytes is the maximum v1 document size, including whitespace.
+	MaxBytes = 256 << 10
+
 	maxSide       = 128
 	maxPlacements = 1024
 )
@@ -54,12 +56,12 @@ func (b Board) Placements() iter.Seq[Placement] { return slices.Values(b.placeme
 // Decode reads exactly one v1 JSON document, including any trailing whitespace.
 // It does not close r. On error the returned board is empty.
 func Decode(r io.Reader) (Board, error) {
-	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(r, MaxBytes+1))
 	if err != nil {
 		return Board{}, fmt.Errorf("read level: %w", err)
 	}
-	if len(data) > maxBytes {
-		return Board{}, fmt.Errorf("level exceeds %d bytes", maxBytes)
+	if len(data) > MaxBytes {
+		return Board{}, fmt.Errorf("level exceeds %d bytes", MaxBytes)
 	}
 	if !utf8.Valid(data) {
 		return Board{}, errors.New("level must be UTF-8")

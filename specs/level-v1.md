@@ -15,3 +15,5 @@ Rows increase along ground Y, columns along ground X, with zero-based indices. C
 Each placement requires `id`, `kind`, `x`, and `y`. `id` is a unique integer from 1 to 4,294,967,295. `kind` is a 1–32 byte ASCII identifier matching `[a-z][a-z0-9_]*`. `x` and `y` are integer indices of an unoccupied walkable cell. The level decoder checks the identifier's shape, not whether a game supports it. A game must reject unsupported kinds before scene entry.
 
 Objects reject missing, duplicated, and unknown fields. Nulls, fractional or exponent-form numbers, extra nested structures, and non-whitespace trailing data are invalid. The format has no paths, URLs, embedded assets, or executable content. Loading does not mutate files or enter a scene.
+
+Goje's encoder emits the root fields in `version`, `rows`, `placements` order and each placement's fields in `id`, `kind`, `x`, `y` order. Its indentation and final newline are deterministic. Readers do not require that formatting or field order.

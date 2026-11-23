@@ -4,12 +4,12 @@ Goje is a Go game framework and toolchain in development. The project is focused
 
 The [runtime guide](runtime.md) explains how to step a scene headlessly, launch it on desktop or web, and collect a local diagnostics report. The [M1 performance baseline](runtime-baseline.md) documents how to measure the cost of diagnostics on both hosts.
 
-The [level authoring guide](levels.md) shows how to edit and validate a Goje v1 level.
+The [level authoring guide](levels.md) shows how to open, edit, and export a Goje v1 level in the browser Level Builder, then validate and play it.
 
 ## What Goje aims to provide
 
 - A game framework and reusable tools for building a playground inside your own game. The first [playground prototype](playground.md#use-the-playground-in-your-game) supports replaying a configured encounter.
-- A level builder and tools for creating pixel art and tiles.
+- A [Level Builder](levels.md) for v1 maps, with separate pixel art and tile tools planned.
 - Tools for making sounds and authoring animations, video, and sprites.
 
-The planned framework and editors are not yet available. See [Contributing to Goje](../CONTRIBUTING.md) to discuss the design or submit a change.
+The full framework and remaining editors are still in development. See [Contributing to Goje](../CONTRIBUTING.md) to discuss the design or submit a change.

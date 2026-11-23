@@ -1,5 +1,20 @@
 # Author a Goje level
 
+## Edit a level in the browser
+
+Run `make serve-level-editor` with Go and Node installed, then open `http://127.0.0.1:8081/`. Use `EDITOR_PORT` to change the port. The server serves the application on loopback; the selected level stays in the browser.
+
+1. Choose **Open level** and select the [authored courtyard](../cmd/playground/levels/courtyard.json).
+2. Select **Floor** and paint cell `(4, 2)` to cut a hole in the wall. Click or drag to paint. To edit with the keyboard, focus the grid, move with the arrow keys, and press **Enter** or **Space**.
+3. To move the lookout, select the placement tool, then activate `(7, 4)` and a free floor such as `(7, 5)`. Use **Undo** or **Redo** to step through completed edits. Press **Escape** to cancel a stroke or placement selection in progress.
+4. Choose **Export** to download a validated copy. The editor does not overwrite the open file. You can reopen the download or pass it to `go run ./cmd/levelcheck` before playing it.
+
+Run `make setup-web` once to install the test browser, then `make smoke-level-editor` to exercise local file selection, editing, and export in Chromium.
+
+The smoke test reports edit and export timings separately for a 128 × 128 level with 1,024 placements. One run on an Apple M4 Pro with Go 1.27.4 and Chromium 159 measured 59 ms for a 41-cell stroke and 33 ms from clicking **Export** to the download event. The stroke timing includes Playwright input and two animation frames. These are browser workflow measurements, not Go CPU timings or performance thresholds.
+
+## Validate a level from the command line
+
 A Goje v1 level is a JSON document with walkable cells, walls, and named placements. Edit the [authored courtyard](../cmd/playground/levels/courtyard.json) in a text editor, then validate it from the repository root:
 
 ```sh
@@ -9,6 +24,8 @@ go run ./cmd/levelcheck cmd/playground/levels/courtyard.json
 Replace a `#` with `.` in one of the courtyard rows to open that ground cell. `levelcheck` reports the board size and placement count, or points to a malformed field or invalid cell. The reference game needs one `scout` and one `lookout`; the validator checks the same rule and never rewrites the file.
 
 Other games can use `level.Decode` with a reader they supply. The decoder validates geometry and identifier syntax; the game must decide which placement kinds it can instantiate. See the [v1 format specification](../specs/level-v1.md) for coordinates, bounds, and compatibility.
+
+Tools that already hold terrain rows and placements can call `level.Encode`. It validates the same v1 constraints as `Decode`, preserves row and placement order, and returns deterministic JSON bytes. It does not open or overwrite a file. The [Level Builder RFC](../rfcs/0005-m4-level-builder.md) describes the browser editor workflow.
 
 ## Route a unit on the ground grid
 
@@ -51,4 +68,30 @@ GOMAXPROCS=1 GOOS=js GOARCH=wasm go test -tags goje_bench \
 
 ## Play a level edit
 
-Open row `y=2` at column `x=4` (the middle cell of the wall), run `levelcheck`, and rebuild the [playground](playground.md) with `make run-desktop` or `make serve-web`. The file is embedded at build time on both hosts. Select the scout and right-click the center of the tile two cells beyond the wall, in the same ground row. The scout now crosses the new opening instead of detouring around the wall. Restore the `#` and rebuild to see the original detour again.
+Export the edited courtyard from the Level Builder. The playground embeds its level at build time, so test the download in a scratch copy of the command rather than replacing the repository fixture. From the repository root, set `download` to the actual path:
+
+```sh
+download="$HOME/Downloads/courtyard-edited.json"
+go run ./cmd/levelcheck "$download"
+
+mkdir -p .build
+work=$(mktemp -d "$PWD/.build/play-edited.XXXXXX")
+mkdir -p "$work/playground/levels" "$work/web"
+cp cmd/playground/*.go "$work/playground/"
+cp "$download" "$work/playground/levels/courtyard.json"
+```
+
+- **Desktop:** Run `go run "$work/playground"`.
+- **Browser:** Build the Wasm bundle and serve it on loopback:
+
+  ```sh
+  GOOS=js GOARCH=wasm go build -o "$work/web/playground.wasm" "$work/playground"
+  cp web/playground/index.html "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$work/web/"
+  node scripts/playground-server.mjs 8080 "$work/web"
+  ```
+
+  Open `http://127.0.0.1:8080/`. The browser build does not need to load the JSON separately.
+
+Select the scout and right-click the center of ground cell `(6, 2)`, two columns beyond the opening. The scout crosses the opening without going around the wall. Press **R** to restore the scout's spawn and the lookout's edited position. Stop the app before removing the scratch directory.
+
+To automate the workflow, run `make setup-web` once and then `make smoke-level-roundtrip`. The smoke test reopens the browser download, validates it with `levelcheck`, and checks the lookout, shortcut crossing, arrival, and reset in rendered frames on both targets. It requires a working native graphics session; on headless Linux with the native smoke dependencies installed, use `xvfb-run -a make smoke-level-roundtrip`.
