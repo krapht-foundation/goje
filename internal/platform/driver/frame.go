@@ -2,6 +2,7 @@ package driver
 
 import (
 	"encoding/binary"
+	"image"
 	"image/color"
 	"math"
 )
@@ -15,7 +16,7 @@ const VertexStride = 20
 type Frame struct {
 	Background color.RGBA
 	Vertices   []byte
-	hasImage   bool
+	imageSize  image.Point
 }
 
 func (f *Frame) reset() {
@@ -27,7 +28,7 @@ func (f *Frame) Clear(tint color.NRGBA) { f.Background = color.RGBA(tint) }
 
 func (f *Frame) Rect(x, y, w, h float32, tint color.NRGBA) {
 	if w > 0 && h > 0 {
-		f.quad(point{x, y}, point{x + w, y}, point{x + w, y + h}, point{x, y + h}, tint, false)
+		f.quad(point{x, y}, point{x + w, y}, point{x + w, y + h}, point{x, y + h}, tint, solidUV)
 	}
 }
 
@@ -39,29 +40,36 @@ func (f *Frame) Line(x1, y1, x2, y2, width float32, tint color.NRGBA) {
 	scale := width / (2 * float32(math.Hypot(float64(dx), float64(dy))))
 	x, y := -dy*scale, dx*scale
 	f.quad(point{x1 + x, y1 + y}, point{x2 + x, y2 + y},
-		point{x2 - x, y2 - y}, point{x1 - x, y1 - y}, tint, false)
+		point{x2 - x, y2 - y}, point{x1 - x, y1 - y}, tint, solidUV)
 }
 
-func (f *Frame) Image(x, y, w, h float32) {
-	if f.hasImage && w > 0 && h > 0 {
-		white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-		f.quad(point{x, y}, point{x + w, y}, point{x + w, y + h}, point{x, y + h}, white, true)
+func (f *Frame) Image(source image.Rectangle, x, y, w, h float32) {
+	if !(w > 0 && h > 0) || source.Empty() || !source.In(image.Rectangle{Max: f.imageSize}) {
+		return
 	}
+	iw, ih := float32(f.imageSize.X), float32(f.imageSize.Y)
+	uv := uvRect{
+		left: float32(source.Min.X) / iw, right: float32(source.Max.X) / iw,
+		top: float32(source.Min.Y) / ih, bottom: float32(source.Max.Y) / ih,
+	}
+	white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	f.quad(point{x, y}, point{x + w, y}, point{x + w, y + h}, point{x, y + h}, white, uv)
 }
 
 type point struct{ x, y float32 }
 
-func (f *Frame) quad(a, b, c, d point, tint color.NRGBA, textured bool) {
-	left, right := float32(-1), float32(-1)
-	if textured {
-		left, right = 0, 1
-	}
-	f.vertex(a, left, 0, tint)
-	f.vertex(b, right, 0, tint)
-	f.vertex(c, right, 1, tint)
-	f.vertex(a, left, 0, tint)
-	f.vertex(c, right, 1, tint)
-	f.vertex(d, left, 1, tint)
+type uvRect struct{ left, right, top, bottom float32 }
+
+// The shared shader uses negative U for untextured vertices.
+var solidUV = uvRect{left: -1, right: -1}
+
+func (f *Frame) quad(a, b, c, d point, tint color.NRGBA, uv uvRect) {
+	f.vertex(a, uv.left, uv.top, tint)
+	f.vertex(b, uv.right, uv.top, tint)
+	f.vertex(c, uv.right, uv.bottom, tint)
+	f.vertex(a, uv.left, uv.top, tint)
+	f.vertex(c, uv.right, uv.bottom, tint)
+	f.vertex(d, uv.left, uv.bottom, tint)
 }
 
 func (f *Frame) vertex(p point, u, v float32, tint color.NRGBA) {

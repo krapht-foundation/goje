@@ -63,24 +63,43 @@ func runBenchmark() error {
 		return errors.New("GOJE_BENCH_MODE must be off or on")
 	}
 	sprites, err := strconv.Atoi(os.Getenv("GOJE_BENCH_SPRITES"))
-	if err != nil || (sprites != 0 && sprites != benchSprites) {
-		return fmt.Errorf("GOJE_BENCH_SPRITES must be 0 or %d", benchSprites)
+	if err != nil {
+		return fmt.Errorf("parse benchmark density: %w", err)
 	}
 	fixture := os.Getenv("GOJE_BENCH_FIXTURE")
 	if fixture == "" {
 		fixture = "pickup"
 	}
+	denseCount := benchSprites
+	if fixture == "ground" {
+		denseCount = denseGroundCells
+	}
+	if sprites != 0 && sprites != denseCount {
+		return fmt.Errorf("benchmark density for %s must be 0 or %d", fixture, denseCount)
+	}
 	var factory engine.SceneFactory
 	var worldItems int
+	var config platform.Config
 	switch fixture {
 	case "pickup":
+		config = playgroundConfig(nil)
 		factory = func() engine.Scene { return &benchScene{Scene: newScene(), sprites: sprites} }
 	case "courtyard":
+		config = playgroundConfig(nil)
 		worldItems = 3
 		if sprites != 0 {
 			worldItems = sprites
 		}
 		factory = func() engine.Scene { return newBenchmarkCourtyard(worldItems) }
+	case "ground":
+		factory, err = groundBenchmarkFactory(sprites != 0, mode == "on")
+		if err != nil {
+			return err
+		}
+		config, err = authoredConfig()
+		if err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown benchmark fixture: %q", fixture)
 	}
@@ -90,8 +109,7 @@ func runBenchmark() error {
 	ctx, cancel := context.WithTimeout(context.Background(), benchTimeout)
 	defer cancel()
 	sampler := driver.StartBenchmark(cancel)
-	config := playgroundConfig()
-	if mode == "on" {
+	if fixture != "ground" && mode == "on" {
 		config.Diagnostics = &platform.Diagnostics{TraceCapacity: benchTraceCapacity}
 	}
 	if runErr := platform.Run(ctx, config, factory); runErr != nil {
@@ -137,6 +155,6 @@ func (s *benchScene) Draw(canvas engine.Canvas) {
 	s.Scene.Draw(canvas)
 	const columns = 64
 	for i := range s.sprites {
-		canvas.Image(float32(i%columns*5), float32(i/columns*6), 4, 4)
+		canvas.Image(markerRegion, float32(i%columns*5), float32(i/columns*6), 4, 4)
 	}
 }

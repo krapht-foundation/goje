@@ -2,16 +2,21 @@ package main
 
 import (
 	_ "embed"
+	"fmt"
 	"image/color"
 	"strings"
 
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/engine/grid"
 	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
+	"github.com/krapht-foundation/goje/platform"
 )
 
 //go:embed levels/courtyard.json
 var authoredLevel string
+
+//go:embed art/ground.png
+var authoredTile string
 
 const scoutEdgeTicks = 16
 
@@ -24,6 +29,7 @@ type authoredCourtyard struct {
 	router    *grid.Router
 	camera    engine.Camera
 	items     []engine.WorldItem
+	ground    []point // Cell centers in projected pixels, independent of the camera.
 	route     []grid.Cell
 	cell      grid.Cell // Last center reached; route[next] is the active edge's endpoint.
 	next      int
@@ -41,6 +47,16 @@ func authoredFactory() (engine.SceneFactory, error) {
 		return nil, err
 	}
 	return func() engine.Scene { return &authoredCourtyard{layout: layout} }, nil
+}
+
+func authoredConfig() (platform.Config, error) {
+	tile, err := courtyardlevel.DecodeTile(strings.NewReader(authoredTile))
+	if err != nil {
+		return platform.Config{}, fmt.Errorf("load art/ground.png: %w", err)
+	}
+	config := playgroundConfig(tile)
+	config.Title = "Goje Courtyard · Left click: select · Right click: move · Arrows: pan · W/S: zoom · R: reset"
+	return config, nil
 }
 
 func (s *authoredCourtyard) Enter() error {
@@ -71,11 +87,15 @@ func (s *authoredCourtyard) Enter() error {
 			HitBounds: engine.HitRect{Left: -8, Top: -9, Right: 8, Bottom: 5},
 		},
 	)
+	s.ground = make([]point, 0, w*h)
 	// Wall IDs live above the entire file ID range, so depth ties stay stable.
 	wallID := uint64(1 << 32)
 	for y := range h {
 		for x := range w {
-			if !s.layout.Board.Walkable(x, y) {
+			if s.layout.Board.Walkable(x, y) {
+				px, py := courtyardProjection.Project(float64(x)+0.5, float64(y)+0.5, 0)
+				s.ground = append(s.ground, point{px, py})
+			} else {
 				s.items = append(s.items, engine.WorldItem{
 					ID: wallID, GroundX: float64(x) + 0.5, GroundY: float64(y) + 0.5,
 					Hit: engine.HitBlock, HitBounds: engine.HitRect{Left: -5, Top: -20, Right: 5, Bottom: 2},
@@ -162,8 +182,12 @@ func (s *authoredCourtyard) advance() {
 
 func (s *authoredCourtyard) Draw(canvas engine.Canvas) {
 	canvas.Clear(color.NRGBA{R: 20, G: 28, B: 41, A: 255})
-	s.drawGrid(canvas)
 	zoom := float32(s.camera.Zoom)
+	for _, tile := range s.ground {
+		x, y := s.camera.ToLogical(tile.x, tile.y)
+		canvas.Image(groundRegion, float32(x)-16*zoom, float32(y)-8*zoom, 32*zoom, 16*zoom)
+	}
+	s.drawGrid(canvas)
 	if s.next < len(s.route) {
 		goal := s.route[len(s.route)-1]
 		px, py := courtyardProjection.Project(float64(goal.X)+0.5, float64(goal.Y)+0.5, 0)
@@ -178,7 +202,7 @@ func (s *authoredCourtyard) Draw(canvas engine.Canvas) {
 		w, h := float32(bounds.Right-bounds.Left)*zoom, float32(bounds.Bottom-bounds.Top)*zoom
 		switch item.ID {
 		case uint64(s.layout.Scout.ID):
-			canvas.Image(left, top, w, h)
+			canvas.Image(markerRegion, left, top, w, h)
 			markerX, markerY = float32(x), top
 		case uint64(s.layout.Lookout.ID):
 			canvas.Rect(left, top, w, h, tokenColor)

@@ -217,7 +217,7 @@ func runWindow(
 		if drawErr != nil {
 			return drawErr
 		}
-		driver.BenchFrameEnd(measured)
+		driver.BenchFrameEnd(measured, len(frame.Vertices))
 		if err := afterDraw(viewport); err != nil {
 			return err
 		}

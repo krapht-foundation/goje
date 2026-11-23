@@ -12,7 +12,7 @@ See the [lifecycle tests](../engine/runtime_test.go) for a runnable example of r
 
 ## Launch a graphical scene
 
-Call `platform.Run(ctx, config, factory)` from `main`, importing `github.com/krapht-foundation/goje/platform`. Set `Config.Width` and `Config.Height` in logical pixels. The scene's `Draw(engine.Canvas)` callback records rectangles, line strokes, and an optional image in top-left coordinates. `Config.Image` selects that image. Goje packs and uploads it before scene entry and keeps it alive across restart; the scene never sees a GPU handle. Close the desktop window or cancel the context to exit the scene and release the host.
+Call `platform.Run(ctx, config, factory)` from `main`, importing `github.com/krapht-foundation/goje/platform`. Set `Config.Width` and `Config.Height` in logical pixels. The scene's `Draw(engine.Canvas)` callback records rectangles, line strokes, and regions of the optional `Config.Image`. Call `canvas.Image(source, x, y, width, height)` with a source rectangle in image-local pixels and a destination in logical pixels. The source origin is the upper-left texel and the maximum edges are exclusive. Empty or out-of-bounds source rectangles draw nothing. Goje samples with nearest-neighbor filtering, uploads the image before scene entry, and reuses it across restarts. Close the desktop window or cancel the context to exit the scene and release the host.
 
 - **Desktop:** Build and run the game with CGO on macOS or Linux. macOS requires the Xcode Command Line Tools. Linux requires X11 and OpenGL build headers and runtime libraries. See the [feasibility report](../rfcs/0002-graphics-feasibility.md#build-and-distribution-notes) for the tested package list. Call `Run` in the main goroutine because GLFW requires the startup thread.
 - **Browser:** Build the same Go command with `GOOS=js GOARCH=wasm`. Serve it over HTTP as `application/wasm` with the matching `wasm_exec.js` and Go bootstrap. Include `<canvas id="goje" tabindex="0"></canvas>` in the page and give it the intended CSS display size. Focus the canvas to use the arrow keys or WASD and R. The host scales the drawing buffer for the device pixel ratio and stops with an error if WebGL 2 is unavailable or the context is lost.
@@ -60,3 +60,5 @@ The Wasm check uses Node through the Go toolchain's test runner. It verifies sha
 See the [M1 performance baseline](runtime-baseline.md) for the measured cost of enabling local capture and the commands to reproduce it.
 
 See the [M2 world-view measurements](world-view-performance.md) for ordering and hit-query costs, the courtyard density comparison, and the pickup rerun against M1.
+
+See the [M5 ground-art measurements](ground-art-performance.md) for PNG startup cost, warmed allocations, and submission costs on a courtyard and a dense board.

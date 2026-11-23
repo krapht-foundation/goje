@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/internal/platform/desktop"
@@ -17,8 +18,15 @@ func runAuthoredSmoke(shortcut bool) error {
 	if err != nil {
 		return err
 	}
+	config, err := authoredConfig()
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	groundAccent := color.NRGBA{R: 91, G: 133, B: 114, A: 255}
+	background := color.NRGBA{R: 20, G: 28, B: 41, A: 255}
+	gridLine := color.NRGBA{R: 63, G: 84, B: 108, A: 255}
 	route := courtyardCheckpoint{name: "wall detour", check: func(v image.Rectangle) bool {
 		return pixelIs(v, 128, 88, markerColor) && pixelIs(v, 208, 108, destinationColor)
 	}}
@@ -26,6 +34,7 @@ func runAuthoredSmoke(shortcut bool) error {
 		return pixelIs(v, 176, 80, courtyardWallColor)
 	}
 	if shortcut {
+		groundAccent = color.NRGBA{R: 174, G: 92, B: 214, A: 255}
 		// The opening's projected scout anchor lies above the original detour.
 		route = courtyardCheckpoint{name: "shortcut crossing", check: func(v image.Rectangle) bool {
 			return pixelIs(v, 176, 80, markerColor) && pixelIs(v, 208, 108, destinationColor)
@@ -37,10 +46,21 @@ func runAuthoredSmoke(shortcut bool) error {
 	}
 	spawn := func(v image.Rectangle) bool {
 		return pixelIs(v, 144, 64, markerColor) && wallAndLookout(v) &&
+			pixelIs(v, 141, 41, groundAccent) && pixelIs(v, 130, 38, background) &&
+			pixelIs(v, 152, 40, gridLine) &&
 			!pixelIs(v, 144, 53, selectionColor)
 	}
 	checks := []courtyardCheckpoint{
 		{name: "authored spawn", check: spawn},
+		{
+			name:  "ground art under zoom",
+			input: engine.Input{Pressed: engine.KeyW},
+			check: func(v image.Rectangle) bool {
+				return pixelIs(v, 136, 26, groundAccent) && pixelIs(v, 122, 22, background) &&
+					pixelIs(v, 150, 25, gridLine)
+			},
+		},
+		{name: "reset camera", input: engine.Input{Pressed: engine.KeyR}, check: spawn},
 		{name: "selection and destination", input: engine.Input{
 			PrimaryPress:   engine.MousePress{X: 144, Y: 64, Valid: true},
 			SecondaryPress: engine.MousePress{X: 208, Y: 108, Valid: true},
@@ -76,7 +96,7 @@ func runAuthoredSmoke(shortcut bool) error {
 		return nil
 	}
 	defer func() { desktop.FrameProbe = nil }()
-	if err := platform.Run(ctx, playgroundConfig(), func() engine.Scene {
+	if err := platform.Run(ctx, config, func() engine.Scene {
 		return &courtyardSmokeScene{Scene: factory(), input: input}
 	}); err != nil {
 		return fmt.Errorf("native authored smoke: %w", err)

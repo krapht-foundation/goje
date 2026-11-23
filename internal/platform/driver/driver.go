@@ -21,7 +21,7 @@ type Config struct {
 	Title         string
 	Width, Height int
 	Texture       *image.NRGBA
-	HasImage      bool
+	ImageSize     image.Point
 	Logger        *slog.Logger
 	Capture       *Capture
 }
@@ -45,7 +45,7 @@ func Start(ctx context.Context, factory engine.SceneFactory, config Config) (*Se
 	}
 	return &Session{
 		runtime: r,
-		frame:   Frame{hasImage: config.HasImage},
+		frame:   Frame{imageSize: config.ImageSize},
 		capture: config.Capture,
 		logger:  config.Logger,
 		ctx:     ctx,

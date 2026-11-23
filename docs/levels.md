@@ -78,8 +78,19 @@ mkdir -p .build
 work=$(mktemp -d "$PWD/.build/play-edited.XXXXXX")
 mkdir -p "$work/playground/levels" "$work/web"
 cp cmd/playground/*.go "$work/playground/"
+cp -R cmd/playground/art "$work/playground/"
 cp "$download" "$work/playground/levels/courtyard.json"
 ```
+
+To try your own ground art in the same build, validate and copy it before launching either target:
+
+```sh
+tile="$HOME/Downloads/my-ground.png"
+go run ./cmd/tilecheck "$tile"
+cp "$tile" "$work/playground/art/ground.png"
+```
+
+The PNG changes how walkable cells look, not which cells are walkable. See [ground art requirements](playground.md#validate-custom-ground-art).
 
 - **Desktop:** Run `go run "$work/playground"`.
 - **Browser:** Build the Wasm bundle and serve it on loopback:
@@ -94,4 +105,4 @@ cp "$download" "$work/playground/levels/courtyard.json"
 
 Select the scout and right-click the center of ground cell `(6, 2)`, two columns beyond the opening. The scout crosses the opening without going around the wall. Press **R** to restore the scout's spawn and the lookout's edited position. Stop the app before removing the scratch directory.
 
-To automate the workflow, run `make setup-web` once and then `make smoke-level-roundtrip`. The smoke test reopens the browser download, validates it with `levelcheck`, and checks the lookout, shortcut crossing, arrival, and reset in rendered frames on both targets. It requires a working native graphics session; on headless Linux with the native smoke dependencies installed, use `xvfb-run -a make smoke-level-roundtrip`.
+To automate the workflow, run `make setup-web` once and then `make smoke-level-roundtrip`. The test validates a [custom PNG](../testdata/custom-ground.png) with `tilecheck`, reopens and validates the browser download with `levelcheck`, and checks the custom ground pixels, lookout, shortcut crossing, arrival, and reset on both targets. It requires a working native graphics session; on headless Linux with the native smoke dependencies installed, use `xvfb-run -a make smoke-level-roundtrip`.

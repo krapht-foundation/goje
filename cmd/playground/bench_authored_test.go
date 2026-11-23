@@ -35,7 +35,7 @@ func BenchmarkAuthoredAdvance(b *testing.B) {
 	}
 	session, err := driver.Start(b.Context(), func() engine.Scene {
 		return &authoredBenchmark{factory().(*authoredCourtyard)}
-	}, driver.Config{HasImage: true})
+	}, driver.Config{ImageSize: groundRegion.Union(markerRegion).Size()})
 	if err != nil {
 		b.Fatal(err)
 	}

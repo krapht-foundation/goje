@@ -93,11 +93,13 @@ serve-level-editor: build-level-editor ## Serve the Level Builder on loopback (E
 smoke-level-editor: build-level-editor ## Verify editing and download in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-level-editor.mjs
 
-smoke-level-roundtrip: build-level-editor ## Play a browser-exported level on desktop and web
+smoke-level-roundtrip: build-level-editor ## Play a browser-exported level with custom art on desktop and web
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/level-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
-		mkdir -p "$$tmp/playground/levels" "$$tmp/web"; \
+		mkdir -p "$$tmp/playground/levels" "$$tmp/playground/art" "$$tmp/web"; \
 		cp cmd/playground/*.go "$$tmp/playground/"; \
+		cp testdata/custom-ground.png "$$tmp/playground/art/ground.png"; \
+		$(GO) run ./cmd/tilecheck "$$tmp/playground/art/ground.png"; \
 		level="$$tmp/playground/levels/courtyard.json"; \
 		$(NODE) scripts/smoke-level-editor.mjs "$$level"; \
 		$(GO) run ./cmd/levelcheck "$$level"; \
@@ -111,7 +113,7 @@ check-example: ## Build the reference playground from a separate module on deskt
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go "$$tmp/"; \
 		cp cmd/playground/authored.go "$$tmp/"; \
-		cp -R cmd/playground/levels "$$tmp/"; \
+		cp -R cmd/playground/levels cmd/playground/art "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \
 		$(GO) mod init example.com/playground; \
@@ -125,11 +127,12 @@ check-example: ## Build the reference playground from a separate module on deskt
 
 .PHONY: benchmark-desktop benchmark-web
 BENCHMARK_FIXTURE ?= pickup
+BENCHMARK_DENSE := $(if $(filter ground,$(BENCHMARK_FIXTURE)),16384,2048)
 
-benchmark-desktop: ## Measure the native playground with diagnostics off and on
+benchmark-desktop: ## Compare the selected playground workload on desktop
 	mkdir -p "$(BUILD_DIR)"
 	$(GO) build -tags goje_bench -o "$(BENCHMARK)" ./cmd/playground
-	@set -eu; for sprites in 0 2048; do \
+	@set -eu; for sprites in 0 $(BENCHMARK_DENSE); do \
 		i=0; while [ $$i -lt "$(BENCHMARK_REPEATS)" ]; do \
 			if [ $$((i % 2)) -eq 0 ]; then modes='off on'; else modes='on off'; fi; \
 			for mode in $$modes; do \
@@ -139,7 +142,7 @@ benchmark-desktop: ## Measure the native playground with diagnostics off and on
 		done; \
 	done
 
-benchmark-web: ## Measure the Chromium playground with diagnostics off and on
+benchmark-web: ## Compare the selected playground workload in Chromium
 	mkdir -p "$(BENCHMARK_WEB_DIR)"
 	GOOS=js GOARCH=wasm $(GO) build -tags goje_bench -o "$(BENCHMARK_WEB_DIR)/playground.wasm" ./cmd/playground
 	install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(BENCHMARK_WEB_DIR)/"

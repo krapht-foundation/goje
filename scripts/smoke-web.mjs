@@ -166,7 +166,7 @@ async function smokeCourtyard(browser, url) {
  * Select the scout, command it across the authored courtyard, then reset.
  * @param {import("playwright").Browser} browser - Running Chromium instance.
  * @param {string} url - Loopback playground URL.
- * @param {boolean} shortcut - Whether the build embeds the Level Builder download.
+ * @param {boolean} shortcut - Whether the build embeds the Level Builder download and custom tile.
  * @returns {Promise<void>} Resolves when the authored spawn is restored.
  */
 async function smokeAuthored(browser, url, shortcut) {
@@ -178,6 +178,8 @@ async function smokeAuthored(browser, url, shortcut) {
     const amber = [248, 164, 76], wall = [148, 122, 105], selected = [255, 235, 87];
     const destination = [116, 246, 144];
     const lookout = [92, 220, 210];
+    const ground = shortcut ? [174, 92, 214] : [91, 133, 114];
+    const background = [20, 28, 41], grid = [63, 84, 108];
     /**
      * Check a logical pixel with horizontal letterboxing at DPR 2.
      * @param {PNG} frame - Decoded canvas screenshot.
@@ -197,7 +199,16 @@ async function smokeAuthored(browser, url, shortcut) {
         !matches(frame, 192, 114, lookout)
       : matches(frame, 176, 80, wall);
     await waitCourtyard(canvas, "authored spawn", frame =>
-      matches(frame, 144, 64, amber) && layoutMatches(frame));
+      matches(frame, 144, 64, amber) && layoutMatches(frame) &&
+      matches(frame, 141, 41, ground) && matches(frame, 130, 38, background) &&
+      matches(frame, 152, 40, grid));
+    // The topmost tile's asymmetric highlight follows the grid while its corners stay clear.
+    await page.keyboard.press("w", { delay: 100 });
+    await waitCourtyard(canvas, "ground art under zoom", frame =>
+      matches(frame, 136, 26, ground) && matches(frame, 122, 22, background) &&
+      matches(frame, 150, 25, grid));
+    await page.keyboard.press("r", { delay: 100 });
+    await waitCourtyard(canvas, "authored camera reset", frame => matches(frame, 141, 41, ground));
     // Observe the real canvas event after its host listener, then separately
     // check that a contextmenu event outside the canvas is not canceled.
     /** @type {boolean[]} */
@@ -250,6 +261,7 @@ async function smokeAuthored(browser, url, shortcut) {
     await page.keyboard.press("r", { delay: 100 });
     await waitCourtyard(canvas, "authored reset", frame =>
       matches(frame, 144, 64, amber) && layoutMatches(frame) &&
+      matches(frame, 141, 41, ground) &&
       !matches(frame, 144, 53, selected) && !matches(frame, 208, 108, destination));
   } finally {
     await page.close();
@@ -312,7 +324,7 @@ try {
     await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`, editedDirectory !== undefined);
     console.log(editedDirectory === undefined
       ? "Browser smoke passed: authored courtyard selection, wall detour, arrival, and reset"
-      : "Browser smoke passed: exported lookout, shortcut crossing, arrival, and reset");
+      : "Browser smoke passed: custom ground art, exported lookout, shortcut crossing, arrival, and reset");
   } finally {
     await browser.close();
   }

@@ -36,7 +36,7 @@ go_version="$(go list -m -f '{{.GoVersion}}')"
 mkdir ../my-playground
 cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go \
   cmd/playground/authored.go ../my-playground/
-cp -R cmd/playground/levels ../my-playground/
+cp -R cmd/playground/levels cmd/playground/art ../my-playground/
 cd ../my-playground
 export GOWORK=off
 go mod init example.com/my-playground
@@ -58,6 +58,12 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory web
 ```
 
 Open `http://127.0.0.1:8080/` and click the canvas if it does not have keyboard focus.
+
+## Validate custom ground art
+
+Export a 32 × 16 PNG, at most 64 KiB, with transparent corners around the isometric diamond. From the repository root, run `go run ./cmd/tilecheck /path/to/tile.png`. This reads the file without rewriting it. To see the result, replace `art/ground.png` in a scratch copy of the reference command and rebuild as shown in [Play a level edit](levels.md#play-a-level-edit). The authored courtyard validates the tile at startup and draws it beneath the grid on walkable cells only. Pickup and patrol do not use the tile.
+
+The [reference ground tile](../cmd/playground/art/ground.png) is original Goje artwork generated for this project. Its muted diamond, transparent corners, and offset highlight distinguish orientation without external art or dependencies. See the [M5 RFC](../rfcs/0006-m5-tile-art.md) for the milestone plan.
 
 ## Capture a local run
 

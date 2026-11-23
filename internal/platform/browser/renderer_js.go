@@ -131,6 +131,7 @@ func newRenderer(gl js.Value, config driver.Config) (_ *renderer, err error) {
 	gl.Call("texParameteri", target, gl.Get("TEXTURE_MAG_FILTER"), nearest)
 	gl.Call("texParameteri", target, gl.Get("TEXTURE_WRAP_S"), clamp)
 	gl.Call("texParameteri", target, gl.Get("TEXTURE_WRAP_T"), clamp)
+	uploadStart := driver.BenchUploadStart()
 	pixels := img.Pix[:4*w*h]
 	upload := r.byteArray.New(len(pixels))
 	js.CopyBytesToJS(upload, pixels)
@@ -146,6 +147,7 @@ func newRenderer(gl js.Value, config driver.Config) (_ *renderer, err error) {
 		gl.Get("UNSIGNED_BYTE"),
 		upload,
 	)
+	driver.BenchUploadEnd(uploadStart)
 	gl.Call("enable", gl.Get("BLEND"))
 	gl.Call("blendFunc", gl.Get("SRC_ALPHA"), gl.Get("ONE_MINUS_SRC_ALPHA"))
 	if code := gl.Call("getError").Int(); code != 0 {
