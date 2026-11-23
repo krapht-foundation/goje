@@ -1,4 +1,4 @@
-/** @file Verify both reference scenes with real Chromium input and rendered canvas pixels. */
+/** @file Verify the reference scenes with real Chromium input and rendered canvas pixels. */
 
 import assert from "node:assert/strict";
 
@@ -106,7 +106,7 @@ function pixelIs(frame, x, y, color) {
 }
 
 /**
- * Drive the default courtyard with real Chromium keyboard and mouse events.
+ * Drive the M2 patrol with real Chromium keyboard and mouse events.
  * @param {import("playwright").Browser} browser - Running Chromium instance.
  * @param {string} url - Loopback playground URL.
  * @returns {Promise<void>} Resolves once both world and selection are restored.
@@ -162,6 +162,75 @@ async function smokeCourtyard(browser, url) {
   }
 }
 
+/**
+ * Select the scout, command a detour around the authored wall, then reset.
+ * @param {import("playwright").Browser} browser - Running Chromium instance.
+ * @param {string} url - Loopback playground URL.
+ * @returns {Promise<void>} Resolves when the authored spawn is restored.
+ */
+async function smokeAuthored(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 880, height: 400 }, deviceScaleFactor: 2 });
+  try {
+    await page.goto(url, { timeout: 15_000 });
+    const canvas = page.locator("#goje");
+    const amber = [248, 164, 76], wall = [148, 122, 105], selected = [255, 235, 87];
+    const destination = [116, 246, 144];
+    /**
+     * Check a logical pixel with horizontal letterboxing at DPR 2.
+     * @param {PNG} frame - Decoded canvas screenshot.
+     * @param {number} x - Horizontal logical pixel.
+     * @param {number} y - Vertical logical pixel.
+     * @param {[number, number, number]} color - Expected RGB.
+     * @returns {boolean} Whether the rendered pixel matches.
+     */
+    const matches = (frame, x, y, color) => pixelIs(frame, 240 + x * 4, y * 4, color);
+    await waitCourtyard(canvas, "authored spawn", frame =>
+      matches(frame, 144, 64, amber) && matches(frame, 176, 80, wall));
+    // Observe the real canvas event after its host listener, then separately
+    // check that a contextmenu event outside the canvas is not canceled.
+    /** @type {boolean[]} */
+    const contextMenus = [];
+    await page.exposeFunction("recordContextMenu", canceled => contextMenus.push(canceled));
+    await page.evaluate(() => {
+      document.addEventListener("contextmenu", event => {
+        if (event.target === document.querySelector("#goje")) window.recordContextMenu(event.defaultPrevented);
+      });
+    });
+    // A press while the other button is held must still reach the host.
+    await page.mouse.move(408, 128);
+    await page.mouse.down({ button: "left" });
+    await page.mouse.click(536, 216, { button: "right" });
+    await page.mouse.up({ button: "left" });
+    await waitCourtyard(canvas, "authored command", frame =>
+      spriteCenter(frame, selected) !== null && matches(frame, 208, 108, destination));
+    // A direct path never reaches logical y=100. Check the bypass across
+    // several tiles so screenshot cadence need not catch one exact pose.
+    await waitCourtyard(canvas, "authored wall detour", frame => {
+      const scout = spriteCenter(frame, amber);
+      return scout !== null && scout.y > 400 && matches(frame, 208, 108, destination);
+    });
+    assert.deepEqual(contextMenus, [true], "the canvas did not suppress the real context menu");
+    assert.ok(await page.evaluate(() => document.body.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    )), "the surrounding page suppressed its context menu");
+    await waitCourtyard(canvas, "authored arrival", frame =>
+      matches(frame, 208, 96, amber) && !matches(frame, 208, 108, destination));
+    await page.mouse.click(30, 216, { button: "right" });
+    for (let i = 0; i < 3; i++) {
+      const frame = PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
+      assert.ok(matches(frame, 208, 96, amber) && spriteCenter(frame, destination) === null,
+        "a secondary press in the bar should not issue an order");
+    }
+    await page.keyboard.press("ArrowRight", { delay: 100 });
+    await page.keyboard.press("r", { delay: 100 });
+    await waitCourtyard(canvas, "authored reset", frame =>
+      matches(frame, 144, 64, amber) && matches(frame, 176, 80, wall) &&
+      !matches(frame, 144, 53, selected) && !matches(frame, 208, 108, destination));
+  } finally {
+    await page.close();
+  }
+}
+
 const server = await servePlayground(0);
 try {
   const browser = await chromium.launch({ timeout: 15_000 });
@@ -211,8 +280,10 @@ try {
     }
     assert.deepEqual(errors, []);
     console.log("Browser smoke passed: movement, pickup, resize, reset, and focus loss");
-    await smokeCourtyard(browser, `http://127.0.0.1:${server.address().port}/`);
+    await smokeCourtyard(browser, `http://127.0.0.1:${server.address().port}/?fixture=courtyard`);
     console.log("Browser smoke passed: courtyard overlap, selection, pan, zoom, resize, patrol, and reset");
+    await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`);
+    console.log("Browser smoke passed: authored courtyard selection, wall detour, arrival, and reset");
   } finally {
     await browser.close();
   }

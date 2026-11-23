@@ -24,11 +24,20 @@ func main() {
 func runPlayground() error {
 	ctx := context.Background()
 	config := playgroundConfig()
-	factory := engine.SceneFactory(newCourtyard)
-	if os.Getenv("GOJE_PLAYGROUND") == "pickup" {
+	var factory engine.SceneFactory
+	switch os.Getenv("GOJE_PLAYGROUND") {
+	case "pickup":
 		factory = newScene
-	} else {
-		config.Title = "Goje Courtyard · Click: select · Arrows: pan · W/S: zoom · Space: patrol · R: reset"
+	case "courtyard":
+		factory = newCourtyard
+		config.Title = "Goje Patrol · Click: select · Arrows: pan · W/S: zoom · Space: patrol · R: reset"
+	default:
+		var err error
+		factory, err = authoredFactory()
+		if err != nil {
+			return err
+		}
+		config.Title = "Goje Courtyard · Left click: select · Right click: move · Arrows: pan · W/S: zoom · R: reset"
 	}
 	if os.Getenv("GOJE_DIAGNOSTICS") == "1" {
 		// Keep the demo finite so native and browser users can both inspect a

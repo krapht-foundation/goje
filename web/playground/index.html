@@ -15,7 +15,7 @@
 <body>
   <p id="status" role="status">Loading Goje Playground…</p>
   <canvas id="goje" tabindex="0" aria-label="Goje Playground" aria-describedby="controls"></canvas>
-  <p id="controls">Click to select · Arrows to pan · W/S to zoom · Space to start or pause patrol · R to reset</p>
+  <p id="controls">Left click to select · Right click to move · Arrows to pan · W/S to zoom · R to reset</p>
   <script src="wasm_exec.js"></script>
   <script>
     /** @file Load the compiled Go playground and show startup or runtime failures. */
@@ -32,9 +32,13 @@
       const diagnosticRun = query.get("diagnostics") === "1";
       const benchmark = query.get("bench");
       const fixture = query.get("fixture") === "courtyard" ? "courtyard" : "pickup";
+      const controls = document.querySelector("#controls");
       if (query.get("fixture") === "pickup" || ((benchmark === "off" || benchmark === "on") && fixture === "pickup")) {
         go.env.GOJE_PLAYGROUND = "pickup";
-        document.querySelector("#controls").textContent = "Arrows or WASD to move · R to reset";
+        controls.textContent = "Arrows or WASD to move · R to reset";
+      } else if (query.get("fixture") === "courtyard") {
+        go.env.GOJE_PLAYGROUND = "courtyard";
+        controls.textContent = "Click to select · Arrows to pan · W/S to zoom · Space to patrol · R to reset";
       }
       if (diagnosticRun) go.env.GOJE_DIAGNOSTICS = "1";
       if (benchmark === "off" || benchmark === "on") {

@@ -58,7 +58,7 @@ build-desktop: ## Build the native playground
 run-desktop: build-desktop ## Open the native playground window
 	"$(PLAYGROUND)"
 
-smoke-desktop: ## Check both playground fixtures in a native window
+smoke-desktop: ## Check all playground fixtures in native windows
 	mkdir -p "$(BUILD_DIR)"
 	$(GO) build -tags goje_smoke -o "$(BUILD_DIR)/playground-smoke" ./cmd/playground
 	$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1]], check=True, timeout=20)' "$(BUILD_DIR)/playground-smoke"
@@ -81,6 +81,8 @@ smoke-web: build-web ## Drive the Wasm playground in Chromium and check canvas p
 check-example: ## Build the reference playground from a separate module on desktop and web
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go "$$tmp/"; \
+		cp cmd/playground/authored.go "$$tmp/"; \
+		cp -R cmd/playground/levels "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \
 		$(GO) mod init example.com/playground; \

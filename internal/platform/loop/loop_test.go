@@ -50,6 +50,7 @@ func TestInputAcrossPresentationAndSuspension(t *testing.T) {
 	host.KeyDown(engine.KeyR, false)
 	host.KeyUp(engine.KeyR)
 	host.KeyDown(engine.KeyD, false)
+	host.PressSecondary(50.5, 33.25)
 	host.PressPrimary(0, 0)
 	if got := host.Frame(8 * time.Millisecond); got.Updates != 0 {
 		t.Fatalf("early frame scheduled %+v; want no update", got)
@@ -57,12 +58,15 @@ func TestInputAcrossPresentationAndSuspension(t *testing.T) {
 	if got := host.Frame(50 * time.Millisecond); got.Updates != 3 {
 		t.Fatalf("catch-up frame scheduled %+v; want three updates", got)
 	}
-	// The first press survived the zero-update frame. A second press cannot
-	// displace it; only the first catch-up tick sees it.
+	// Each button retains its first press through the zero-update frame.
+	// Only the first catch-up tick sees the two independent edges.
 	host.PressPrimary(70, 25)
+	host.PressSecondary(75, 46)
 	want := engine.Input{
-		Held: engine.KeyD, Pressed: engine.KeyR | engine.KeyD,
-		PrimaryPress: engine.MousePress{Valid: true},
+		Held:           engine.KeyD,
+		Pressed:        engine.KeyR | engine.KeyD,
+		PrimaryPress:   engine.MousePress{Valid: true},
+		SecondaryPress: engine.MousePress{X: 50.5, Y: 33.25, Valid: true},
 	}
 	if got := host.NextInput(); got != want {
 		t.Fatalf("first step input = %+v; want %+v", got, want)
@@ -73,13 +77,15 @@ func TestInputAcrossPresentationAndSuspension(t *testing.T) {
 			t.Fatalf("catch-up step input = %+v; want held D with no edge", got)
 		}
 	}
-	// Suspend with both a pending edge and partial tick time.
+	// Suspend with both mouse edges pending and partial tick time.
 	host.Frame(62 * time.Millisecond)
 	host.KeyDown(engine.KeyW, false)
 	host.PressPrimary(8.5, 30.25)
+	host.PressSecondary(10.5, 40.25)
 	host.SetActive(false)
 	host.KeyDown(engine.KeyA, false)
 	host.PressPrimary(60, 75)
+	host.PressSecondary(80, 95)
 	if got := host.Frame(5 * time.Second); got != (loop.Budget{}) {
 		t.Fatalf("suspended frame = %+v; want no updates or drops", got)
 	}
@@ -96,5 +102,19 @@ func TestInputAcrossPresentationAndSuspension(t *testing.T) {
 	}
 	if got := host.NextInput(); got != (engine.Input{}) {
 		t.Fatalf("resumed step inherited stale input: %+v", got)
+	}
+}
+
+func TestSecondaryPressCanBeBufferedAgainAfterConsumption(t *testing.T) {
+	var host loop.Loop
+	for _, point := range []engine.MousePress{
+		{X: 5, Y: 10, Valid: true},
+		{X: 20, Y: 15, Valid: true},
+	} {
+		host.PressSecondary(point.X, point.Y)
+		want := engine.Input{SecondaryPress: point}
+		if got := host.NextInput(); got != want {
+			t.Fatalf("input = %+v; want %+v", got, want)
+		}
 	}
 }
