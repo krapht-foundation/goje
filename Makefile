@@ -9,6 +9,8 @@ PLAYWRIGHT_INSTALL_FLAGS ?=
 BUILD_DIR := $(CURDIR)/.build
 TOOLBIN := $(BUILD_DIR)/tools
 WEB_DIR := $(BUILD_DIR)/web
+EDITOR_WEB_DIR := $(BUILD_DIR)/leveleditor-web
+EDITOR_PORT ?= 8081
 PLAYWRIGHT_CACHE := $(BUILD_DIR)/playwright
 PLAYGROUND := $(BUILD_DIR)/playground$(if $(filter windows,$(shell $(GO) env GOOS)),.exe)
 BENCHMARK := $(BUILD_DIR)/playground-benchmark
@@ -77,6 +79,33 @@ setup-web: ## Install pinned browser smoke dependencies and Chromium
 
 smoke-web: build-web ## Drive the Wasm playground in Chromium and check canvas pixels
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-web.mjs
+
+.PHONY: build-level-editor serve-level-editor smoke-level-editor smoke-level-roundtrip
+build-level-editor: ## Build the standalone browser Level Builder
+	mkdir -p "$(EDITOR_WEB_DIR)"
+	GOOS=js GOARCH=wasm $(GO) build -o "$(EDITOR_WEB_DIR)/editor.wasm" ./cmd/leveleditor
+	install -m 0644 web/leveleditor/index.html web/leveleditor/editor.mjs web/leveleditor/editor.css \
+		"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(EDITOR_WEB_DIR)/"
+
+serve-level-editor: build-level-editor ## Serve the Level Builder on loopback (EDITOR_PORT=8081 by default)
+	$(NODE) scripts/level-editor-server.mjs "$(EDITOR_PORT)"
+
+smoke-level-editor: build-level-editor ## Verify editing and download in Chromium
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-level-editor.mjs
+
+smoke-level-roundtrip: build-level-editor ## Play a browser-exported level on desktop and web
+	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/level-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
+		mkdir -p "$$tmp/playground/levels" "$$tmp/web"; \
+		cp cmd/playground/*.go "$$tmp/playground/"; \
+		level="$$tmp/playground/levels/courtyard.json"; \
+		$(NODE) scripts/smoke-level-editor.mjs "$$level"; \
+		$(GO) run ./cmd/levelcheck "$$level"; \
+		$(GO) build -tags goje_smoke -o "$$tmp/playground-smoke" "$$tmp/playground"; \
+		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/web/playground.wasm" "$$tmp/playground"; \
+		install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/web/"; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/playground-smoke" --shortcut; \
+		$(NODE) scripts/smoke-web.mjs "$$tmp/web"
 
 check-example: ## Build the reference playground from a separate module on desktop and web
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \

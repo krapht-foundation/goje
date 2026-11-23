@@ -163,18 +163,21 @@ async function smokeCourtyard(browser, url) {
 }
 
 /**
- * Select the scout, command a detour around the authored wall, then reset.
+ * Select the scout, command it across the authored courtyard, then reset.
  * @param {import("playwright").Browser} browser - Running Chromium instance.
  * @param {string} url - Loopback playground URL.
+ * @param {boolean} shortcut - Whether the build embeds the Level Builder download.
  * @returns {Promise<void>} Resolves when the authored spawn is restored.
  */
-async function smokeAuthored(browser, url) {
+async function smokeAuthored(browser, url, shortcut) {
   const page = await browser.newPage({ viewport: { width: 880, height: 400 }, deviceScaleFactor: 2 });
   try {
+    if (shortcut) await page.clock.install();
     await page.goto(url, { timeout: 15_000 });
     const canvas = page.locator("#goje");
     const amber = [248, 164, 76], wall = [148, 122, 105], selected = [255, 235, 87];
     const destination = [116, 246, 144];
+    const lookout = [92, 220, 210];
     /**
      * Check a logical pixel with horizontal letterboxing at DPR 2.
      * @param {PNG} frame - Decoded canvas screenshot.
@@ -184,8 +187,17 @@ async function smokeAuthored(browser, url) {
      * @returns {boolean} Whether the rendered pixel matches.
      */
     const matches = (frame, x, y, color) => pixelIs(frame, 240 + x * 4, y * 4, color);
+    /**
+     * Distinguish the original wall from the exported opening and relocated lookout.
+     * @param {PNG} frame - Decoded canvas screenshot.
+     * @returns {boolean} Whether the expected layout appears.
+     */
+    const layoutMatches = frame => shortcut
+      ? !matches(frame, 176, 80, wall) && matches(frame, 176, 122, lookout) &&
+        !matches(frame, 192, 114, lookout)
+      : matches(frame, 176, 80, wall);
     await waitCourtyard(canvas, "authored spawn", frame =>
-      matches(frame, 144, 64, amber) && matches(frame, 176, 80, wall));
+      matches(frame, 144, 64, amber) && layoutMatches(frame));
     // Observe the real canvas event after its host listener, then separately
     // check that a contextmenu event outside the canvas is not canceled.
     /** @type {boolean[]} */
@@ -196,19 +208,32 @@ async function smokeAuthored(browser, url) {
         if (event.target === document.querySelector("#goje")) window.recordContextMenu(event.defaultPrevented);
       });
     });
+    if (shortcut) {
+      // Pause while the scout is idle. Stepping animation time keeps PNG capture
+      // and runner scheduling from consuming the brief crossing window.
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    }
     // A press while the other button is held must still reach the host.
     await page.mouse.move(408, 128);
     await page.mouse.down({ button: "left" });
     await page.mouse.click(536, 216, { button: "right" });
     await page.mouse.up({ button: "left" });
+    if (shortcut) await page.clock.runFor(32);
     await waitCourtyard(canvas, "authored command", frame =>
       spriteCenter(frame, selected) !== null && matches(frame, 208, 108, destination));
-    // A direct path never reaches logical y=100. Check the bypass across
-    // several tiles so screenshot cadence need not catch one exact pose.
-    await waitCourtyard(canvas, "authored wall detour", frame => {
+    // At 60 ticks/s and 16 ticks per tile, the opening is two tiles (32 ticks)
+    // from the spawn. Advance to that frame before taking a screenshot.
+    if (shortcut) await page.clock.runFor(500);
+    await waitCourtyard(canvas, shortcut ? "exported shortcut crossing" : "authored wall detour", frame => {
       const scout = spriteCenter(frame, amber);
-      return scout !== null && scout.y > 400 && matches(frame, 208, 108, destination);
+      if (scout === null || !matches(frame, 208, 108, destination)) return false;
+      // Check a band around the opening's projected scout anchor (176, 80).
+      // The original bypass instead goes below logical y=100.
+      return shortcut
+        ? Math.abs(scout.x - (240 + 176 * 4)) <= 28 && Math.abs(scout.y - 80 * 4) <= 20
+        : scout.y > 400;
     });
+    if (shortcut) await page.clock.resume();
     assert.deepEqual(contextMenus, [true], "the canvas did not suppress the real context menu");
     assert.ok(await page.evaluate(() => document.body.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
@@ -224,14 +249,16 @@ async function smokeAuthored(browser, url) {
     await page.keyboard.press("ArrowRight", { delay: 100 });
     await page.keyboard.press("r", { delay: 100 });
     await waitCourtyard(canvas, "authored reset", frame =>
-      matches(frame, 144, 64, amber) && matches(frame, 176, 80, wall) &&
+      matches(frame, 144, 64, amber) && layoutMatches(frame) &&
       !matches(frame, 144, 53, selected) && !matches(frame, 208, 108, destination));
   } finally {
     await page.close();
   }
 }
 
-const server = await servePlayground(0);
+const editedDirectory = process.argv[2];
+if (process.argv.length > 3) throw new Error("Usage: node scripts/smoke-web.mjs [EDITED_WEB_DIR]");
+const server = await servePlayground(0, editedDirectory);
 try {
   const browser = await chromium.launch({ timeout: 15_000 });
   try {
@@ -282,8 +309,10 @@ try {
     console.log("Browser smoke passed: movement, pickup, resize, reset, and focus loss");
     await smokeCourtyard(browser, `http://127.0.0.1:${server.address().port}/?fixture=courtyard`);
     console.log("Browser smoke passed: courtyard overlap, selection, pan, zoom, resize, patrol, and reset");
-    await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`);
-    console.log("Browser smoke passed: authored courtyard selection, wall detour, arrival, and reset");
+    await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`, editedDirectory !== undefined);
+    console.log(editedDirectory === undefined
+      ? "Browser smoke passed: authored courtyard selection, wall detour, arrival, and reset"
+      : "Browser smoke passed: exported lookout, shortcut crossing, arrival, and reset");
   } finally {
     await browser.close();
   }

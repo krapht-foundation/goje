@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"log"
+	"os"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 
@@ -43,6 +44,13 @@ type smokeScene struct {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--shortcut" {
+		if err := runAuthoredSmoke(true); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Desktop smoke passed: exported lookout, shortcut crossing, arrival, and reset")
+		return
+	}
 	if err := runSmoke(); err != nil {
 		log.Fatal(err)
 	}
@@ -51,7 +59,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("Desktop smoke passed: courtyard overlap, selection, pan, zoom, resize, and reset")
-	if err := runAuthoredSmoke(); err != nil {
+	if err := runAuthoredSmoke(false); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Desktop smoke passed: authored courtyard selection, wall detour, arrival, and reset")

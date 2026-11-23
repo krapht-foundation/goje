@@ -22,7 +22,18 @@ const assets = new Map([
  * @throws {Error} The returned promise rejects if an asset cannot be read or the bind fails.
  */
 export async function servePlayground(port, directory = defaultDirectory) {
-  const files = new Map(await Promise.all(Array.from(assets, async ([path, [name, type]]) => {
+  return serveAssets(port, directory, assets);
+}
+
+/**
+ * Serve a fixed set of built assets without resolving request paths on disk.
+ * @param {number} port - Loopback TCP port, or zero for an available port.
+ * @param {string} directory - Build output directory.
+ * @param {Map<string, [string, string]>} routes - URL paths mapped to filenames and MIME types.
+ * @returns {Promise<import("node:http").Server>} The listening server.
+ */
+export async function serveAssets(port, directory, routes) {
+  const files = new Map(await Promise.all(Array.from(routes, async ([path, [name, type]]) => {
     return [path, { type, bytes: await readFile(join(directory, name)) }];
   })));
   const server = createServer((request, response) => {
@@ -42,6 +53,7 @@ export async function servePlayground(port, directory = defaultDirectory) {
 }
 
 if (import.meta.main) {
-  const server = await servePlayground(Number(process.argv[2] ?? 8080));
+  if (process.argv.length > 4) throw new Error("Usage: node scripts/playground-server.mjs [PORT] [WEB_DIR]");
+  const server = await servePlayground(Number(process.argv[2] ?? 8080), process.argv[3]);
   console.log(`Goje Playground: http://127.0.0.1:${server.address().port}/`);
 }
