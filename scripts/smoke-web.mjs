@@ -172,6 +172,7 @@ async function smokeCourtyard(browser, url) {
 async function smokeAuthored(browser, url, shortcut) {
   const page = await browser.newPage({ viewport: { width: 880, height: 400 }, deviceScaleFactor: 2 });
   try {
+    if (shortcut) await page.clock.install();
     await page.goto(url, { timeout: 15_000 });
     const canvas = page.locator("#goje");
     const amber = [248, 164, 76], wall = [148, 122, 105], selected = [255, 235, 87];
@@ -207,13 +208,22 @@ async function smokeAuthored(browser, url, shortcut) {
         if (event.target === document.querySelector("#goje")) window.recordContextMenu(event.defaultPrevented);
       });
     });
+    if (shortcut) {
+      // Pause while the scout is idle. Stepping animation time keeps PNG capture
+      // and runner scheduling from consuming the brief crossing window.
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    }
     // A press while the other button is held must still reach the host.
     await page.mouse.move(408, 128);
     await page.mouse.down({ button: "left" });
     await page.mouse.click(536, 216, { button: "right" });
     await page.mouse.up({ button: "left" });
+    if (shortcut) await page.clock.runFor(32);
     await waitCourtyard(canvas, "authored command", frame =>
       spriteCenter(frame, selected) !== null && matches(frame, 208, 108, destination));
+    // At 60 ticks/s and 16 ticks per tile, the opening is two tiles (32 ticks)
+    // from the spawn. Advance to that frame before taking a screenshot.
+    if (shortcut) await page.clock.runFor(500);
     await waitCourtyard(canvas, shortcut ? "exported shortcut crossing" : "authored wall detour", frame => {
       const scout = spriteCenter(frame, amber);
       if (scout === null || !matches(frame, 208, 108, destination)) return false;
@@ -223,6 +233,7 @@ async function smokeAuthored(browser, url, shortcut) {
         ? Math.abs(scout.x - (240 + 176 * 4)) <= 28 && Math.abs(scout.y - 80 * 4) <= 20
         : scout.y > 400;
     });
+    if (shortcut) await page.clock.resume();
     assert.deepEqual(contextMenus, [true], "the canvas did not suppress the real context menu");
     assert.ok(await page.evaluate(() => document.body.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),

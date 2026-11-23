@@ -49,6 +49,8 @@ The `level` and `internal/leveleditor` tests cover deterministic encoding, inval
 
 The check embedded the download in a temporary copy of the reference command without modifying its Go source or the repository fixture. Native OpenGL back-buffer and Chromium canvas checks observed the relocated lookout, the scout crossing the opening, arrival at `(6, 2)`, and reset to the edited layout. The original detour remains covered by `make smoke-desktop` and `make smoke-web`. See [Play a level edit](../docs/levels.md#play-a-level-edit) for manual and automated reproduction.
 
+The Chromium round trip pauses and advances animation time for the crossing screenshot so a slow runner cannot miss the scout while it is in the opening.
+
 ## Out of scope
 
 New maps, board resizing, new placement kinds, adding or deleting placements, layers, tilesets, external asset references, live preview, collaboration, autosave, native editor distribution, and a shared UI toolkit for future content apps. M4 does not change the engine's desktop or web delivery targets.
