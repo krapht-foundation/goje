@@ -56,7 +56,7 @@ func (s *courtyard) Update(tick engine.Tick) (engine.Transition, error) {
 	if press := input.PrimaryPress; press.Valid {
 		s.pick(press, s.items[:])
 	}
-	s.moveCamera(input)
+	moveCourtyardCamera(&s.camera, &s.zoomLevel, input, 0, 0)
 	if input.Pressed.Has(engine.KeySpace) {
 		s.patrolling = !s.patrolling
 	}
@@ -75,22 +75,27 @@ func (s *courtyard) pick(press engine.MousePress, items []engine.WorldItem) {
 	}
 }
 
-func (s *courtyard) moveCamera(input engine.Input) {
-	s.zoomLevel = min(
+func moveCourtyardCamera(
+	camera *engine.Camera,
+	zoomLevel *int,
+	input engine.Input,
+	homeX, homeY float64,
+) {
+	*zoomLevel = min(
 		len(courtyardZoom)-1,
-		max(0, s.zoomLevel+axis(input.Pressed, engine.KeyS, engine.KeyW)),
+		max(0, *zoomLevel+axis(input.Pressed, engine.KeyS, engine.KeyW)),
 	)
-	s.camera.Zoom = courtyardZoom[s.zoomLevel]
+	camera.Zoom = courtyardZoom[*zoomLevel]
 	x := axis(input.Held, engine.KeyArrowLeft, engine.KeyArrowRight)
 	y := axis(input.Held, engine.KeyArrowUp, engine.KeyArrowDown)
 	// Pan at the same screen speed at each zoom. Zoom itself leaves the
 	// projected center alone, so the world expands around the view center.
-	distance := 2 / s.camera.Zoom
+	distance := 2 / camera.Zoom
 	if x != 0 && y != 0 {
 		distance /= math.Sqrt2
 	}
-	s.camera.CenterX = min(128, max(-128, s.camera.CenterX+float64(x)*distance))
-	s.camera.CenterY = min(64, max(-64, s.camera.CenterY+float64(y)*distance))
+	camera.CenterX = min(homeX+128, max(homeX-128, camera.CenterX+float64(x)*distance))
+	camera.CenterY = min(homeY+64, max(homeY-64, camera.CenterY+float64(y)*distance))
 }
 
 func (s *courtyard) prepareWorld() {

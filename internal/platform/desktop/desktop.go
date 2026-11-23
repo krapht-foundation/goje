@@ -157,15 +157,21 @@ func runWindow(
 	})
 	window.SetMouseButtonCallback(
 		func(w *glfw.Window, button glfw.MouseButton, action glfw.Action, _ glfw.ModifierKey) {
-			if button != glfw.MouseButtonLeft || action != glfw.Press {
+			supported := button == glfw.MouseButtonLeft || button == glfw.MouseButtonRight
+			if action != glfw.Press || !supported {
 				return
 			}
 			x, y := cursorX, cursorY
 			windowW, windowH := w.GetSize()
 			x, y, ok := driver.LogicalPointer(x, y, float64(windowW), float64(windowH),
 				image.Pt(width, height), image.Pt(config.Width, config.Height), viewport)
-			if ok {
+			if !ok {
+				return
+			}
+			if button == glfw.MouseButtonLeft {
 				session.Loop.PressPrimary(x, y)
+			} else {
+				session.Loop.PressSecondary(x, y)
 			}
 		},
 	)

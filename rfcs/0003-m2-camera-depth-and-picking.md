@@ -33,3 +33,5 @@ Start with sorting reusable compact items and a reverse scan on a press. Require
 ## Out of scope
 
 Camera rotation, perspective, multiple cameras, arbitrary footprint intersections, height-aware occlusion graphs, alpha picking, drag-box selection, touch, navigation, collision, asset formats, multiple textures, editor applications, and new host targets. Revisit these only after a concrete scenario exposes a limit of the proposed model.
+
+The [M3 proposal](0004-m3-levels-and-unit-commands.md) uses the existing world view to load an authored level and command a unit to move around a wall. The M2 courtyard remains a regression fixture.

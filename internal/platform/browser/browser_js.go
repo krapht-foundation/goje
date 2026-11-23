@@ -99,21 +99,36 @@ func runLoop(
 					session.Loop.KeyUp(key)
 				}
 			}
-		case "pointerdown":
-			if e.Get("pointerType").String() != "mouse" || e.Get("button").Int() != 0 {
+		case "pointerdown", "mousedown":
+			button := e.Get("button").Int()
+			if button != 0 && button != 2 {
+				break
+			}
+			if kind == "pointerdown" {
+				if e.Get("pointerType").String() != "mouse" {
+					break
+				}
+			} else if mask := 1 << (button / 2); e.Get("buttons").Int()&^mask == 0 {
+				// Pointerdown reports the first physical button. Mousedown
+				// reports additional buttons without observing pointer motion.
 				break
 			}
 			x, y, ok := graphics.logicalPointer(window, canvas, e)
 			if !ok {
 				break
 			}
-			// The browser's default focus action follows pointerdown. Focus now
-			// so a valid press can also be the one that reactivates the game.
+			// Focus before buffering so a valid press can reactivate the game.
 			if !document.Get("activeElement").Equal(canvas) {
 				canvas.Call("focus", map[string]any{"preventScroll": true})
 				updateActive()
 			}
-			session.Loop.PressPrimary(x, y)
+			if button == 0 {
+				session.Loop.PressPrimary(x, y)
+			} else {
+				session.Loop.PressSecondary(x, y)
+			}
+		case "contextmenu":
+			e.Call("preventDefault")
 		case "webglcontextlost":
 			select {
 			case lost <- struct{}{}:
@@ -129,6 +144,8 @@ func runLoop(
 		{canvas, "keydown"},
 		{canvas, "keyup"},
 		{canvas, "pointerdown"},
+		{canvas, "mousedown"},
+		{canvas, "contextmenu"},
 		{canvas, "focus"},
 		{canvas, "blur"},
 		{window, "focus"},

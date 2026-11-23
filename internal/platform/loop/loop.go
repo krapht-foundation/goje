@@ -84,11 +84,19 @@ func (l *Loop) KeyDown(key engine.Keys, repeat bool) {
 // KeyUp releases a key without clearing any buffered press edge.
 func (l *Loop) KeyUp(key engine.Keys) { l.input.Held &^= key }
 
-// PressPrimary buffers an in-viewport mouse press until the next tick.
+// PressPrimary buffers an in-viewport left mouse press until the next tick.
 // Later presses cannot replace the coordinates of an unconsumed press.
 func (l *Loop) PressPrimary(x, y float64) {
 	if !l.suspended && !l.input.PrimaryPress.Valid {
 		l.input.PrimaryPress = engine.MousePress{X: x, Y: y, Valid: true}
+	}
+}
+
+// PressSecondary buffers an in-viewport right mouse press until the next tick.
+// Later presses cannot replace the coordinates of an unconsumed press.
+func (l *Loop) PressSecondary(x, y float64) {
+	if !l.suspended && !l.input.SecondaryPress.Valid {
+		l.input.SecondaryPress = engine.MousePress{X: x, Y: y, Valid: true}
 	}
 }
 
@@ -98,5 +106,6 @@ func (l *Loop) NextInput() engine.Input {
 	input := l.input
 	l.input.Pressed = 0
 	l.input.PrimaryPress = engine.MousePress{}
+	l.input.SecondaryPress = engine.MousePress{}
 	return input
 }

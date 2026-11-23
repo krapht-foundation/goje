@@ -2,9 +2,9 @@
 
 This repository includes a reference playground built on Goje's public scene runtime and graphical hosts. It is both a runnable example and a smoke fixture for desktop and web. You do not need to ship this command with your game.
 
-The playground opens on a paused isometric courtyard so you can repeat the same clicks. Click the center of the cyan unit to select it. Click the exposed wall just above it to see the wall block selection of the amber unit behind it. Click the amber unit's exposed left edge to select that unit instead. A yellow bar marks the selected unit.
+The playground opens the authored isometric courtyard. **Left-click** the amber scout to select it, then **right-click** a ground tile on the other side of the wall. The yellow bar shows selection; a green marker shows the accepted destination. The scout follows the shortest walkable route and the marker disappears on arrival. Walls and the cyan lookout block movement. An invalid command leaves the current route intact.
 
-Use the arrow keys to pan the camera and **W** and **S** to zoom in and out around the view center. **Space** starts or pauses the patrol; both units pass in front of and behind the wall. **R** restores the original overlap, camera, and empty selection. In the browser, click the canvas if it does not have keyboard focus.
+Use the arrow keys to pan and **W/S** to zoom around the view center. **R** restores the authored spawns, camera, and empty selection. In the browser, click the canvas to focus it. See the [level authoring guide](levels.md) to edit the courtyard and play the result.
 
 ## Prerequisites
 
@@ -22,6 +22,8 @@ For the browser, start `make serve-web` and open `http://127.0.0.1:8080/`. Set `
 
 The original pickup encounter remains available through `GOJE_PLAYGROUND=pickup make run-desktop` or `http://127.0.0.1:8080/?fixture=pickup`. Move with the arrow keys or **WASD** to collect the cyan token, then press **R** to reset.
 
+The M2 patrol remains available through `GOJE_PLAYGROUND=courtyard make run-desktop` or `http://127.0.0.1:8080/?fixture=courtyard`. Click either visible unit to select it, **Space** to start or pause patrol, and **R** to restore the original overlap. Click the exposed wall to see it block selection of the unit behind it.
+
 ## Use the playground in your game
 
 Implement `engine.Scene` and pass a factory to `platform.Run`. Let the factory create fresh encounter state, and keep reusable assets such as the marker image in the host configuration. Read input in `Update` and return `engine.Restart()` to re-enter the same factory without reopening the host or uploading the image again. See the [runtime guide](runtime.md) for the lifecycle and headless testing API.
@@ -32,7 +34,9 @@ The [reference command](../cmd/playground/) uses the same Go source for desktop 
 goje_root="$PWD"
 go_version="$(go list -m -f '{{.GoVersion}}')"
 mkdir ../my-playground
-cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go ../my-playground/
+cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go \
+  cmd/playground/authored.go ../my-playground/
+cp -R cmd/playground/levels ../my-playground/
 cd ../my-playground
 export GOWORK=off
 go mod init example.com/my-playground
@@ -72,6 +76,6 @@ make setup-web
 make smoke-web
 ```
 
-`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check scripts input snapshots and reads the OpenGL back buffer for both scenes. The browser smoke check uses Playwright Chromium, real keyboard and mouse input, and canvas screenshots. It checks pickup and focus loss, as well as courtyard overlap, wall blocking, selection, pan, zoom, letterboxed resize, patrol, and reset. `make check-example` builds the command from an independent module for the host and for WebAssembly.
+`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check scripts input snapshots and reads the OpenGL back buffer. The Chromium check uses real keyboard and mouse input and canvas screenshots. Both check the authored scout's selection, detour, arrival, and reset alongside the earlier patrol and pickup fixtures. `make check-example` builds the command from an independent module for the host and for WebAssembly.
 
 The native smoke fixture is intended for macOS and Linux with X11, including Xvfb; the browser fixture uses Chromium with WebGL 2. Neither smoke check certifies GPU performance or every platform or browser. `make setup-web` installs its Chromium headless shell into `.build/playwright/`, separate from any user-wide cache. See the [playground specification](../specs/playground.md) for acceptance criteria.

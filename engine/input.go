@@ -19,7 +19,7 @@ const (
 // Has reports whether all the specified keys are in the set.
 func (k Keys) Has(keys Keys) bool { return k&keys == keys }
 
-// MousePress is the first primary mouse-button press buffered for a tick.
+// MousePress is the first valid press of a mouse button buffered for a tick.
 // X and Y are logical viewport pixels measured from the top left. Read them
 // only when Valid is true; a press at (0, 0) is valid.
 type MousePress struct {
@@ -30,9 +30,12 @@ type MousePress struct {
 // Input is a value snapshot for one simulation tick. Held describes keys down
 // at tick start, while Pressed includes new key presses since the previous tick.
 // A short press can appear in Pressed without appearing in Held.
-// PrimaryPress is consumed once, regardless of the number of updates per frame.
+// PrimaryPress and SecondaryPress carry the left and right mouse-button edges.
+// Each is buffered independently and consumed by one tick, including during
+// catch-up. Losing focus clears both edges.
 type Input struct {
-	Held         Keys
-	Pressed      Keys
-	PrimaryPress MousePress
+	Held           Keys
+	Pressed        Keys
+	PrimaryPress   MousePress
+	SecondaryPress MousePress
 }
