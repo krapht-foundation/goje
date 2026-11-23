@@ -47,6 +47,10 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("Desktop smoke passed: rendered movement, pickup, and reset")
+	if err := runCourtyardSmoke(); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Desktop smoke passed: courtyard overlap, selection, pan, zoom, resize, and reset")
 }
 
 func runSmoke() error {

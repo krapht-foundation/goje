@@ -1,4 +1,4 @@
-/** @file Verify the reference encounter, resize, and focus handling using browser canvas pixels. */
+/** @file Verify both reference scenes with real Chromium input and rendered canvas pixels. */
 
 import assert from "node:assert/strict";
 
@@ -76,6 +76,92 @@ function at(sprite, x, y, scale, left = 0) {
     Math.abs(sprite.y - y * scale) <= 2;
 }
 
+/**
+ * Wait for a courtyard checkpoint using the rendered pixels at DPR 2.
+ * @param {import("playwright").Locator} canvas - Goje canvas.
+ * @param {string} stage - Checkpoint name for failures.
+ * @param {function(PNG): boolean} matches - Whether the checkpoint is visible.
+ * @returns {Promise<void>} Resolves after a matching frame is painted.
+ */
+async function waitCourtyard(canvas, stage, matches) {
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    if (matches(PNG.sync.read(await canvas.screenshot({ timeout: 3_000 })))) return;
+  }
+  throw new Error(`No matching courtyard frame for ${stage}`);
+}
+
+/**
+ * Compare the rendered color at a canvas screenshot pixel.
+ * @param {PNG} frame - Decoded screenshot.
+ * @param {number} x - Horizontal device pixel.
+ * @param {number} y - Vertical device pixel.
+ * @param {[number, number, number]} color - Expected RGB.
+ * @returns {boolean} Whether the pixel matches.
+ */
+function pixelIs(frame, x, y, color) {
+  const offset = (Math.floor(y) * frame.width + Math.floor(x)) * 4;
+  return frame.data[offset + 3] === 255 &&
+    color.every((channel, i) => Math.abs(frame.data[offset + i] - channel) <= 2);
+}
+
+/**
+ * Drive the default courtyard with real Chromium keyboard and mouse events.
+ * @param {import("playwright").Browser} browser - Running Chromium instance.
+ * @param {string} url - Loopback playground URL.
+ * @returns {Promise<void>} Resolves once both world and selection are restored.
+ */
+async function smokeCourtyard(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 2 });
+  try {
+    await page.goto(url, { timeout: 15_000 });
+    const canvas = page.locator("#goje");
+    const amber = [248, 164, 76], teal = [92, 220, 210], wall = [148, 122, 105];
+    const selected = [255, 235, 87];
+    await waitCourtyard(canvas, "spawn overlap", frame =>
+      pixelIs(frame, 640, 352, teal) && pixelIs(frame, 640, 336, wall) && pixelIs(frame, 620, 336, amber));
+    await page.mouse.click(320, 176);
+    await waitCourtyard(canvas, "front unit selected", frame => pixelIs(frame, 640, 324, selected));
+    await page.mouse.click(320, 168);
+    await waitCourtyard(canvas, "wall blocks rear unit", frame => pixelIs(frame, 640, 324, wall));
+    await page.mouse.click(310, 168);
+    await waitCourtyard(canvas, "exposed rear unit selected", frame => pixelIs(frame, 640, 308, selected));
+
+    await page.setViewportSize({ width: 880, height: 500 });
+    // At DPR 2, the resized view begins 80 device pixels in and scales by 5.
+    await waitCourtyard(canvas, "resized selection and letterbox", frame =>
+      frame.width === 1760 && pixelIs(frame, 20, 500, [0, 0, 0]) && pixelIs(frame, 880, 385, selected));
+    await page.mouse.click(10, 250);
+    await page.keyboard.press("w");
+    await waitCourtyard(canvas, "centered zoom preserves selection after a bar click", frame =>
+      pixelIs(frame, 880, 360, selected) && pixelIs(frame, 904, 360, selected) &&
+      !pixelIs(frame, 880, 385, selected));
+
+    await page.keyboard.down("ArrowRight");
+    try {
+      await waitCourtyard(canvas, "camera pans right", frame => {
+        const marker = spriteCenter(frame, selected);
+        return marker !== null && marker.x < 850;
+      });
+    } finally {
+      await page.keyboard.up("ArrowRight");
+    }
+    await page.keyboard.press("r");
+    await waitCourtyard(canvas, "camera and selection reset", frame =>
+      pixelIs(frame, 880, 440, teal) && pixelIs(frame, 880, 420, wall) && !pixelIs(frame, 880, 385, selected));
+    await page.keyboard.press("Space");
+    await waitCourtyard(canvas, "patrol moves the unit away from spawn", frame => {
+      const unit = spriteCenter(frame, teal);
+      return unit !== null && unit.x < 855;
+    });
+    await page.keyboard.press("r");
+    await waitCourtyard(canvas, "patrol reset restores starting overlap", frame =>
+      pixelIs(frame, 880, 440, teal) && pixelIs(frame, 880, 420, wall) && pixelIs(frame, 855, 420, amber));
+  } finally {
+    await page.close();
+  }
+}
+
 const server = await servePlayground(0);
 try {
   const browser = await chromium.launch({ timeout: 15_000 });
@@ -86,7 +172,7 @@ try {
     page.on("console", message => {
       if (message.type() === "error") errors.push(message.text());
     });
-    await page.goto(`http://127.0.0.1:${server.address().port}/`, { timeout: 15_000 });
+    await page.goto(`http://127.0.0.1:${server.address().port}/?fixture=pickup`, { timeout: 15_000 });
     const canvas = page.locator("#goje");
     await waitForFrame(canvas, "initial spawn", (player, token) =>
       at(player, 160, 92, 2) && at(token, 192, 108, 2));
@@ -125,6 +211,8 @@ try {
     }
     assert.deepEqual(errors, []);
     console.log("Browser smoke passed: movement, pickup, resize, reset, and focus loss");
+    await smokeCourtyard(browser, `http://127.0.0.1:${server.address().port}/`);
+    console.log("Browser smoke passed: courtyard overlap, selection, pan, zoom, resize, patrol, and reset");
   } finally {
     await browser.close();
   }

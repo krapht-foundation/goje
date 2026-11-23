@@ -9,6 +9,8 @@ Goje has a Go module and a playable desktop and browser playground. Design feedb
 3. Use the Go version in `go.mod` or a newer supported release. Run `make fmt` for formatting and `make check` for the read-only quality gate. For rendering, input, or other playground changes, run both smoke targets from the [playground guide](docs/playground.md) and name any target you could not verify.
 4. Update [public documentation](docs/README.md) when behavior or usage changes. Use plain, complete sentences and distinguish existing features from plans. Use relative links within the repository and check that examples and commands match the current project.
 
+GitHub Actions checks each pull request and each push to `main`. A new commit cancels older runs for the same pull request. The Ubuntu check runs both graphical smoke targets and caches the Chromium build selected by `package-lock.json`; it installs missing system libraries when the runner image does not provide them.
+
 ## Document code for maintainers
 
 - Keep the code readable on its own. Use names that reflect the game or engine concept, keep ownership visible, and prefer straightforward control flow. Write comments in plain, complete sentences for a contributor who has not seen the original discussion.

@@ -26,12 +26,14 @@ const (
 // benchReport puts the report marker first so the browser runner can recognize
 // the JSON line among other messages emitted by the Wasm console adapter.
 type benchReport struct {
-	Benchmark string `json:"benchmark"`
-	Mode      string `json:"mode"`
-	Sprites   int    `json:"sprites"`
-	GoVersion string `json:"go_version"`
-	GOOS      string `json:"goos"`
-	GOARCH    string `json:"goarch"`
+	Benchmark  string `json:"benchmark"`
+	Mode       string `json:"mode"`
+	Sprites    int    `json:"sprites"`
+	Fixture    string `json:"fixture"`
+	WorldItems int    `json:"world_items,omitempty"`
+	GoVersion  string `json:"go_version"`
+	GOOS       string `json:"goos"`
+	GOARCH     string `json:"goarch"`
 	driver.BenchmarkReport
 	TraceCapacity          int    `json:"trace_capacity"`
 	TraceRecords           int    `json:"trace_records"`
@@ -64,6 +66,24 @@ func runBenchmark() error {
 	if err != nil || (sprites != 0 && sprites != benchSprites) {
 		return fmt.Errorf("GOJE_BENCH_SPRITES must be 0 or %d", benchSprites)
 	}
+	fixture := os.Getenv("GOJE_BENCH_FIXTURE")
+	if fixture == "" {
+		fixture = "pickup"
+	}
+	var factory engine.SceneFactory
+	var worldItems int
+	switch fixture {
+	case "pickup":
+		factory = func() engine.Scene { return &benchScene{Scene: newScene(), sprites: sprites} }
+	case "courtyard":
+		worldItems = 3
+		if sprites != 0 {
+			worldItems = sprites
+		}
+		factory = func() engine.Scene { return newBenchmarkCourtyard(worldItems) }
+	default:
+		return fmt.Errorf("unknown benchmark fixture: %q", fixture)
+	}
 
 	// The sampler cancels on completion. The deadline bounds runs stalled by a
 	// suspended window or tab, rather than producing incomplete timing data.
@@ -74,9 +94,7 @@ func runBenchmark() error {
 	if mode == "on" {
 		config.Diagnostics = &platform.Diagnostics{TraceCapacity: benchTraceCapacity}
 	}
-	if runErr := platform.Run(ctx, config, func() engine.Scene {
-		return &benchScene{Scene: newScene(), sprites: sprites}
-	}); runErr != nil {
+	if runErr := platform.Run(ctx, config, factory); runErr != nil {
 		return fmt.Errorf("run playground benchmark: %w", runErr)
 	}
 
@@ -86,6 +104,7 @@ func runBenchmark() error {
 	}
 	report := benchReport{
 		Benchmark: "goje", Mode: mode, Sprites: sprites,
+		Fixture: fixture, WorldItems: worldItems,
 		GoVersion: runtime.Version(), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
 		BenchmarkReport: samples,
 	}

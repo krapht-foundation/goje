@@ -2,10 +2,15 @@ name: Check
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -22,15 +27,46 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Install native graphics build and runtime libraries
+      - name: Ensure native graphics dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libgl1-mesa-dev xorg-dev
+          # Install only the X11 headers GLFW uses, not the xorg-dev bundle.
+          packages=(xvfb xauth libgl1-mesa-dri libgl-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libxxf86vm-dev)
+          missing=()
+          for package in "${packages[@]}"; do
+            if [[ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null)" != installed ]]; then
+              missing+=("$package")
+            fi
+          done
+          if ((${#missing[@]})); then
+            # Refresh package indexes only if the runner's indexes are stale.
+            if ! sudo apt-get install -y --no-install-recommends "${missing[@]}"; then
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends "${missing[@]}"
+            fi
+          fi
       - name: Run Go checks
         run: make check test-race vuln check-example
       - name: Run desktop smoke
         run: xvfb-run -a make smoke-desktop
-      - name: Install Chromium
-        run: make setup-web PLAYWRIGHT_INSTALL_FLAGS=--with-deps
+      - name: Cache the pinned Chromium build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/playwright
+          key: playwright-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Set up Chromium
+        run: |
+          make setup-web
+          # The hosted image usually has Chromium's runtime libraries. Use
+          # Playwright's installer if the image is missing a linked library.
+          shopt -s nullglob
+          browsers=(.build/playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell)
+          if ((${#browsers[@]} != 1)); then
+            echo "Expected one Chromium headless shell after setup" >&2
+            exit 1
+          fi
+          dependencies=$(ldd "${browsers[0]}")
+          if grep -q 'not found' <<< "$dependencies"; then
+            npm exec -- playwright install-deps chromium
+          fi
       - name: Run browser smoke
         run: make smoke-web

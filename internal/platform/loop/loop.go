@@ -1,4 +1,4 @@
-// Package loop implements the common pacing and keyboard buffering policy for
+// Package loop implements the common pacing and input buffering policy for
 // Goje hosts. Hosts supply monotonic timestamps and native events; the engine
 // receives one input snapshot per fixed tick without depending on host clocks.
 package loop
@@ -21,7 +21,7 @@ type Budget struct {
 	Dropped int64
 }
 
-// Loop buffers keyboard state and schedules fixed updates. Its zero value is
+// Loop buffers input and schedules fixed updates. Its zero value is
 // active and uses the first frame's timestamp as its baseline. A host owns and
 // calls it on the game loop; it is not safe for concurrent use.
 type Loop struct {
@@ -61,7 +61,7 @@ func (l *Loop) Frame(now time.Duration) Budget {
 
 // SetActive suspends or resumes the loop. The host combines focus and page
 // visibility before calling it. Suspension discards pending input and time
-// debt so inactive time and keys cannot leak into the resumed simulation.
+// debt so inactive time and input cannot leak into the resumed simulation.
 // It reports whether the state actually changed.
 func (l *Loop) SetActive(active bool) bool {
 	if l.suspended == !active {
@@ -84,10 +84,19 @@ func (l *Loop) KeyDown(key engine.Keys, repeat bool) {
 // KeyUp releases a key without clearing any buffered press edge.
 func (l *Loop) KeyUp(key engine.Keys) { l.input.Held &^= key }
 
+// PressPrimary buffers an in-viewport mouse press until the next tick.
+// Later presses cannot replace the coordinates of an unconsumed press.
+func (l *Loop) PressPrimary(x, y float64) {
+	if !l.suspended && !l.input.PrimaryPress.Valid {
+		l.input.PrimaryPress = engine.MousePress{X: x, Y: y, Valid: true}
+	}
+}
+
 // NextInput consumes the buffered press edges and returns the current snapshot.
 // The host calls it once per update, not once per presentation.
 func (l *Loop) NextInput() engine.Input {
 	input := l.input
 	l.input.Pressed = 0
+	l.input.PrimaryPress = engine.MousePress{}
 	return input
 }

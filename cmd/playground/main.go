@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/platform"
 )
 
@@ -23,6 +24,12 @@ func main() {
 func runPlayground() error {
 	ctx := context.Background()
 	config := playgroundConfig()
+	factory := engine.SceneFactory(newCourtyard)
+	if os.Getenv("GOJE_PLAYGROUND") == "pickup" {
+		factory = newScene
+	} else {
+		config.Title = "Goje Courtyard · Click: select · Arrows: pan · W/S: zoom · Space: patrol · R: reset"
+	}
 	if os.Getenv("GOJE_DIAGNOSTICS") == "1" {
 		// Keep the demo finite so native and browser users can both inspect a
 		// finished capture without reading from the live game loop.
@@ -33,7 +40,7 @@ func runPlayground() error {
 		config.Diagnostics = &platform.Diagnostics{TraceCapacity: 512}
 	}
 
-	runErr := platform.Run(ctx, config, newScene)
+	runErr := platform.Run(ctx, config, factory)
 	if config.Diagnostics != nil {
 		return errors.Join(runErr, json.NewEncoder(os.Stdout).Encode(config.Diagnostics.Result))
 	}

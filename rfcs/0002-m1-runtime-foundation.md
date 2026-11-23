@@ -63,4 +63,4 @@ See the [graphics feasibility report](0002-graphics-feasibility.md) for the obse
 
 ## Outside M1
 
-Scene stacks, a general-purpose render graph, camera and picking APIs, ECS, collision and physics, RTS navigation, audio, networking, editor applications, a versioned asset pipeline, and remote telemetry or vendor-specific exporters. The next milestone can use an overlapping-sprite scene to validate 2.5D camera transforms, render ordering, and selection together. The broader game-owned playground product remains tracked in [RFC 0001](0001-game-owned-playgrounds.md).
+Scene stacks, a general-purpose render graph, camera and picking APIs, ECS, collision and physics, RTS navigation, audio, networking, editor applications, a versioned asset pipeline, and remote telemetry or vendor-specific exporters. The [M2 plan](0003-m2-camera-depth-and-picking.md) uses an overlapping-sprite scene to validate 2.5D camera transforms, render ordering, and selection together. The broader game-owned playground product remains tracked in [RFC 0001](0001-game-owned-playgrounds.md).

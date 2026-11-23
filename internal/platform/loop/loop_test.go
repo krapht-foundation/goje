@@ -50,13 +50,20 @@ func TestInputAcrossPresentationAndSuspension(t *testing.T) {
 	host.KeyDown(engine.KeyR, false)
 	host.KeyUp(engine.KeyR)
 	host.KeyDown(engine.KeyD, false)
+	host.PressPrimary(0, 0)
 	if got := host.Frame(8 * time.Millisecond); got.Updates != 0 {
 		t.Fatalf("early frame scheduled %+v; want no update", got)
 	}
 	if got := host.Frame(50 * time.Millisecond); got.Updates != 3 {
 		t.Fatalf("catch-up frame scheduled %+v; want three updates", got)
 	}
-	want := engine.Input{Held: engine.KeyD, Pressed: engine.KeyR | engine.KeyD}
+	// The first press survived the zero-update frame. A second press cannot
+	// displace it; only the first catch-up tick sees it.
+	host.PressPrimary(70, 25)
+	want := engine.Input{
+		Held: engine.KeyD, Pressed: engine.KeyR | engine.KeyD,
+		PrimaryPress: engine.MousePress{Valid: true},
+	}
 	if got := host.NextInput(); got != want {
 		t.Fatalf("first step input = %+v; want %+v", got, want)
 	}
@@ -69,8 +76,10 @@ func TestInputAcrossPresentationAndSuspension(t *testing.T) {
 	// Suspend with both a pending edge and partial tick time.
 	host.Frame(62 * time.Millisecond)
 	host.KeyDown(engine.KeyW, false)
+	host.PressPrimary(8.5, 30.25)
 	host.SetActive(false)
 	host.KeyDown(engine.KeyA, false)
+	host.PressPrimary(60, 75)
 	if got := host.Frame(5 * time.Second); got != (loop.Budget{}) {
 		t.Fatalf("suspended frame = %+v; want no updates or drops", got)
 	}

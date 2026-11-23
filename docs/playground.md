@@ -2,7 +2,9 @@
 
 This repository includes a reference playground built on Goje's public scene runtime and graphical hosts. It is both a runnable example and a smoke fixture for desktop and web. You do not need to ship this command with your game.
 
-The scene shows an isometric grid, an elevated player marker, and a cyan token. Hold the right arrow key or **D** to move through the token and collect it. Press **R** to restore the player and token to their starting positions without restarting. In the browser, click the canvas first if the page does not have keyboard focus.
+The playground opens on a paused isometric courtyard so you can repeat the same clicks. Click the center of the cyan unit to select it. Click the exposed wall just above it to see the wall block selection of the amber unit behind it. Click the amber unit's exposed left edge to select that unit instead. A yellow bar marks the selected unit.
+
+Use the arrow keys to pan the camera and **W** and **S** to zoom in and out around the view center. **Space** starts or pauses the patrol; both units pass in front of and behind the wall. **R** restores the original overlap, camera, and empty selection. In the browser, click the canvas if it does not have keyboard focus.
 
 ## Prerequisites
 
@@ -18,6 +20,8 @@ make run-desktop
 
 For the browser, start `make serve-web` and open `http://127.0.0.1:8080/`. Set `PORT` to use a different port. `make build-web` alone generates a static site in `.build/web/`; serve `playground.wasm` as `application/wasm` and keep its generated `wasm_exec.js` alongside it.
 
+The original pickup encounter remains available through `GOJE_PLAYGROUND=pickup make run-desktop` or `http://127.0.0.1:8080/?fixture=pickup`. Move with the arrow keys or **WASD** to collect the cyan token, then press **R** to reset.
+
 ## Use the playground in your game
 
 Implement `engine.Scene` and pass a factory to `platform.Run`. Let the factory create fresh encounter state, and keep reusable assets such as the marker image in the host configuration. Read input in `Update` and return `engine.Restart()` to re-enter the same factory without reopening the host or uploading the image again. See the [runtime guide](runtime.md) for the lifecycle and headless testing API.
@@ -28,7 +32,7 @@ The [reference command](../cmd/playground/) uses the same Go source for desktop 
 goje_root="$PWD"
 go_version="$(go list -m -f '{{.GoVersion}}')"
 mkdir ../my-playground
-cp cmd/playground/main.go cmd/playground/game.go ../my-playground/
+cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go ../my-playground/
 cd ../my-playground
 export GOWORK=off
 go mod init example.com/my-playground
@@ -68,6 +72,6 @@ make setup-web
 make smoke-web
 ```
 
-`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check builds a separate binary that scripts input snapshots and reads the OpenGL back buffer at spawn, after pickup, and after reset. The browser smoke check uses Playwright Chromium and real keyboard input to verify the same states. It also checks that resizing preserves the encounter and focus loss clears held keys. `make check-example` builds the command from an independent module for the host and for WebAssembly.
+`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check scripts input snapshots and reads the OpenGL back buffer for both scenes. The browser smoke check uses Playwright Chromium, real keyboard and mouse input, and canvas screenshots. It checks pickup and focus loss, as well as courtyard overlap, wall blocking, selection, pan, zoom, letterboxed resize, patrol, and reset. `make check-example` builds the command from an independent module for the host and for WebAssembly.
 
 The native smoke fixture is intended for macOS and Linux with X11, including Xvfb; the browser fixture uses Chromium with WebGL 2. Neither smoke check certifies GPU performance or every platform or browser. `make setup-web` installs its Chromium headless shell into `.build/playwright/`, separate from any user-wide cache. See the [playground specification](../specs/playground.md) for acceptance criteria.

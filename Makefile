@@ -58,7 +58,7 @@ build-desktop: ## Build the native playground
 run-desktop: build-desktop ## Open the native playground window
 	"$(PLAYGROUND)"
 
-smoke-desktop: ## Check movement, pickup, and reset in a native window
+smoke-desktop: ## Check both playground fixtures in a native window
 	mkdir -p "$(BUILD_DIR)"
 	$(GO) build -tags goje_smoke -o "$(BUILD_DIR)/playground-smoke" ./cmd/playground
 	$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1]], check=True, timeout=20)' "$(BUILD_DIR)/playground-smoke"
@@ -80,7 +80,7 @@ smoke-web: build-web ## Drive the Wasm playground in Chromium and check canvas p
 
 check-example: ## Build the reference playground from a separate module on desktop and web
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
-		cp cmd/playground/main.go cmd/playground/game.go "$$tmp/"; \
+		cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \
 		$(GO) mod init example.com/playground; \
@@ -93,6 +93,8 @@ check-example: ## Build the reference playground from a separate module on deskt
 		echo "External reference builds passed: desktop and Wasm"
 
 .PHONY: benchmark-desktop benchmark-web
+BENCHMARK_FIXTURE ?= pickup
+
 benchmark-desktop: ## Measure the native playground with diagnostics off and on
 	mkdir -p "$(BUILD_DIR)"
 	$(GO) build -tags goje_bench -o "$(BENCHMARK)" ./cmd/playground
@@ -100,7 +102,7 @@ benchmark-desktop: ## Measure the native playground with diagnostics off and on
 		i=0; while [ $$i -lt "$(BENCHMARK_REPEATS)" ]; do \
 			if [ $$((i % 2)) -eq 0 ]; then modes='off on'; else modes='on off'; fi; \
 			for mode in $$modes; do \
-				GOJE_BENCH_MODE=$$mode GOJE_BENCH_SPRITES=$$sprites "$(BENCHMARK)"; \
+				GOJE_BENCH_MODE=$$mode GOJE_BENCH_SPRITES=$$sprites GOJE_BENCH_FIXTURE="$(BENCHMARK_FIXTURE)" "$(BENCHMARK)"; \
 			done; \
 			i=$$((i + 1)); \
 		done; \
@@ -110,4 +112,4 @@ benchmark-web: ## Measure the Chromium playground with diagnostics off and on
 	mkdir -p "$(BENCHMARK_WEB_DIR)"
 	GOOS=js GOARCH=wasm $(GO) build -tags goje_bench -o "$(BENCHMARK_WEB_DIR)/playground.wasm" ./cmd/playground
 	install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(BENCHMARK_WEB_DIR)/"
-	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/benchmark-web.mjs "$(BENCHMARK_WEB_DIR)" "$(BENCHMARK_REPEATS)"
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/benchmark-web.mjs "$(BENCHMARK_WEB_DIR)" "$(BENCHMARK_REPEATS)" "$(BENCHMARK_FIXTURE)"
