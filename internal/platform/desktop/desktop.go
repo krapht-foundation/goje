@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"runtime"
 	"time"
 
@@ -117,8 +118,9 @@ func runWindow(
 		focused = keepActive || value
 		session.SetActive(focused && !viewport.Empty())
 	})
-	window.SetFramebufferSizeCallback(func(_ *glfw.Window, width, height int) {
+	window.SetFramebufferSizeCallback(func(_ *glfw.Window, w, h int) {
 		needsDraw = true
+		width, height = w, h
 		viewport = driver.Viewport(width, height, config.Width, config.Height)
 		session.SetActive(focused && !viewport.Empty())
 	})
@@ -141,6 +143,32 @@ func runWindow(
 			session.Loop.KeyUp(mapped)
 		}
 	})
+	// Follow GLFW's ordered cursor events. Querying the live cursor from a
+	// button callback can see movement newer than the queued button event.
+	cursorX, cursorY := window.GetCursorPos()
+	windowX, windowY := window.GetPos()
+	window.SetCursorPosCallback(func(_ *glfw.Window, x, y float64) {
+		cursorX, cursorY = x, y
+	})
+	window.SetPosCallback(func(_ *glfw.Window, x, y int) {
+		cursorX += float64(windowX - x)
+		cursorY += float64(windowY - y)
+		windowX, windowY = x, y
+	})
+	window.SetMouseButtonCallback(
+		func(w *glfw.Window, button glfw.MouseButton, action glfw.Action, _ glfw.ModifierKey) {
+			if button != glfw.MouseButtonLeft || action != glfw.Press {
+				return
+			}
+			x, y := cursorX, cursorY
+			windowW, windowH := w.GetSize()
+			x, y, ok := driver.LogicalPointer(x, y, float64(windowW), float64(windowH),
+				image.Pt(width, height), image.Pt(config.Width, config.Height), viewport)
+			if ok {
+				session.Loop.PressPrimary(x, y)
+			}
+		},
+	)
 
 	// Wake a suspended event wait on cancellation. Join the wakeup before
 	// the window and GLFW are destroyed so it cannot post to a closed host.
@@ -215,6 +243,8 @@ func engineKey(key glfw.Key) engine.Keys {
 		return engine.KeyS
 	case glfw.KeyR:
 		return engine.KeyR
+	case glfw.KeySpace:
+		return engine.KeySpace
 	default:
 		return 0
 	}

@@ -25,16 +25,18 @@ function isBenchmarkResult(message) {
  * @param {import("playwright").Browser} browser - Chromium instance shared by the runs.
  * @param {string} origin - Base URL for the benchmark Wasm artifact.
  * @param {"off" | "on"} mode - Whether the Go host enables diagnostics.
- * @param {0 | 2048} sprites - Extra textured sprites drawn each frame.
+ * @param {"pickup" | "courtyard"} fixture - Scene under test.
+ * @param {0 | 2048} sprites - Zero for the small scene, 2048 for the dense variant.
  * @returns {Promise<object>} Parsed Go report for the requested configuration.
  * @throws {Error} If the report is missing, reports a startup failure, or does not match the run.
  */
-async function runBenchmark(browser, origin, mode, sprites) {
+async function runBenchmark(browser, origin, mode, fixture, sprites) {
   const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
   try {
     await page.bringToFront();
     const url = new URL(origin);
     url.searchParams.set("bench", mode);
+    url.searchParams.set("fixture", fixture);
     url.searchParams.set("sprites", String(sprites));
     const [message, response] = await Promise.all([
       page.waitForEvent("console", { predicate: isBenchmarkResult, timeout: 75_000 }),
@@ -44,12 +46,12 @@ async function runBenchmark(browser, origin, mode, sprites) {
     const line = message.text();
     if (!line.startsWith(reportPrefix)) throw new Error(line);
     const report = JSON.parse(line);
-    if (report.mode !== mode || report.sprites !== sprites) {
+    if (report.mode !== mode || report.fixture !== fixture || report.sprites !== sprites) {
       throw new Error(`unexpected benchmark configuration: ${line}`);
     }
     return report;
   } catch (error) {
-    throw new Error(`browser benchmark: mode=${mode}, sprites=${sprites}: ${error.message}`, {
+    throw new Error(`browser benchmark: fixture=${fixture}, mode=${mode}, sprites=${sprites}: ${error.message}`, {
       cause: error,
     });
   } finally {
@@ -59,8 +61,10 @@ async function runBenchmark(browser, origin, mode, sprites) {
 
 const directory = process.argv[2];
 const repetitions = Number(process.argv[3] ?? 3);
-if (!directory || !Number.isSafeInteger(repetitions) || repetitions < 1 || process.argv.length > 4) {
-  throw new Error("Usage: node scripts/benchmark-web.mjs WEB_DIR [positive repetition count]");
+const fixture = process.argv[4] ?? "pickup";
+if (!directory || !Number.isSafeInteger(repetitions) || repetitions < 1 ||
+    !["pickup", "courtyard"].includes(fixture) || process.argv.length > 5) {
+  throw new Error("Usage: node scripts/benchmark-web.mjs WEB_DIR [positive repetition count] [pickup|courtyard]");
 }
 
 const server = await servePlayground(0, directory);
@@ -74,7 +78,7 @@ try {
         // Alternate which mode runs first to reduce systematic order effects.
         const modes = repetition % 2 === 1 ? ["off", "on"] : ["on", "off"];
         for (const mode of modes) {
-          const report = await runBenchmark(browser, origin, mode, sprites);
+          const report = await runBenchmark(browser, origin, mode, fixture, sprites);
           console.log(JSON.stringify({ ...report, repetition, chromium_version: chromiumVersion }));
         }
       }

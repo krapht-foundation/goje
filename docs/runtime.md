@@ -33,9 +33,17 @@ err := platform.Run(ctx, config, newScene)
 
 Read the result only after `Run` returns. The host does not execute game exporters, record raw input or game data, or transmit a report. The caller owns the finished trace and decides whether to inspect or serialize it. The [reference playground](playground.md#capture-a-local-run) shows how to view a capture on desktop and web.
 
+## Build an isometric world view
+
+`engine.Isometric.Project` maps tile coordinates and elevation to unzoomed projected pixels. Use `engine.Camera.ToLogical` to apply pan and zoom before drawing. For a logical point, `Camera.ToProjected` removes that transform. To find the underlying tile, pass the result to `Isometric.Unproject` with elevation zero.
+
+Keep a reusable slice of `engine.WorldItem` separate from simulation storage. Call `engine.SortWorldItems` after changing ground anchors or adding or removing items. In `Draw`, traverse that slice from back to front and transform each item's `ProjectedAnchor` through the camera. To resolve a logical press, transform it back to projected pixels and call `engine.PickWorld` on the same slice. Hit rectangles are relative to each projected anchor; `HitBlock` stops selection without returning an object. Pan and zoom alone do not require sorting again.
+
+In `Scene.Update`, check `tick.Input.PrimaryPress.Valid` before reading `X` and `Y`. Desktop and browser hosts supply logical coordinates from the instant the button went down, not from its release. Presses in letterbox bars are ignored. Resolve selection before applying the tick's movement or camera controls so it uses the tick's starting world and camera. The [M2 world-view specification](../specs/world-view-m2.md) defines the complete contract.
+
 ## How a host drives the runtime
 
-The shared [host loop](../internal/platform/loop/loop.go) takes a timestamp relative to a fixed origin, normalizes native keyboard events into buffered snapshots, and returns a budget of fixed steps before each presentation. The host takes one snapshot per step, not once per frame: that preserves a quick key press when no update ran yet and prevents it from firing again during catch-up. The host combines its focus and visibility state before suspending or resuming the loop. Suspension clears pending input and accumulated time, so resuming cannot replay stale keys or time spent inactive.
+The shared [host loop](../internal/platform/loop/loop.go) takes a timestamp relative to a fixed origin, buffers input events, and returns a budget of fixed steps before each presentation. The host takes one snapshot per step, not once per frame: that preserves quick presses when no update ran yet and prevents them from firing again during catch-up. For mouse input, the first valid press wins if several arrive before a tick. The host combines its focus and visibility state before suspending or resuming the loop. Suspension clears pending input and accumulated time, so neither stale presses nor inactive time affect the resumed scene.
 
 The [desktop host](../internal/platform/desktop/desktop.go) and [browser host](../internal/platform/browser/browser_js.go) own window and canvas events, presentation, and GPU cleanup. Both call the [shared driver](../internal/platform/driver/driver.go), which steps the scene, then records one painter-ordered batch in reusable storage. The host clears the letterbox and submits that batch. Scene state stays independent of both the display refresh rate and GPU resource lifetime.
 
@@ -50,3 +58,5 @@ GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" \
 The Wasm check uses Node through the Go toolchain's test runner. It verifies shared runtime behavior, not browser input, rendering, or focus events.
 
 See the [M1 performance baseline](runtime-baseline.md) for the measured cost of enabling local capture and the commands to reproduce it.
+
+See the [M2 world-view measurements](world-view-performance.md) for ordering and hit-query costs, the courtyard density comparison, and the pickup rerun against M1.

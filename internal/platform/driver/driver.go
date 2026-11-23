@@ -161,3 +161,28 @@ func Viewport(w, h, logicalW, logicalH int) image.Rectangle {
 	x, y := (w-vw)/2, (h-vh)/2
 	return image.Rect(x, y, x+vw, y+vh)
 }
+
+// LogicalPointer maps a top-origin window or canvas point through a bottom-origin
+// framebuffer viewport. Source dimensions are in the same units as x and y.
+// Scale each axis using the actual framebuffer size, not a nominal DPI ratio.
+func LogicalPointer(
+	x, y, sourceW, sourceH float64,
+	framebuffer, logical image.Point,
+	viewport image.Rectangle,
+) (
+	logicalX, logicalY float64, ok bool,
+) {
+	if sourceW <= 0 || sourceH <= 0 || framebuffer.X <= 0 || framebuffer.Y <= 0 || viewport.Empty() {
+		return 0, 0, false
+	}
+	frameX := x * float64(framebuffer.X) / sourceW
+	frameY := y * float64(framebuffer.Y) / sourceH
+	top := framebuffer.Y - viewport.Max.Y
+	left := float64(viewport.Min.X)
+	if !(frameX >= left && frameX < float64(viewport.Max.X) &&
+		frameY >= float64(top) && frameY < float64(framebuffer.Y-viewport.Min.Y)) {
+		return 0, 0, false
+	}
+	return (frameX - left) * float64(logical.X) / float64(viewport.Dx()),
+		(frameY - float64(top)) * float64(logical.Y) / float64(viewport.Dy()), true
+}

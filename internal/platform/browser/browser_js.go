@@ -8,6 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"math"
+	"strconv"
+	"strings"
 	"syscall/js"
 	"time"
 
@@ -95,6 +99,21 @@ func runLoop(
 					session.Loop.KeyUp(key)
 				}
 			}
+		case "pointerdown":
+			if e.Get("pointerType").String() != "mouse" || e.Get("button").Int() != 0 {
+				break
+			}
+			x, y, ok := graphics.logicalPointer(window, canvas, e)
+			if !ok {
+				break
+			}
+			// The browser's default focus action follows pointerdown. Focus now
+			// so a valid press can also be the one that reactivates the game.
+			if !document.Get("activeElement").Equal(canvas) {
+				canvas.Call("focus", map[string]any{"preventScroll": true})
+				updateActive()
+			}
+			session.Loop.PressPrimary(x, y)
 		case "webglcontextlost":
 			select {
 			case lost <- struct{}{}:
@@ -109,6 +128,7 @@ func runLoop(
 	}{
 		{canvas, "keydown"},
 		{canvas, "keyup"},
+		{canvas, "pointerdown"},
 		{canvas, "focus"},
 		{canvas, "blur"},
 		{window, "focus"},
@@ -202,6 +222,35 @@ func runLoop(
 	}
 }
 
+func (r *renderer) logicalPointer(window, canvas, event js.Value) (x, y float64, ok bool) {
+	// The client rect and pointer share the browser viewport's origin, even
+	// when the page is scrolled. The drawing buffer covers the CSS content box.
+	box := canvas.Call("getBoundingClientRect")
+	style := window.Call("getComputedStyle", canvas)
+	left := cssInset(style, "borderLeftWidth") + cssInset(style, "paddingLeft")
+	right := cssInset(style, "borderRightWidth") + cssInset(style, "paddingRight")
+	top := cssInset(style, "borderTopWidth") + cssInset(style, "paddingTop")
+	bottom := cssInset(style, "borderBottomWidth") + cssInset(style, "paddingBottom")
+	return driver.LogicalPointer(
+		event.Get("clientX").Float()-box.Get("left").Float()-left,
+		event.Get("clientY").Float()-box.Get("top").Float()-top,
+		box.Get("width").Float()-left-right,
+		box.Get("height").Float()-top-bottom,
+		r.framebuffer,
+		image.Pt(r.logicalW, r.logicalH),
+		r.viewport,
+	)
+}
+
+func cssInset(style js.Value, property string) float64 {
+	// Computed border and padding lengths are expressed in CSS pixels.
+	value, err := strconv.ParseFloat(strings.TrimSuffix(style.Get(property).String(), "px"), 64)
+	if err != nil {
+		return math.NaN() // An unknown CSS box cannot supply a valid press.
+	}
+	return value
+}
+
 func gameKey(code string) engine.Keys {
 	switch code {
 	case "ArrowLeft":
@@ -222,6 +271,8 @@ func gameKey(code string) engine.Keys {
 		return engine.KeyS
 	case "KeyR":
 		return engine.KeyR
+	case "Space":
+		return engine.KeySpace
 	default:
 		return 0
 	}

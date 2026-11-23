@@ -27,6 +27,7 @@ type renderer struct {
 	capacity                          int
 	logicalW, logicalH                int
 	backingW, backingH                int
+	framebuffer                       image.Point
 	viewport                          image.Rectangle
 }
 
@@ -216,12 +217,11 @@ func (r *renderer) present(window, canvas js.Value, frame *driver.Frame) error {
 		if canvas.Get("height").Int() != h {
 			canvas.Set("height", h)
 		}
-		r.viewport = driver.Viewport(
+		r.framebuffer = image.Pt(
 			gl.Get("drawingBufferWidth").Int(),
 			gl.Get("drawingBufferHeight").Int(),
-			r.logicalW,
-			r.logicalH,
 		)
+		r.viewport = driver.Viewport(r.framebuffer.X, r.framebuffer.Y, r.logicalW, r.logicalH)
 		v := r.viewport
 		gl.Call("viewport", v.Min.X, v.Min.Y, v.Dx(), v.Dy())
 		gl.Call("scissor", v.Min.X, v.Min.Y, v.Dx(), v.Dy())
