@@ -1,4 +1,4 @@
-package courtyard_test
+package tile_test
 
 import (
 	"bytes"
@@ -8,17 +8,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/krapht-foundation/goje/examples/courtyard"
+	"github.com/krapht-foundation/goje/tile"
 )
 
-func TestDecodeTile(t *testing.T) {
+func TestDecodePNG(t *testing.T) {
 	const limit = 64 << 10
 	want := color.NRGBA{R: 123, G: 77, B: 45, A: 199}
-	tile := image.NewNRGBA(image.Rect(0, 0, 32, 16))
-	tile.SetNRGBA(10, 4, want)
-	valid := encodePNG(t, tile)
+	pixels := image.NewNRGBA(image.Rect(0, 0, 32, 16))
+	pixels.SetNRGBA(10, 4, want)
+	valid := encodePNG(t, pixels)
 	t.Run("preserves asymmetric color and alpha", func(t *testing.T) {
-		got, err := courtyard.DecodeTile(bytes.NewReader(valid))
+		got, err := tile.Decode(bytes.NewReader(valid))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -42,18 +42,18 @@ func TestDecodeTile(t *testing.T) {
 		{"over byte limit", append(bytes.Clone(valid), make([]byte, limit-len(valid)+1)...), "exceeds 64 KiB"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := courtyard.DecodeTile(bytes.NewReader(test.data))
+			_, err := tile.Decode(bytes.NewReader(test.data))
 			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("DecodeTile error = %v, want %q", err, test.want)
+				t.Fatalf("Decode error = %v, want %q", err, test.want)
 			}
 		})
 	}
 }
 
-func encodePNG(t *testing.T, tile image.Image) []byte {
+func encodePNG(t *testing.T, pixels image.Image) []byte {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, tile); err != nil {
+	if err := png.Encode(&buf, pixels); err != nil {
 		t.Fatal(err)
 	}
 	return buf.Bytes()

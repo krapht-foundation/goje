@@ -10,6 +10,7 @@ import (
 	"github.com/krapht-foundation/goje/engine/grid"
 	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
 	"github.com/krapht-foundation/goje/platform"
+	"github.com/krapht-foundation/goje/tile"
 )
 
 //go:embed levels/courtyard.json
@@ -50,11 +51,11 @@ func authoredFactory() (engine.SceneFactory, error) {
 }
 
 func authoredConfig() (platform.Config, error) {
-	tile, err := courtyardlevel.DecodeTile(strings.NewReader(authoredTile))
+	ground, err := tile.Decode(strings.NewReader(authoredTile))
 	if err != nil {
 		return platform.Config{}, fmt.Errorf("load art/ground.png: %w", err)
 	}
-	config := playgroundConfig(tile)
+	config := playgroundConfig(ground)
 	config.Title = "Goje Courtyard · Left click: select · Right click: move · Arrows: pan · W/S: zoom · R: reset"
 	return config, nil
 }

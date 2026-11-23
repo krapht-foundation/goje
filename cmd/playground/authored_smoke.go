@@ -34,7 +34,8 @@ func runAuthoredSmoke(shortcut bool) error {
 		return pixelIs(v, 176, 80, courtyardWallColor)
 	}
 	if shortcut {
-		groundAccent = color.NRGBA{R: 174, G: 92, B: 214, A: 255}
+		// Match the highlight drawn through the Tile Maker in the round-trip smoke.
+		groundAccent = color.NRGBA{R: 222, G: 122, B: 66, A: 255}
 		// The opening's projected scout anchor lies above the original detour.
 		route = courtyardCheckpoint{name: "shortcut crossing", check: func(v image.Rectangle) bool {
 			return pixelIs(v, 176, 80, markerColor) && pixelIs(v, 208, 108, destinationColor)

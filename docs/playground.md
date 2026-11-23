@@ -59,6 +59,17 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory web
 
 Open `http://127.0.0.1:8080/` and click the canvas if it does not have keyboard focus.
 
+## Draw a ground tile in the browser
+
+Run `make serve-tile-maker` with Go and Node installed, then open `http://127.0.0.1:8082/`. Set `TILE_MAKER_PORT` to use a different port. The app runs on loopback and does not upload your files.
+
+1. Start with the blank tile or choose **Open PNG** to edit a 32 × 16 PNG up to 64 KiB.
+2. Choose a color and use **Pencil** to paint opaque pixels or **Eraser** to clear them. Click or drag on the grid, or focus it and use the arrow keys and **Enter** or **Space**. **Undo** and **Redo** operate on whole strokes or individual keyboard edits.
+3. Use the native-size tile and the isometric repeat to check the result. The optional diamond guide helps place transparent corners without limiting where you can draw.
+4. Choose **Export PNG** to download a copy. The editor never overwrites the original and preserves intermediate alpha on untouched pixels. Reopen the download or validate it for the playground using the instructions below.
+
+Run `make setup-web` once, then `make smoke-tile-maker` to exercise the controls and check the downloaded PNG in Chromium. The smoke reports stroke time (including browser input and two animation frames) and export time (from initiating the click to the download event), not Go CPU time.
+
 ## Validate custom ground art
 
 Export a 32 × 16 PNG, at most 64 KiB, with transparent corners around the isometric diamond. From the repository root, run `go run ./cmd/tilecheck /path/to/tile.png`. This reads the file without rewriting it. To see the result, replace `art/ground.png` in a scratch copy of the reference command and rebuild as shown in [Play a level edit](levels.md#play-a-level-edit). The authored courtyard validates the tile at startup and draws it beneath the grid on walkable cells only. Pickup and patrol do not use the tile.

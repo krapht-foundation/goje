@@ -178,7 +178,8 @@ async function smokeAuthored(browser, url, shortcut) {
     const amber = [248, 164, 76], wall = [148, 122, 105], selected = [255, 235, 87];
     const destination = [116, 246, 144];
     const lookout = [92, 220, 210];
-    const ground = shortcut ? [174, 92, 214] : [91, 133, 114];
+    // Match the highlight drawn through the Tile Maker in the round-trip smoke.
+    const ground = shortcut ? [222, 122, 66] : [91, 133, 114];
     const background = [20, 28, 41], grid = [63, 84, 108];
     /**
      * Check a logical pixel with horizontal letterboxing at DPR 2.

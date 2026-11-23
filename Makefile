@@ -11,6 +11,8 @@ TOOLBIN := $(BUILD_DIR)/tools
 WEB_DIR := $(BUILD_DIR)/web
 EDITOR_WEB_DIR := $(BUILD_DIR)/leveleditor-web
 EDITOR_PORT ?= 8081
+TILE_MAKER_WEB_DIR := $(BUILD_DIR)/tilemaker-web
+TILE_MAKER_PORT ?= 8082
 PLAYWRIGHT_CACHE := $(BUILD_DIR)/playwright
 PLAYGROUND := $(BUILD_DIR)/playground$(if $(filter windows,$(shell $(GO) env GOOS)),.exe)
 BENCHMARK := $(BUILD_DIR)/playground-benchmark
@@ -93,13 +95,27 @@ serve-level-editor: build-level-editor ## Serve the Level Builder on loopback (E
 smoke-level-editor: build-level-editor ## Verify editing and download in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-level-editor.mjs
 
-smoke-level-roundtrip: build-level-editor ## Play a browser-exported level with custom art on desktop and web
+.PHONY: build-tile-maker serve-tile-maker smoke-tile-maker
+build-tile-maker: ## Build the standalone browser Tile Maker
+	mkdir -p "$(TILE_MAKER_WEB_DIR)"
+	GOOS=js GOARCH=wasm $(GO) build -o "$(TILE_MAKER_WEB_DIR)/tilemaker.wasm" ./cmd/tilemaker
+	install -m 0644 web/tilemaker/index.html web/tilemaker/tilemaker.mjs web/tilemaker/tilemaker.css \
+		"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(TILE_MAKER_WEB_DIR)/"
+
+serve-tile-maker: build-tile-maker ## Serve the Tile Maker on loopback (TILE_MAKER_PORT=8082 by default)
+	$(NODE) scripts/tile-maker-server.mjs "$(TILE_MAKER_PORT)"
+
+smoke-tile-maker: build-tile-maker ## Verify pixel editing, previews, and PNG handoff in Chromium
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-tile-maker.mjs
+
+smoke-level-roundtrip: build-level-editor build-tile-maker ## Play both browser exports on desktop and web
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/level-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
 		mkdir -p "$$tmp/playground/levels" "$$tmp/playground/art" "$$tmp/web"; \
 		cp cmd/playground/*.go "$$tmp/playground/"; \
-		cp testdata/custom-ground.png "$$tmp/playground/art/ground.png"; \
-		$(GO) run ./cmd/tilecheck "$$tmp/playground/art/ground.png"; \
+		tile="$$tmp/playground/art/ground.png"; \
+		$(NODE) scripts/smoke-tile-maker.mjs "$$tile"; \
+		$(GO) run ./cmd/tilecheck "$$tile"; \
 		level="$$tmp/playground/levels/courtyard.json"; \
 		$(NODE) scripts/smoke-level-editor.mjs "$$level"; \
 		$(GO) run ./cmd/levelcheck "$$level"; \

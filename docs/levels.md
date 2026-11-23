@@ -82,10 +82,10 @@ cp -R cmd/playground/art "$work/playground/"
 cp "$download" "$work/playground/levels/courtyard.json"
 ```
 
-To try your own ground art in the same build, validate and copy it before launching either target:
+To try your own ground art in the same build, [draw and export a tile in the Tile Maker](playground.md#draw-a-ground-tile-in-the-browser). Leave the corners transparent so the tiles fit the isometric grid. Set `tile` to the actual download path, then validate and copy it before launching either target:
 
 ```sh
-tile="$HOME/Downloads/my-ground.png"
+tile="$HOME/Downloads/tile.png"
 go run ./cmd/tilecheck "$tile"
 cp "$tile" "$work/playground/art/ground.png"
 ```
@@ -105,4 +105,4 @@ The PNG changes how walkable cells look, not which cells are walkable. See [grou
 
 Select the scout and right-click the center of ground cell `(6, 2)`, two columns beyond the opening. The scout crosses the opening without going around the wall. Press **R** to restore the scout's spawn and the lookout's edited position. Stop the app before removing the scratch directory.
 
-To automate the workflow, run `make setup-web` once and then `make smoke-level-roundtrip`. The test validates a [custom PNG](../testdata/custom-ground.png) with `tilecheck`, reopens and validates the browser download with `levelcheck`, and checks the custom ground pixels, lookout, shortcut crossing, arrival, and reset on both targets. It requires a working native graphics session; on headless Linux with the native smoke dependencies installed, use `xvfb-run -a make smoke-level-roundtrip`.
+To automate the workflow, run `make setup-web` once and then `make smoke-level-roundtrip`. The smoke test authors, exports, and reopens a tile in the Tile Maker and an edited courtyard in the Level Builder. It runs `tilecheck` and `levelcheck` on the exact downloads, embeds them without rewriting either file, and checks the rendered accent, transparent corners, moved lookout, shortcut crossing, arrival, and reset on desktop and web. It requires a working native graphics session; on headless Linux with the native smoke dependencies installed, use `xvfb-run -a make smoke-level-roundtrip`.
