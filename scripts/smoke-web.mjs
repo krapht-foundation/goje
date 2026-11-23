@@ -1,4 +1,4 @@
-/** @file Verify movement, pickup, resize, and reset using rendered browser canvas pixels. */
+/** @file Verify the reference encounter, resize, and focus handling using browser canvas pixels. */
 
 import assert from "node:assert/strict";
 
@@ -36,6 +36,16 @@ function spriteCenter({ data, width }, [r, g, b]) {
 }
 
 /**
+ * Read the player and token positions from one painted browser frame.
+ * @param {import("playwright").Locator} canvas - The game canvas.
+ * @returns {Promise<{ player: SpriteCenter | null, token: SpriteCenter | null }>} Visible sprites.
+ */
+async function readSprites(canvas) {
+  const frame = PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
+  return { player: spriteCenter(frame, [248, 164, 76]), token: spriteCenter(frame, [92, 220, 210]) };
+}
+
+/**
  * Poll screenshots until both sprite positions meet a condition in the same frame.
  * @param {import("playwright").Locator} canvas - Locator for the rendered playground canvas.
  * @param {string} stage - Description for a timeout error.
@@ -46,8 +56,8 @@ function spriteCenter({ data, width }, [r, g, b]) {
 async function waitForFrame(canvas, stage, matches) {
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
-    const frame = PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
-    if (matches(spriteCenter(frame, [248, 164, 76]), spriteCenter(frame, [92, 220, 210]))) return;
+    const { player, token } = await readSprites(canvas);
+    if (matches(player, token)) return;
   }
   throw new Error(`No matching playground frame for ${stage}`);
 }
@@ -58,10 +68,11 @@ async function waitForFrame(canvas, stage, matches) {
  * @param {number} x - Expected horizontal position in logical game pixels.
  * @param {number} y - Expected vertical position in logical game pixels.
  * @param {number} scale - Screenshot pixels per logical game pixel.
+ * @param {number} [left=0] - Horizontal start of the letterboxed viewport in screenshot pixels.
  * @returns {boolean} Whether the sprite is within two screenshot pixels of the target.
  */
-function at(sprite, x, y, scale) {
-  return sprite !== null && Math.abs(sprite.x - x * scale) <= 2 &&
+function at(sprite, x, y, scale, left = 0) {
+  return sprite !== null && Math.abs(sprite.x - (left + x * scale)) <= 2 &&
     Math.abs(sprite.y - y * scale) <= 2;
 }
 
@@ -76,7 +87,7 @@ try {
       if (message.type() === "error") errors.push(message.text());
     });
     await page.goto(`http://127.0.0.1:${server.address().port}/`, { timeout: 15_000 });
-    const canvas = page.locator("canvas");
+    const canvas = page.locator("#goje");
     await waitForFrame(canvas, "initial spawn", (player, token) =>
       at(player, 160, 92, 2) && at(token, 192, 108, 2));
     await canvas.click({ timeout: 3_000 });
@@ -87,14 +98,33 @@ try {
     } finally {
       await page.keyboard.up("ArrowRight");
     }
-    await page.setViewportSize({ width: 800, height: 500 });
+    await page.setViewportSize({ width: 880, height: 500 });
     await waitForFrame(canvas, "resized encounter", (player, token) =>
-      player !== null && player.x > 510 && Math.abs(player.y - 230) <= 2 && token === null);
+      player !== null && player.x > 550 && Math.abs(player.y - 230) <= 2 && token === null);
     await page.keyboard.press("r", { delay: 100 });
     await waitForFrame(canvas, "reset", (player, token) =>
-      at(player, 160, 92, 2.5) && at(token, 192, 108, 2.5));
+      at(player, 160, 92, 2.5, 40) && at(token, 192, 108, 2.5, 40));
+
+    await page.keyboard.down("ArrowLeft");
+    try {
+      await waitForFrame(canvas, "movement before focus loss", player =>
+        player !== null && player.x < 425);
+      await canvas.blur();
+      const { player: blurred } = await readSprites(canvas);
+      assert.ok(blurred !== null && blurred.x > 140, "player must have room to drift left");
+
+      // Resume while the key is still held. A stale key must not move the
+      // player on any of the following focused ticks.
+      await canvas.focus();
+      for (let i = 0; i < 4; i++) {
+        const { player } = await readSprites(canvas);
+        assert.deepEqual(player, blurred, "the held key survived focus loss");
+      }
+    } finally {
+      await page.keyboard.up("ArrowLeft");
+    }
     assert.deepEqual(errors, []);
-    console.log("Browser smoke passed: real keys moved the player, collected the token, and reset both after resize");
+    console.log("Browser smoke passed: movement, pickup, resize, reset, and focus loss");
   } finally {
     await browser.close();
   }

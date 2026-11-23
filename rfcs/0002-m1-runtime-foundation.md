@@ -40,6 +40,8 @@ The [M1 runtime specification](../specs/runtime-m1.md) defines lifecycle, timing
 
 The first candidates are [GLFW](https://www.glfw.org/docs/latest/intro.html) and OpenGL 3.3 core on desktop, and Go `js/wasm` with [WebGL 2](https://developer.mozilla.org/en-US/docs/Web/API/WebGL2RenderingContext) in the browser. The proposed verification matrix is macOS, Linux with X11 under Xvfb/Mesa, and Chromium. Windows, Wayland-native support, Safari and Firefox certification, and signed desktop installers are not M1 acceptance targets. This is a verification boundary, not a change to the desktop and web product goals.
 
+See the [graphics feasibility report](0002-graphics-feasibility.md) for the observed results and build requirements.
+
 ## Implementation plan
 
 | Order | Deliverable | Exit check |

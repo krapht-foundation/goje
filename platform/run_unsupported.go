@@ -1,0 +1,17 @@
+//go:build !(js && wasm) && !(cgo && (darwin || linux))
+
+package platform
+
+import (
+	"context"
+	"errors"
+
+	"github.com/krapht-foundation/goje/engine"
+	"github.com/krapht-foundation/goje/internal/platform/driver"
+)
+
+func run(context.Context, driver.Config, engine.SceneFactory) error {
+	return errors.New(
+		"Goje graphics require macOS or Linux with CGO, or a js/wasm build with WebGL 2",
+	)
+}

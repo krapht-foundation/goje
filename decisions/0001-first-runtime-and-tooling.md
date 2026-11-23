@@ -1,6 +1,6 @@
 # ADR 0001: One Go module and an Ebitengine playground
 
-**Status:** Accepted for the first playable slice.
+**Status:** Accepted for the first playable slice. The public package layout and playground backend have since been superseded by [ADR 0002](0002-runtime-host-and-diagnostics.md).
 
 ## Context
 
@@ -16,4 +16,4 @@ Use Make for shared commands and pin developer tool versions in `tools.mk`. Use 
 
 Desktop and web share the game code, but require different runtime verification. Ebitengine gives the first slice a working cross-platform runtime without committing the public API to it. Separate modules, a custom renderer, and editor-specific dependencies are not necessary for this slice.
 
-The repository keeps the runnable playground to exercise both targets and reproduce integration failures. The reference command and smoke harness share `cmd/playground` so that the example can be copied into another module without importing private code. The command consumes the public package, not the reverse. The [game-owned playground RFC](../rfcs/0001-game-owned-playgrounds.md) covers the experimental API and remaining design questions.
+The repository keeps the runnable playground to exercise both targets and reproduce integration failures. The command consumes the public packages, not the reverse. The [game-owned playground RFC](../rfcs/0001-game-owned-playgrounds.md) covers the reference workflow and remaining design questions.

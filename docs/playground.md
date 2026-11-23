@@ -1,13 +1,13 @@
 # Run the Goje Playground
 
-This repository includes a reference playground built with Goje's experimental, game-owned playground API. It is both a runnable example and a smoke fixture for desktop and web. You do not need to ship this command with your game.
+This repository includes a reference playground built on Goje's public scene runtime and graphical hosts. It is both a runnable example and a smoke fixture for desktop and web. You do not need to ship this command with your game.
 
 The scene shows an isometric grid, an elevated player marker, and a cyan token. Hold the right arrow key or **D** to move through the token and collect it. Press **R** to restore the player and token to their starting positions without restarting. In the browser, click the canvas first if the page does not have keyboard focus.
 
 ## Prerequisites
 
 - Go at the version in [`go.mod`](../go.mod) or newer, and GNU Make.
-- A graphical desktop for native runs. Linux requires an X11 or XWayland session and [Ebitengine's runtime libraries](https://ebitengine.org/en/documents/install.html#runtime-libraries). An Xvfb session with Mesa can run the desktop smoke check on Linux CI.
+- CGO and a graphical desktop for native runs. On macOS, install the Xcode Command Line Tools. On Linux, install the X11 and OpenGL development libraries and use X11 or XWayland. See the [tested prerequisites](../rfcs/0002-graphics-feasibility.md#build-and-distribution-notes). An Xvfb session with Mesa can run the Linux desktop smoke check.
 - Node.js 24.2 or newer and npm for serving and testing the browser build. Python 3 is used for the native smoke timeout and Markdown link check.
 
 ## Run
@@ -20,15 +20,15 @@ For the browser, start `make serve-web` and open `http://127.0.0.1:8080/`. Set `
 
 ## Use the playground in your game
 
-Import `github.com/krapht-foundation/goje/engine` and pass your game's scene loader to `engine.NewPlayground`. Configure the starting encounter in that loader, and have it create fresh mutable state each time it runs. Keep reusable assets outside the scene. In your normal game loop, use `Scene()` to update and render the current scene, and call `Reset()` when the player requests a restart. Get the current scene again after resetting instead of retaining references from the previous run.
+Implement `engine.Scene` and pass a factory to `platform.Run`. Let the factory create fresh encounter state, and keep reusable assets such as the marker image in the host configuration. Read input in `Update` and return `engine.Restart()` to re-enter the same factory without reopening the host or uploading the image again. See the [runtime guide](runtime.md) for the lifecycle and headless testing API.
 
-See the [reference command](../cmd/playground/) for a working integration. It uses Ebitengine for input, drawing, and the game loop; those are not dependencies of the playground API. To try the reference in another module before a Goje release, run the following from this repository:
+The [reference command](../cmd/playground/) uses the same Go source for desktop and web. To try it in another module before a Goje release, run these commands from this repository:
 
 ```sh
 goje_root="$PWD"
 go_version="$(go list -m -f '{{.GoVersion}}')"
 mkdir ../my-playground
-cp cmd/playground/*.go ../my-playground/
+cp cmd/playground/main.go cmd/playground/game.go ../my-playground/
 cd ../my-playground
 export GOWORK=off
 go mod init example.com/my-playground
@@ -39,6 +39,21 @@ go run .
 ```
 
 The local `replace` selects the unreleased revision. When depending on a published Goje version, use the version in `go.mod` without the local replacement. The reference command imports only public packages.
+
+To run that same module in a browser, build the Wasm binary and serve it alongside the reference page and the matching Go bootstrap:
+
+```sh
+mkdir -p web
+GOOS=js GOARCH=wasm go build -o web/playground.wasm .
+cp "$goje_root/web/playground/index.html" "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/
+python3 -m http.server 8080 --bind 127.0.0.1 --directory web
+```
+
+Open `http://127.0.0.1:8080/` and click the canvas if it does not have keyboard focus.
+
+## Capture a local run
+
+Run `GOJE_DIAGNOSTICS=1 make run-desktop` on desktop, or start `make serve-web` and open `http://127.0.0.1:8080/?diagnostics=1`. Move around and press **R** to see a scene transition in the lifecycle log. After ten seconds (or earlier if you close the native window), the run stops and prints the JSON report to the terminal or the browser developer console. The demo retains up to 512 phase records; the report still counts ticks and frames after the trace fills.
 
 ## Verify
 
@@ -53,6 +68,6 @@ make setup-web
 make smoke-web
 ```
 
-`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check scripts input actions and reads rendered frames before pickup, after pickup, and after reset. The browser smoke check uses Playwright Chromium to check the same states with real keyboard input and also verifies that resizing preserves encounter state. `make check-example` copies the command to an independent module and builds it for the host and for WebAssembly. Neither smoke check certifies GPU performance or every platform or browser. See the [playground specification](../specs/playground.md) for acceptance criteria.
+`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check builds a separate binary that scripts input snapshots and reads the OpenGL back buffer at spawn, after pickup, and after reset. The browser smoke check uses Playwright Chromium and real keyboard input to verify the same states. It also checks that resizing preserves the encounter and focus loss clears held keys. `make check-example` builds the command from an independent module for the host and for WebAssembly.
 
-If the default graphics backend cannot present a window on macOS, try `EBITENGINE_GRAPHICS_LIBRARY=opengl make run-desktop` or use the same override for `make smoke-desktop`. `make setup-web` installs its Chromium headless shell into `.build/playwright/`, separate from any user-wide cache.
+The native smoke fixture is intended for macOS and Linux with X11, including Xvfb; the browser fixture uses Chromium with WebGL 2. Neither smoke check certifies GPU performance or every platform or browser. `make setup-web` installs its Chromium headless shell into `.build/playwright/`, separate from any user-wide cache. See the [playground specification](../specs/playground.md) for acceptance criteria.

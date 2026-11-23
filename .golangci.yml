@@ -143,7 +143,11 @@ linters:
             - '${base-path}/engine/**/*.go'
           deny:
             - pkg: github.com/hajimehoshi/ebiten/v2
-              desc: Keep the engine independent of the playground graphics backend.
+              desc: Goje owns its runtime; do not import Ebitengine.
+            - pkg: github.com/go-gl/gl
+              desc: Keep OpenGL bindings in the desktop host.
+            - pkg: github.com/go-gl/glfw
+              desc: Keep windowing bindings in the desktop host.
             - pkg: github.com/krapht-foundation/goje/cmd
               desc: Commands consume the engine, not the other way around.
             - pkg: github.com/krapht-foundation/goje/platform

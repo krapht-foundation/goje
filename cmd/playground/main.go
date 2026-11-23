@@ -1,18 +1,41 @@
+//go:build !goje_smoke && !goje_bench
+
 package main
 
 import (
-	"flag"
-	"fmt"
+	"context"
+	"encoding/json"
+	"errors"
 	"log"
+	"log/slog"
+	"os"
+	"time"
+
+	"github.com/krapht-foundation/goje/platform"
 )
 
 func main() {
-	smoke := flag.Bool("smoke", false, "run the native rendering smoke scenario and exit")
-	flag.Parse()
-	if err := run(*smoke); err != nil {
+	if err := runPlayground(); err != nil {
 		log.Fatal(err)
 	}
-	if *smoke {
-		fmt.Println("Desktop smoke passed: rendered movement, pickup, and reset")
+}
+
+func runPlayground() error {
+	ctx := context.Background()
+	config := playgroundConfig()
+	if os.Getenv("GOJE_DIAGNOSTICS") == "1" {
+		// Keep the demo finite so native and browser users can both inspect a
+		// finished capture without reading from the live game loop.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		config.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+		config.Diagnostics = &platform.Diagnostics{TraceCapacity: 512}
 	}
+
+	runErr := platform.Run(ctx, config, newScene)
+	if config.Diagnostics != nil {
+		return errors.Join(runErr, json.NewEncoder(os.Stdout).Encode(config.Diagnostics.Result))
+	}
+	return runErr
 }

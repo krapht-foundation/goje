@@ -1,10 +1,12 @@
-/** @file Serve the built Goje Playground on loopback for local use and browser smoke tests. */
+/** @file Serve the built Goje Playground on loopback for local use and browser tooling. */
 
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("../.build/web/", import.meta.url);
+const defaultDirectory = fileURLToPath(new URL("../.build/web/", import.meta.url));
 /** @type {Map<string, [string, string]>} */
 const assets = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -15,12 +17,13 @@ const assets = new Map([
 /**
  * Load the built playground assets and start serving them on loopback.
  * @param {number} port - TCP port to bind; use 0 to request an available port.
+ * @param {string} [directory] - Build output directory; defaults to the ordinary playground build.
  * @returns {Promise<import("node:http").Server>} The listening server. The caller owns shutdown.
  * @throws {Error} The returned promise rejects if an asset cannot be read or the bind fails.
  */
-export async function servePlayground(port) {
+export async function servePlayground(port, directory = defaultDirectory) {
   const files = new Map(await Promise.all(Array.from(assets, async ([path, [name, type]]) => {
-    return [path, { type, bytes: await readFile(new URL(name, root)) }];
+    return [path, { type, bytes: await readFile(join(directory, name)) }];
   })));
   const server = createServer((request, response) => {
     const file = files.get(request.url?.split("?", 1)[0]);

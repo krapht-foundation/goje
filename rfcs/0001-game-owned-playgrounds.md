@@ -16,7 +16,7 @@ Game developers need a way to assemble a playable test environment from their ow
 
 Goje's runtime and developer tooling must not depend on the example or its test assets. The reference command now exercises the public API and also serves as the smoke fixture.
 
-The [M1 runtime foundation RFC](0002-m1-runtime-foundation.md) proposes moving scene restart into the engine lifecycle. This RFC continues to track the broader playground tooling.
+The reference command uses the scene restart lifecycle from the [M1 runtime foundation RFC](0002-m1-runtime-foundation.md). This RFC continues to track the broader playground tooling.
 
 ## First workflow to validate
 
@@ -24,6 +24,6 @@ Use a sample game's existing scene and assets to configure a repeatable encounte
 
 ## Open questions
 
-- The prototype calls the same game-owned scene loader for initialization and reset. Is that sufficient when the scene holds resources that need explicit teardown or asynchronous loading?
+- How should a future playground handle asynchronous asset loading and restart when a scene cannot be recreated synchronously?
 - What inspection or encounter-editing features are needed after the first workflow works?
 - Would a standalone launcher or editor add value beyond an in-game playground? Decide after testing the embedded workflow.

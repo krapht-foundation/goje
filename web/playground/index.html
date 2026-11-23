@@ -7,11 +7,15 @@
   <link rel="icon" href="data:,">
   <style>
     html, body { margin: 0; width: 100%; height: 100%; background: #141c29; color: #fff; }
+    #goje { display: block; width: 100%; height: 100%; }
+    #controls { position: fixed; right: 1rem; bottom: 1rem; margin: 0; font: 0.875rem system-ui; pointer-events: none; }
     #status { position: fixed; z-index: 1; top: 1rem; left: 1rem; font: 1rem system-ui; }
   </style>
 </head>
 <body>
   <p id="status" role="status">Loading Goje Playground…</p>
+  <canvas id="goje" tabindex="0" aria-label="Goje Playground" aria-describedby="controls"></canvas>
+  <p id="controls">Arrows or WASD to move · R to reset</p>
   <script src="wasm_exec.js"></script>
   <script>
     /** @file Load the compiled Go playground and show startup or runtime failures. */
@@ -24,12 +28,27 @@
      */
     async function start() {
       const go = new Go();
+      const query = new URLSearchParams(window.location.search);
+      const diagnosticRun = query.get("diagnostics") === "1";
+      const benchmark = query.get("bench");
+      if (diagnosticRun) go.env.GOJE_DIAGNOSTICS = "1";
+      if (benchmark === "off" || benchmark === "on") {
+        go.env.GOJE_BENCH_MODE = benchmark;
+        go.env.GOJE_BENCH_SPRITES = query.get("sprites") === "2048" ? "2048" : "0";
+      }
+      let exitCode = 0;
+      /** @param {number} code - Exit status from the Go program. */
+      go.exit = code => { exitCode = code; };
       const response = await fetch("playground.wasm");
       if (!response.ok) throw new Error(`Wasm download failed: HTTP ${response.status}`);
       const { instance } = await WebAssembly.instantiateStreaming(response, go.importObject);
       statusLine.hidden = true;
       await go.run(instance);
-      throw new Error("The playground stopped.");
+      if (exitCode !== 0) {
+        throw new Error("The playground stopped with an error. Check the browser console for details.");
+      }
+      statusLine.hidden = false;
+      statusLine.textContent = diagnosticRun ? "Diagnostics finished. See the browser console." : "The playground stopped.";
     }
     start().catch(error => {
       statusLine.hidden = false;

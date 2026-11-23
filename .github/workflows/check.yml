@@ -22,10 +22,10 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Install native graphics runtime
+      - name: Install native graphics build and runtime libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xauth libx11-6 libgl1 libglx-mesa0 libgl1-mesa-dri
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libgl1-mesa-dev xorg-dev
       - name: Run Go checks
         run: make check test-race vuln check-example
       - name: Run desktop smoke

@@ -1,6 +1,6 @@
 # M1 runtime specification
 
-**Status:** Accepted; implementation pending. See the [M1 plan](../rfcs/0002-m1-runtime-foundation.md) and the [host and diagnostics decision](../decisions/0002-runtime-host-and-diagnostics.md).
+**Status:** Accepted. The headless lifecycle, shared timing and input policy, graphical hosts, and local diagnostics are implemented and used by the [reference playground](playground.md). See the [runtime guide](../docs/runtime.md) for the API and the [performance baseline](../docs/runtime-baseline.md) for measurements.
 
 ## Scene lifecycle
 
