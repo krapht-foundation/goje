@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/krapht-foundation/goje/examples/courtyard"
+	"github.com/krapht-foundation/goje/tile"
 )
 
 func main() {
@@ -26,11 +26,11 @@ func check(path string) (err error) {
 		return fmt.Errorf("open tile: %w", err)
 	}
 	defer func() { err = errors.Join(err, file.Close()) }()
-	tile, err := courtyard.DecodeTile(file)
+	pixels, err := tile.Decode(file)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	bounds := tile.Bounds()
+	bounds := pixels.Bounds()
 	_, err = fmt.Printf("%s: valid ground tile (%d × %d pixels)\n", path, bounds.Dx(), bounds.Dy())
 	if err != nil {
 		return fmt.Errorf("write validation result: %w", err)

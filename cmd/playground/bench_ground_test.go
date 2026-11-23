@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
 	"github.com/krapht-foundation/goje/internal/platform/driver"
+	"github.com/krapht-foundation/goje/tile"
 )
 
 func BenchmarkGroundAdvance(b *testing.B) {
@@ -61,19 +61,19 @@ func BenchmarkGroundStartup(b *testing.B) {
 	b.Run("decode", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := courtyardlevel.DecodeTile(strings.NewReader(authoredTile)); err != nil {
+			if _, err := tile.Decode(strings.NewReader(authoredTile)); err != nil {
 				b.Fatal(err)
 			}
 		}
 	})
 	b.Run("pack", func(b *testing.B) {
-		tile, err := courtyardlevel.DecodeTile(strings.NewReader(authoredTile))
+		pixels, err := tile.Decode(strings.NewReader(authoredTile))
 		if err != nil {
 			b.Fatal(err)
 		}
 		b.ReportAllocs()
 		for b.Loop() {
-			playgroundConfig(tile)
+			playgroundConfig(pixels)
 		}
 	})
 }

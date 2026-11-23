@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goje Tile Maker</title>
+  <link rel="stylesheet" href="tilemaker.css">
+</head>
+<body>
+  <main>
+    <h1>Goje Tile Maker</h1>
+    <p>Draw a 32 × 16 ground tile. Files stay in this browser.</p>
+    <fieldset id="controls" disabled>
+      <legend>Tile controls</legend>
+      <button id="new" type="button">New tile</button>
+      <button id="open" type="button">Open PNG</button>
+      <input id="file" type="file" accept=".png,image/png" hidden>
+      <button id="export" type="button">Export PNG</button>
+      <button id="undo" type="button">Undo</button>
+      <button id="redo" type="button">Redo</button>
+      <button id="pencil" type="button" aria-pressed="true">Pencil</button>
+      <label>Color <input id="color" type="color" value="#386bb0"></label>
+      <button id="eraser" type="button" aria-pressed="false">Eraser</button>
+      <label><input id="guide-toggle" type="checkbox" checked> Diamond guide</label>
+    </fieldset>
+    <p id="status" role="status">Loading the Tile Maker…</p>
+    <p id="keys">Use arrow keys to move, then Enter or Space to edit a pixel.</p>
+    <p><output id="coordinate" aria-label="Active pixel">(0, 0)</output> · <output id="dirty">Saved</output></p>
+    <div id="grid" role="group" aria-label="Tile editing grid" aria-describedby="keys coordinate">
+      <canvas id="tile" width="32" height="16" aria-hidden="true"></canvas>
+      <div class="lines" aria-hidden="true"></div>
+      <svg id="guide" viewBox="0 0 32 16" aria-hidden="true"><polygon points="16,0 32,8 16,16 0,8"/></svg>
+      <div id="cursor" aria-hidden="true"></div>
+    </div>
+    <div class="previews">
+      <figure>
+        <figcaption>Tile at 1×</figcaption>
+        <canvas id="native" width="32" height="16" aria-label="Tile at native size"></canvas>
+      </figure>
+      <figure>
+        <figcaption>2 × 2 isometric repeat</figcaption>
+        <canvas id="repeat" width="64" height="32" aria-label="Isometric repeat preview"></canvas>
+      </figure>
+    </div>
+  </main>
+  <script src="wasm_exec.js"></script>
+  <script type="module" src="tilemaker.mjs"></script>
+</body>
+</html>
