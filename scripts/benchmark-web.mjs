@@ -1,4 +1,4 @@
-/** @file Benchmark one playground Wasm artifact with diagnostics off and on in Chromium. */
+/** @file Compare two modes of one playground Wasm fixture in Chromium. */
 
 import { promisify } from "node:util";
 
@@ -24,9 +24,9 @@ function isBenchmarkResult(message) {
  * Run one sample window in a fresh, foreground page without injecting input.
  * @param {import("playwright").Browser} browser - Chromium instance shared by the runs.
  * @param {string} origin - Base URL for the benchmark Wasm artifact.
- * @param {"off" | "on"} mode - Whether the Go host enables diagnostics.
- * @param {"pickup" | "courtyard"} fixture - Scene under test.
- * @param {0 | 2048} sprites - Zero for the small scene, 2048 for the dense variant.
+ * @param {"off" | "on"} mode - Whether to enable diagnostics, or tile quads for the ground fixture.
+ * @param {"pickup" | "courtyard" | "ground"} fixture - Scene under test.
+ * @param {0 | 2048 | 16384} sprites - Zero for the reference scene or the fixture's dense variant.
  * @returns {Promise<object>} Parsed Go report for the requested configuration.
  * @throws {Error} If the report is missing, reports a startup failure, or does not match the run.
  */
@@ -63,8 +63,8 @@ const directory = process.argv[2];
 const repetitions = Number(process.argv[3] ?? 3);
 const fixture = process.argv[4] ?? "pickup";
 if (!directory || !Number.isSafeInteger(repetitions) || repetitions < 1 ||
-    !["pickup", "courtyard"].includes(fixture) || process.argv.length > 5) {
-  throw new Error("Usage: node scripts/benchmark-web.mjs WEB_DIR [positive repetition count] [pickup|courtyard]");
+    !["pickup", "courtyard", "ground"].includes(fixture) || process.argv.length > 5) {
+  throw new Error("Usage: node scripts/benchmark-web.mjs WEB_DIR [positive repetition count] [pickup|courtyard|ground]");
 }
 
 const server = await servePlayground(0, directory);
@@ -73,7 +73,7 @@ try {
   const browser = await chromium.launch({ headless: true, timeout: 15_000 });
   try {
     const chromiumVersion = browser.version();
-    for (const sprites of [0, 2048]) {
+    for (const sprites of [0, fixture === "ground" ? 16384 : 2048]) {
       for (let repetition = 1; repetition <= repetitions; repetition++) {
         // Alternate which mode runs first to reduce systematic order effects.
         const modes = repetition % 2 === 1 ? ["off", "on"] : ["on", "off"];

@@ -23,7 +23,7 @@ func BenchmarkCourtyardAdvance(b *testing.B) {
 		b.Run(fixture.name, func(b *testing.B) {
 			session, err := driver.Start(b.Context(), func() engine.Scene {
 				return newBenchmarkCourtyard(fixture.count)
-			}, driver.Config{HasImage: true})
+			}, driver.Config{ImageSize: markerRegion.Size()})
 			if err != nil {
 				b.Fatal(err)
 			}

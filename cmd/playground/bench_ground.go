@@ -1,0 +1,61 @@
+//go:build goje_bench && !goje_smoke
+
+package main
+
+import (
+	"bytes"
+	"io"
+	"strings"
+
+	"github.com/krapht-foundation/goje/engine"
+	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
+	"github.com/krapht-foundation/goje/level"
+)
+
+const denseGroundCells = 128 * 128
+
+// Both modes use the same board, camera and atlas. Only tile quads differ.
+func groundBenchmarkFactory(dense, tiles bool) (engine.SceneFactory, error) {
+	var source io.Reader = strings.NewReader(authoredLevel)
+	if dense {
+		data, err := denseGroundLevel()
+		if err != nil {
+			return nil, err
+		}
+		source = bytes.NewReader(data)
+	}
+	layout, err := courtyardlevel.Decode(source)
+	if err != nil {
+		return nil, err
+	}
+	return func() engine.Scene {
+		return &groundBenchmark{&authoredCourtyard{layout: layout}, tiles}
+	}, nil
+}
+
+func denseGroundLevel() ([]byte, error) {
+	var rows [128]string
+	row := strings.Repeat(".", len(rows))
+	for y := range rows {
+		rows[y] = row
+	}
+	return level.Encode(rows[:], []level.Placement{
+		{ID: 1, Kind: "scout", X: 63, Y: 63},
+		{ID: 2, Kind: "lookout", X: 64, Y: 64},
+	})
+}
+
+type groundBenchmark struct {
+	*authoredCourtyard
+	tiles bool
+}
+
+func (s *groundBenchmark) Enter() error {
+	if err := s.authoredCourtyard.Enter(); err != nil {
+		return err
+	}
+	if !s.tiles {
+		s.ground = nil
+	}
+	return nil
+}

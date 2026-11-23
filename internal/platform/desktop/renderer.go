@@ -62,9 +62,11 @@ func newRenderer(config driver.Config) (*renderer, error) {
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	uploadStart := driver.BenchUploadStart()
 	//nolint:gosec // G115: texture dimensions were checked against the GL int32 limit above.
 	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, int32(width), int32(height), 0,
 		gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(&texture.Pix[0]))
+	driver.BenchUploadEnd(uploadStart)
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA)

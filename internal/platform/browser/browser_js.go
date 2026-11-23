@@ -232,7 +232,7 @@ func runLoop(
 			if drawErr != nil {
 				return drawErr
 			}
-			driver.BenchFrameEnd(measured)
+			driver.BenchFrameEnd(measured, len(batch.Vertices))
 			session.Presented()
 			presented <- struct{}{}
 		}

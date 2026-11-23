@@ -27,6 +27,8 @@ type Benchmark struct {
 	tickCount    int
 	tickOverflow int
 	dropped      int64
+	vertexBytes  int
+	upload       time.Duration
 	ticks        [benchmarkTickSamples]time.Duration
 	frames       [benchmarkMeasuredFrames]time.Duration
 	intervals    [benchmarkMeasuredFrames]time.Duration
@@ -54,8 +56,9 @@ func BenchFrameStart() time.Time {
 	return time.Now()
 }
 
-// BenchFrameEnd samples CPU work through submission, excluding swap or paint.
-func BenchFrameEnd(start time.Time) {
+// BenchFrameEnd samples CPU work through submission, excluding swap or paint,
+// and tracks the largest measured vertex batch.
+func BenchFrameEnd(start time.Time, vertexBytes int) {
 	b := activeBenchmark
 	if b == nil || b.framesSeen == benchmarkTotalFrames {
 		return
@@ -66,11 +69,27 @@ func BenchFrameEnd(start time.Time) {
 		b.frames[i] = elapsed
 		// The last warmup start also makes the first measured interval valid.
 		b.intervals[i] = start.Sub(b.lastStart)
+		b.vertexBytes = max(b.vertexBytes, vertexBytes)
 	}
 	b.lastStart = start
 	b.framesSeen++
 	if b.framesSeen == benchmarkTotalFrames {
 		b.cancel()
+	}
+}
+
+// BenchUploadStart marks the start of the one-time texture upload submission.
+func BenchUploadStart() time.Time {
+	if activeBenchmark == nil {
+		return time.Time{}
+	}
+	return time.Now()
+}
+
+// BenchUploadEnd records CPU time through submission, not GPU completion.
+func BenchUploadEnd(start time.Time) {
+	if b := activeBenchmark; b != nil {
+		b.upload = time.Since(start)
 	}
 }
 
@@ -115,6 +134,9 @@ type BenchmarkReport struct {
 	Frame              BenchmarkTiming `json:"frame"`
 	Interval           BenchmarkTiming `json:"interval"`
 	DroppedTicks       int64           `json:"dropped_ticks"`
+	PeakVertices       int             `json:"peak_vertices"`
+	PeakVertexBytes    int             `json:"peak_vertex_bytes"`
+	TextureUploadNS    int64           `json:"texture_upload_ns"`
 	TickSampleOverflow int             `json:"tick_sample_overflow"`
 	Clock              BenchmarkClock  `json:"clock"`
 }
@@ -153,6 +175,9 @@ func (b *Benchmark) Report() (BenchmarkReport, error) {
 		Frame:              summarizeBenchmarkTimings(b.frames[:]),
 		Interval:           summarizeBenchmarkTimings(b.intervals[:]),
 		DroppedTicks:       b.dropped,
+		PeakVertices:       b.vertexBytes / VertexStride,
+		PeakVertexBytes:    b.vertexBytes,
+		TextureUploadNS:    b.upload.Nanoseconds(),
 		TickSampleOverflow: b.tickOverflow,
 		Clock:              probeBenchmarkClock(),
 	}, nil

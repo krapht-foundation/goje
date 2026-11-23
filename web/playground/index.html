@@ -31,7 +31,8 @@
       const query = new URLSearchParams(window.location.search);
       const diagnosticRun = query.get("diagnostics") === "1";
       const benchmark = query.get("bench");
-      const fixture = query.get("fixture") === "courtyard" ? "courtyard" : "pickup";
+      const requestedFixture = query.get("fixture");
+      const fixture = ["courtyard", "ground"].includes(requestedFixture) ? requestedFixture : "pickup";
       const controls = document.querySelector("#controls");
       if (query.get("fixture") === "pickup" || ((benchmark === "off" || benchmark === "on") && fixture === "pickup")) {
         go.env.GOJE_PLAYGROUND = "pickup";
@@ -44,7 +45,8 @@
       if (benchmark === "off" || benchmark === "on") {
         go.env.GOJE_BENCH_MODE = benchmark;
         go.env.GOJE_BENCH_FIXTURE = fixture;
-        go.env.GOJE_BENCH_SPRITES = query.get("sprites") === "2048" ? "2048" : "0";
+        const dense = fixture === "ground" ? "16384" : "2048";
+        go.env.GOJE_BENCH_SPRITES = query.get("sprites") === dense ? dense : "0";
       }
       let exitCode = 0;
       /** @param {number} code - Exit status from the Go program. */

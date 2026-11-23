@@ -48,7 +48,9 @@ func main() {
 		if err := runAuthoredSmoke(true); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("Desktop smoke passed: exported lookout, shortcut crossing, arrival, and reset")
+		fmt.Println(
+			"Desktop smoke passed: custom tile, moved lookout, shortcut crossing, arrival, and reset",
+		)
 		return
 	}
 	if err := runSmoke(); err != nil {
@@ -71,7 +73,7 @@ func runSmoke() error {
 	smoke := &nativeSmoke{cancel: cancel}
 	desktop.FrameProbe = smoke.inspect
 	defer func() { desktop.FrameProbe = nil }()
-	if err := platform.Run(ctx, playgroundConfig(), func() engine.Scene {
+	if err := platform.Run(ctx, playgroundConfig(nil), func() engine.Scene {
 		return &smokeScene{Scene: newScene(), smoke: smoke}
 	}); err != nil {
 		return fmt.Errorf("native smoke: %w", err)

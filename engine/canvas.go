@@ -1,6 +1,9 @@
 package engine
 
-import "image/color"
+import (
+	"image"
+	"image/color"
+)
 
 // Canvas records drawing in logical pixels from the upper-left corner. Draw
 // calls are painted in order, except Clear, which sets the frame background.
@@ -10,7 +13,8 @@ type Canvas interface {
 	Rect(x, y, width, height float32, tint color.NRGBA)
 	// Line draws a centered stroke with flat ends. Zero-length lines are ignored.
 	Line(x1, y1, x2, y2, width float32, tint color.NRGBA)
-	// Image draws the image configured at launch with nearest-neighbor scaling.
-	// It draws nothing if the game did not configure an image.
-	Image(x, y, width, height float32)
+	// Image draws a region of the launch image with nearest-neighbor scaling.
+	// Source coordinates are relative to the upper-left texel, with exclusive
+	// maximum edges. Missing images and empty or out-of-bounds regions do not draw.
+	Image(source image.Rectangle, x, y, width, height float32)
 }

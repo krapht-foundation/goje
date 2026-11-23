@@ -20,8 +20,11 @@ const (
 )
 
 var (
-	markerColor = color.NRGBA{R: 248, G: 164, B: 76, A: 255}
-	tokenColor  = color.NRGBA{R: 92, G: 220, B: 210, A: 255}
+	markerColor  = color.NRGBA{R: 248, G: 164, B: 76, A: 255}
+	tokenColor   = color.NRGBA{R: 92, G: 220, B: 210, A: 255}
+	markerRegion = image.Rect(0, 0, 12, 12)
+	// The transparent column keeps the marker and ground texels separated.
+	groundRegion = image.Rect(13, 0, 45, 16)
 )
 
 type point struct{ x, y float64 }
@@ -76,21 +79,28 @@ func (s *scene) move(horizontal, vertical int) {
 	}
 }
 
-func playgroundConfig() platform.Config {
-	// Build the marker once per host run. Scene restarts only reset world state.
-	marker := image.NewNRGBA(image.Rect(0, 0, 12, 12))
+func playgroundConfig(ground image.Image) platform.Config {
+	// Pack once per host run. Pickup and patrol only need the marker.
+	bounds := markerRegion
+	if ground != nil {
+		bounds = bounds.Union(groundRegion)
+	}
+	texture := image.NewNRGBA(bounds)
+	if ground != nil {
+		draw.Draw(texture, groundRegion, ground, ground.Bounds().Min, draw.Src)
+	}
 	draw.Draw(
-		marker,
+		texture,
 		image.Rect(0, 2, 12, 12),
 		image.NewUniform(markerColor),
 		image.Point{},
 		draw.Src,
 	)
 	highlight := image.NewUniform(color.NRGBA{R: 255, G: 214, B: 147, A: 255})
-	draw.Draw(marker, image.Rect(2, 0, 10, 2), highlight, image.Point{}, draw.Src)
+	draw.Draw(texture, image.Rect(2, 0, 10, 2), highlight, image.Point{}, draw.Src)
 	return platform.Config{
 		Title: "Goje Playground · Arrows / WASD: move · R: reset",
-		Width: width, Height: height, Image: marker,
+		Width: width, Height: height, Image: texture,
 	}
 }
 
@@ -118,5 +128,5 @@ func (s *scene) Draw(canvas engine.Canvas) {
 	x, spriteY := project(s.player.x, s.player.y, bodyLift)
 	groundY := spriteY + bodyLift
 	canvas.Rect(x-8, groundY-2, 16, 4, color.NRGBA{R: 7, G: 13, B: 22, A: 255})
-	canvas.Image(x-6, spriteY-7, 12, 12)
+	canvas.Image(markerRegion, x-6, spriteY-7, 12, 12)
 }

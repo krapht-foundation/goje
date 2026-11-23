@@ -149,13 +149,13 @@ func (s *courtyard) drawWorld(canvas engine.Canvas, items []engine.WorldItem) {
 		h := float32(bounds.Bottom-bounds.Top) * zoom
 		switch item.ID {
 		case courtyardAmber:
-			canvas.Image(left, top, w, h)
+			canvas.Image(markerRegion, left, top, w, h)
 		case courtyardTeal:
 			canvas.Rect(left, top, w, h, tokenColor)
 		case courtyardWall:
 			canvas.Rect(left, top, w, h, courtyardWallColor)
 		default:
-			canvas.Image(left, top, w, h)
+			canvas.Image(markerRegion, left, top, w, h)
 		}
 		if item.ID == s.selected {
 			markerX, markerY = float32(x), top

@@ -18,7 +18,8 @@ import (
 
 // Config describes the initial window and logical viewport. Image is optional;
 // the host uploads its pixels once, before entering the scene, and keeps the
-// texture alive across scene changes. Do not modify the image concurrently with Run.
+// texture alive across scene changes. Canvas source regions are relative to the
+// image's upper-left pixel. Do not modify the image concurrently with Run.
 type Config struct {
 	Title         string
 	Width, Height int
@@ -76,9 +77,13 @@ func Run(ctx context.Context, config Config, scene engine.SceneFactory) error {
 		config.Logger.InfoContext(ctx, "Goje host starting")
 		defer config.Logger.InfoContext(ctx, "Goje host stopped")
 	}
+	var imageSize image.Point
+	if config.Image != nil {
+		imageSize = texture.Bounds().Size()
+	}
 	return run(ctx, driver.Config{
 		Title: config.Title, Width: config.Width, Height: config.Height,
-		Texture: texture, HasImage: config.Image != nil,
+		Texture: texture, ImageSize: imageSize,
 		Logger: config.Logger, Capture: capture,
 	}, scene)
 }

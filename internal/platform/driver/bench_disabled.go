@@ -8,7 +8,13 @@ import "time"
 func BenchFrameStart() time.Time { return time.Time{} }
 
 // BenchFrameEnd is an inlinable no-op outside benchmark builds.
-func BenchFrameEnd(time.Time) {}
+func BenchFrameEnd(time.Time, int) {}
+
+// BenchUploadStart is an inlinable no-op outside benchmark builds.
+func BenchUploadStart() time.Time { return time.Time{} }
+
+// BenchUploadEnd is an inlinable no-op outside benchmark builds.
+func BenchUploadEnd(time.Time) {}
 
 // BenchDropped is an inlinable no-op outside benchmark builds.
 func BenchDropped(int64) {}

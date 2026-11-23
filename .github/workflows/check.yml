@@ -70,5 +70,5 @@ jobs:
           fi
       - name: Run browser smoke
         run: make smoke-web
-      - name: Play the browser export on desktop and web
+      - name: Play the browser export with custom art on desktop and web
         run: xvfb-run -a make smoke-level-roundtrip

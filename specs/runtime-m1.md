@@ -18,7 +18,7 @@
 ## Presentation and resources
 
 - Drawing does not mutate simulation state. Present a logical viewport with uniform scaling and letterboxing in the physical framebuffer. Resizing preserves scene state. Keep ground position, elevation, and logical screen coordinates separate.
-- Support a background, colored geometry, and a textured quad for the reference encounter. The game chooses the asset; the host owns the GPU resource until shutdown. Upload the reference image once and reuse it across scene restarts. An asset manager and content format are out of scope.
+- Support a background, colored geometry, and nearest-neighbor textured quads in paint order. The game chooses one optional launch image. Each quad samples a region in image-local pixels from its upper left, with exclusive maximum edges. An absent image or an empty or out-of-bounds source region draws nothing. The host uploads the image once, reuses it across scene restarts, and owns the GPU resource until shutdown. An asset manager and content format are out of scope.
 - The native host honors the selected windowing library's thread requirements. The browser host cancels frame callbacks and releases its event handlers on shutdown. On graphics context loss, stop cleanly and surface the error; recovery is out of scope.
 
 ## Local diagnostics

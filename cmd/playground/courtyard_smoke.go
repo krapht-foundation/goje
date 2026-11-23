@@ -114,7 +114,7 @@ func runCourtyardSmoke() error {
 		return nil
 	}
 	defer func() { desktop.FrameProbe = nil }()
-	if err := platform.Run(ctx, playgroundConfig(), func() engine.Scene {
+	if err := platform.Run(ctx, playgroundConfig(nil), func() engine.Scene {
 		return &courtyardSmokeScene{Scene: newCourtyard(), input: input}
 	}); err != nil {
 		return fmt.Errorf("native courtyard smoke: %w", err)
