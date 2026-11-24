@@ -18,6 +18,8 @@ Goje's runtime and developer tooling must not depend on the example or its test 
 
 The reference command uses the scene restart lifecycle from the [M1 runtime foundation RFC](0002-m1-runtime-foundation.md). This RFC continues to track the broader playground tooling.
 
+[M7](0008-m7-game-projects.md) proposes a shared project loader and an independent playground that uses it without copying the reference command.
+
 ## First workflow to validate
 
 Use a sample game's existing scene and assets to configure a repeatable encounter. Run it, alter gameplay state, and reset to the configured starting state without restarting the game. Verify the workflow on desktop and in a browser, including that the reset restores the scenario's starting state. Use the same public API in the sample and in a separate-module build check.

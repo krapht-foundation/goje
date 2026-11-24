@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "rows": ["...", ".#."],
+  "placements": [{"id": 1, "kind": "beacon", "x": 0, "y": 0}]
+}

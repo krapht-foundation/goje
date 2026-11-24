@@ -26,17 +26,16 @@ The M2 patrol remains available through `GOJE_PLAYGROUND=courtyard make run-desk
 
 ## Use the playground in your game
 
-Implement `engine.Scene` and pass a factory to `platform.Run`. Let the factory create fresh encounter state, and keep reusable assets such as the marker image in the host configuration. Read input in `Update` and return `engine.Restart()` to re-enter the same factory without reopening the host or uploading the image again. See the [runtime guide](runtime.md) for the lifecycle and headless testing API.
+The [Beacon example](../examples/beacon/game.go) is a small, top-down 2D game built on the public `project`, `level`, `engine`, and `platform` packages. It owns its layout, rendering, and input rules, and it does not import the reference courtyard. Try the included project with `go run ./examples/beacon`.
 
-The [reference command](../cmd/playground/) uses the same Go source for desktop and web. To try it in another module before a Goje release, run these commands from this repository:
+To start a separate module, run these commands from the Goje checkout:
 
 ```sh
 goje_root="$PWD"
 go_version="$(go list -m -f '{{.GoVersion}}')"
 mkdir ../my-playground
-cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go \
-  cmd/playground/authored.go ../my-playground/
-cp -R cmd/playground/levels cmd/playground/art ../my-playground/
+cp examples/beacon/game.go examples/beacon/run.go ../my-playground/
+cp -R examples/beacon/assets examples/beacon/web ../my-playground/
 cd ../my-playground
 export GOWORK=off
 go mod init example.com/my-playground
@@ -46,18 +45,25 @@ go mod tidy
 go run .
 ```
 
-The local `replace` selects the unreleased revision. When depending on a published Goje version, use the version in `go.mod` without the local replacement. The reference command imports only public packages.
+The local `replace` selects the unreleased Goje revision. Use a published version without `replace` once one is available. Click the beacon or press **Space** to toggle it, and press **R** to reset. The game validates the placement once before opening a window and recreates only scene state on reset.
 
-To run that same module in a browser, build the Wasm binary and serve it alongside the reference page and the matching Go bootstrap:
+To use your own assets, open `assets/arena.json` in Level Builder and move the `beacon` to another walkable cell. Save the export as `assets/arena.json` in your module. Use the Tile Maker to draw a PNG and save it as `assets/floor.png`. You can rename either file if you update [`assets/goje.json`](../examples/beacon/assets/goje.json). The example requires exactly one `beacon` and a board of at most 4 × 2 cells. Validate the pair before rebuilding:
 
 ```sh
-mkdir -p web
-GOOS=js GOARCH=wasm go build -o web/playground.wasm .
-cp "$goje_root/web/playground/index.html" "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/
-python3 -m http.server 8080 --bind 127.0.0.1 --directory web
+(cd "$goje_root" && go run ./cmd/projectcheck ../my-playground/assets)
 ```
 
-Open `http://127.0.0.1:8080/` and click the canvas if it does not have keyboard focus.
+To run the same module in a browser, build the Wasm binary and add the matching Go bootstrap to the included page:
+
+```sh
+GOOS=js GOARCH=wasm go build -o web/playground.wasm .
+cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/
+node "$goje_root/scripts/playground-server.mjs" 8080 "$PWD/web"
+```
+
+Open `http://127.0.0.1:8080/` and click the canvas to focus it. Both builds embed the same project.
+
+From the Goje checkout, `make setup-web` and `make smoke-beacon` automate the author-to-play workflow using exact editor downloads and a separate Go module. On headless Linux with the native graphics dependencies, use `xvfb-run -a make smoke-beacon`.
 
 ## Draw a ground tile in the browser
 
@@ -72,7 +78,7 @@ Run `make setup-web` once, then `make smoke-tile-maker` to exercise the controls
 
 ## Validate custom ground art
 
-Export a 32 × 16 PNG, at most 64 KiB, with transparent corners around the isometric diamond. From the repository root, run `go run ./cmd/tilecheck /path/to/tile.png`. This reads the file without rewriting it. To see the result, replace `art/ground.png` in a scratch copy of the reference command and rebuild as shown in [Play a level edit](levels.md#play-a-level-edit). The authored courtyard validates the tile at startup and draws it beneath the grid on walkable cells only. Pickup and patrol do not use the tile.
+Export a 32 × 16 PNG, at most 64 KiB, with transparent corners around the isometric diamond. From the repository root, run `go run ./cmd/tilecheck /path/to/tile.png`. This reads the file without rewriting it. To see the result, point the `ground` field of `goje.json` at the PNG in a scratch copy of the reference command and rebuild as shown in [Play a level edit](levels.md#play-a-level-edit). The authored courtyard validates the tile at startup and draws it beneath the grid on walkable cells only. Pickup and patrol do not use the tile.
 
 The [reference ground tile](../cmd/playground/art/ground.png) is original Goje artwork generated for this project. Its muted diamond, transparent corners, and offset highlight distinguish orientation without external art or dependencies. See the [M5 RFC](../rfcs/0006-m5-tile-art.md) for the milestone plan.
 

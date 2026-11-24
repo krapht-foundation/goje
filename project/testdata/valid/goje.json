@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "level": "levels/arena.json",
+  "ground": "art/stone.png"
+}

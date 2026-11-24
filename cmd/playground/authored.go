@@ -1,23 +1,21 @@
 package main
 
 import (
-	_ "embed"
+	"embed"
 	"fmt"
+	"image"
 	"image/color"
-	"strings"
+	"io/fs"
 
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/engine/grid"
 	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
 	"github.com/krapht-foundation/goje/platform"
-	"github.com/krapht-foundation/goje/tile"
+	projectdata "github.com/krapht-foundation/goje/project"
 )
 
-//go:embed levels/courtyard.json
-var authoredLevel string
-
-//go:embed art/ground.png
-var authoredTile string
+//go:embed goje.json levels/*.json art/*.png
+var authoredFiles embed.FS
 
 const scoutEdgeTicks = 16
 
@@ -41,23 +39,34 @@ type authoredCourtyard struct {
 	cameraHomeX, cameraHomeY float64
 }
 
-// Load once per launch. Restart builds new scene state from the same validated layout.
-func authoredFactory() (engine.SceneFactory, error) {
-	layout, err := courtyardlevel.Decode(strings.NewReader(authoredLevel))
-	if err != nil {
-		return nil, err
-	}
-	return func() engine.Scene { return &authoredCourtyard{layout: layout} }, nil
+type authoredProject struct {
+	layout courtyardlevel.Layout
+	ground image.Image
 }
 
-func authoredConfig() (platform.Config, error) {
-	ground, err := tile.Decode(strings.NewReader(authoredTile))
+// Load the manifest once, then apply courtyard rules before opening a host.
+func loadAuthored(root fs.FS) (authoredProject, error) {
+	loaded, err := projectdata.Load(root)
 	if err != nil {
-		return platform.Config{}, fmt.Errorf("load art/ground.png: %w", err)
+		return authoredProject{}, err
 	}
-	config := playgroundConfig(ground)
+	layout, err := courtyardlevel.Resolve(loaded.Level)
+	if err != nil {
+		return authoredProject{}, fmt.Errorf("resolve courtyard placements: %w", err)
+	}
+	return authoredProject{layout: layout, ground: loaded.Ground}, nil
+}
+
+// Restart captures only the validated layout; the host retains the packed atlas.
+func (p authoredProject) factory() engine.SceneFactory {
+	layout := p.layout
+	return func() engine.Scene { return &authoredCourtyard{layout: layout} }
+}
+
+func (p authoredProject) config() platform.Config {
+	config := playgroundConfig(p.ground)
 	config.Title = "Goje Courtyard · Left click: select · Right click: move · Arrows: pan · W/S: zoom · R: reset"
-	return config, nil
+	return config
 }
 
 func (s *authoredCourtyard) Enter() error {

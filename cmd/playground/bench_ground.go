@@ -4,7 +4,6 @@ package main
 
 import (
 	"bytes"
-	"io"
 	"strings"
 
 	"github.com/krapht-foundation/goje/engine"
@@ -15,18 +14,19 @@ import (
 const denseGroundCells = 128 * 128
 
 // Both modes use the same board, camera and atlas. Only tile quads differ.
-func groundBenchmarkFactory(dense, tiles bool) (engine.SceneFactory, error) {
-	var source io.Reader = strings.NewReader(authoredLevel)
+func groundBenchmarkFactory(
+	layout courtyardlevel.Layout,
+	dense, tiles bool,
+) (engine.SceneFactory, error) {
 	if dense {
 		data, err := denseGroundLevel()
 		if err != nil {
 			return nil, err
 		}
-		source = bytes.NewReader(data)
-	}
-	layout, err := courtyardlevel.Decode(source)
-	if err != nil {
-		return nil, err
+		layout, err = courtyardlevel.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
 	}
 	return func() engine.Scene {
 		return &groundBenchmark{&authoredCourtyard{layout: layout}, tiles}

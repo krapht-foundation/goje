@@ -33,6 +33,12 @@ err := platform.Run(ctx, config, newScene)
 
 Read the result only after `Run` returns. The host does not execute game exporters, record raw input or game data, or transmit a report. The caller owns the finished trace and decides whether to inspect or serialize it. The [reference playground](playground.md#capture-a-local-run) shows how to view a capture on desktop and web.
 
+## Choose a view for the game
+
+The scene runtime and canvas do not require a projection. A 2D game can draw and pick directly in logical pixels. A 2.5D game can keep gameplay on a flat ground plane, project it for presentation, and draw elevated or depth-sorted visuals. The same game can use different views for different scenes.
+
+Goje aims to support games that mix 2D and 2.5D presentation, including the kind of variety seen in *Cult of the Lamb*. The current canvas can draw flat and isometric scenes with sprites. It does not yet provide a general mesh renderer or a ready-made pipeline for 2D characters in 3D environments.
+
 ## Build an isometric world view
 
 `engine.Isometric.Project` maps tile coordinates and elevation to unzoomed projected pixels. Use `engine.Camera.ToLogical` to apply pan and zoom before drawing. For a logical point, `Camera.ToProjected` removes that transform. To find the underlying tile, pass the result to `Isometric.Unproject` with elevation zero.

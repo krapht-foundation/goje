@@ -14,14 +14,11 @@ import (
 )
 
 func runAuthoredSmoke(shortcut bool) error {
-	factory, err := authoredFactory()
+	loaded, err := loadAuthored(authoredFiles)
 	if err != nil {
 		return err
 	}
-	config, err := authoredConfig()
-	if err != nil {
-		return err
-	}
+	config, factory := loaded.config(), loaded.factory()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	groundAccent := color.NRGBA{R: 91, G: 133, B: 114, A: 255}
