@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Goje repository social preview</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; }
+  main {
+    position: relative;
+    box-sizing: border-box;
+    width: 1280px;
+    height: 640px;
+    padding: 104px 80px 80px;
+    overflow: hidden;
+    text-align: center;
+    color: #24262e;
+    background-color: #def4f1;
+    background-image:
+      radial-gradient(ellipse at center, #def4f1 38%, transparent 83%),
+      linear-gradient(#24262e10 1px, transparent 1px),
+      linear-gradient(90deg, #24262e10 1px, transparent 1px);
+    background-size: 100% 100%, 32px 32px, 32px 32px;
+    font-family: Arial, sans-serif;
+  }
+  .frame {
+    position: absolute;
+    inset: 36px;
+    border: 2px solid #24262e26;
+  }
+  .frame::before, .frame::after {
+    position: absolute;
+    content: "";
+    width: 12px;
+    height: 12px;
+    background: #d75449;
+  }
+  .frame::before { top: -2px; left: -2px; }
+  .frame::after { bottom: -2px; right: -2px; }
+  .eyebrow, .targets {
+    margin: 0;
+    color: #365d58;
+    font: 700 22px/1.2 monospace;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+  }
+  img { display: block; width: 864px; height: auto; margin: 4px auto 22px; }
+  .summary { margin: 0 0 24px; font-size: 44px; font-weight: 700; }
+</style>
+<main>
+  <div class="frame" aria-hidden="true"></div>
+  <p class="eyebrow">Game framework + toolchain</p>
+  <img src="goje.svg" width="380" height="125" alt="Goje">
+  <p class="summary">Build 2D &amp; 2.5D games in Go.</p>
+  <p class="targets">Desktop · Web</p>
+</main>
+</html>

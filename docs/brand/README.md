@@ -22,3 +22,7 @@ PLAYWRIGHT_BROWSERS_PATH="$PWD/.build/playwright" node scripts/generate-brand-ic
 ```
 
 The icon assets do not add Android or iOS runtime targets to Goje.
+
+## GitHub social preview
+
+Upload [`social-preview.png`](social-preview.png) under **Settings → General → Social preview**. The image is 1280 × 640 px, with the logo and text inside the template's safe area. To update it, edit [`social-preview.html`](social-preview.html) and capture it in a 1280 × 640 browser viewport at 1× scale.
