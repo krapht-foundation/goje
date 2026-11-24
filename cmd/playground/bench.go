@@ -96,10 +96,18 @@ func runBenchmark() error {
 		if loadErr != nil {
 			return loadErr
 		}
-		factory, err = groundBenchmarkFactory(loaded.layout, sprites != 0, mode == "on")
+		factory, err = groundBenchmarkFactory(loaded, sprites != 0, mode == "on")
 		if err != nil {
 			return err
 		}
+		config = loaded.config()
+	case "sprite":
+		loaded, loadErr := loadAuthored(authoredFiles)
+		if loadErr != nil {
+			return loadErr
+		}
+		worldItems = max(1, sprites)
+		factory = spriteBenchmarkFactory(loaded, worldItems, mode == "on")
 		config = loaded.config()
 	default:
 		return fmt.Errorf("unknown benchmark fixture: %q", fixture)
@@ -109,8 +117,8 @@ func runBenchmark() error {
 	// suspended window or tab, rather than producing incomplete timing data.
 	ctx, cancel := context.WithTimeout(context.Background(), benchTimeout)
 	defer cancel()
-	sampler := driver.StartBenchmark(cancel)
-	if fixture != "ground" && mode == "on" {
+	sampler := driver.StartBenchmark(cancel, fixture == "sprite")
+	if (fixture == "pickup" || fixture == "courtyard") && mode == "on" {
 		config.Diagnostics = &platform.Diagnostics{TraceCapacity: benchTraceCapacity}
 	}
 	if runErr := platform.Run(ctx, config, factory); runErr != nil {

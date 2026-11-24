@@ -33,11 +33,11 @@ func benchmarkGroundAdvance(b *testing.B, dense, tiles bool) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	factory, err := groundBenchmarkFactory(loaded.layout, dense, tiles)
+	factory, err := groundBenchmarkFactory(loaded, dense, tiles)
 	if err != nil {
 		b.Fatal(err)
 	}
-	atlas := driver.Config{ImageSize: groundRegion.Union(markerRegion).Size()}
+	atlas := driver.Config{ImageSize: loaded.atlas.Bounds().Size()}
 	session, err := driver.Start(b.Context(), factory, atlas)
 	if err != nil {
 		b.Fatal(err)

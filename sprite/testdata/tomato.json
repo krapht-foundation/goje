@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "clips": [
+    {
+      "name": "idle",
+      "frames": [
+        { "x": 0, "y": 0, "width": 24, "height": 20, "pivotX": 12, "pivotY": 20, "ticks": 114 },
+        { "x": 24, "y": 0, "width": 24, "height": 20, "pivotX": 12, "pivotY": 20, "ticks": 6 }
+      ]
+    },
+    {
+      "name": "move",
+      "frames": [
+        { "x": 48, "y": 2, "width": 26, "height": 18, "pivotX": 13, "pivotY": 18, "ticks": 4 },
+        { "x": 74, "y": 0, "width": 24, "height": 24, "pivotX": 12, "pivotY": 24, "ticks": 8 },
+        { "x": 0, "y": 0, "width": 24, "height": 20, "pivotX": 12, "pivotY": 20, "ticks": 4 }
+      ]
+    }
+  ]
+}

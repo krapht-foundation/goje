@@ -5,6 +5,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"slices"
 	"time"
 )
@@ -29,6 +30,8 @@ type Benchmark struct {
 	dropped      int64
 	vertexBytes  int
 	upload       time.Duration
+	trackAllocs  bool
+	allocs       benchmarkAllocations
 	ticks        [benchmarkTickSamples]time.Duration
 	frames       [benchmarkMeasuredFrames]time.Duration
 	intervals    [benchmarkMeasuredFrames]time.Duration
@@ -38,8 +41,8 @@ var activeBenchmark *Benchmark
 
 // StartBenchmark installs the sampler before starting the only graphical host
 // in the process. It cancels the host after the last sampled submission.
-func StartBenchmark(cancel context.CancelFunc) *Benchmark {
-	b := &Benchmark{cancel: cancel}
+func StartBenchmark(cancel context.CancelFunc, trackAllocations bool) *Benchmark {
+	b := &Benchmark{cancel: cancel, trackAllocs: trackAllocations}
 	activeBenchmark = b
 	return b
 }
@@ -50,8 +53,13 @@ func BenchKeepActive() bool { return activeBenchmark != nil }
 
 // BenchFrameStart marks the start of CPU work after the host wakes for a frame.
 func BenchFrameStart() time.Time {
-	if activeBenchmark == nil {
+	b := activeBenchmark
+	if b == nil {
 		return time.Time{}
+	}
+	// Sample before the first measured frame's clock starts, not within its CPU time.
+	if b.trackAllocs && b.framesSeen == benchmarkWarmupFrames {
+		b.allocs = readBenchmarkAllocations()
 	}
 	return time.Now()
 }
@@ -74,6 +82,11 @@ func BenchFrameEnd(start time.Time, vertexBytes int) {
 	b.lastStart = start
 	b.framesSeen++
 	if b.framesSeen == benchmarkTotalFrames {
+		if b.trackAllocs {
+			end := readBenchmarkAllocations()
+			b.allocs.Objects = end.Objects - b.allocs.Objects
+			b.allocs.Bytes = end.Bytes - b.allocs.Bytes
+		}
 		b.cancel()
 	}
 }
@@ -139,6 +152,20 @@ type BenchmarkReport struct {
 	TextureUploadNS    int64           `json:"texture_upload_ns"`
 	TickSampleOverflow int             `json:"tick_sample_overflow"`
 	Clock              BenchmarkClock  `json:"clock"`
+
+	GoAllocations *benchmarkAllocations `json:"go_allocations,omitempty"`
+}
+
+// benchmarkAllocations counts cumulative Go heap allocations, not JavaScript or GPU memory.
+type benchmarkAllocations struct {
+	Objects uint64 `json:"objects"`
+	Bytes   uint64 `json:"bytes"`
+}
+
+func readBenchmarkAllocations() benchmarkAllocations {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return benchmarkAllocations{Objects: stats.Mallocs, Bytes: stats.TotalAlloc}
 }
 
 // BenchmarkTiming contains nearest-rank percentiles in nanoseconds. ZeroSamples
@@ -169,6 +196,10 @@ func (b *Benchmark) Report() (BenchmarkReport, error) {
 			b.framesSeen, benchmarkTotalFrames, b.tickCount,
 		)
 	}
+	var allocs *benchmarkAllocations
+	if b.trackAllocs {
+		allocs = &b.allocs
+	}
 	return BenchmarkReport{
 		WarmupFrames:       benchmarkWarmupFrames,
 		Tick:               summarizeBenchmarkTimings(b.ticks[:b.tickCount]),
@@ -179,6 +210,7 @@ func (b *Benchmark) Report() (BenchmarkReport, error) {
 		PeakVertexBytes:    b.vertexBytes,
 		TextureUploadNS:    b.upload.Nanoseconds(),
 		TickSampleOverflow: b.tickOverflow,
+		GoAllocations:      allocs,
 		Clock:              probeBenchmarkClock(),
 	}, nil
 }

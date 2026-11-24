@@ -32,7 +32,7 @@
       const diagnosticRun = query.get("diagnostics") === "1";
       const benchmark = query.get("bench");
       const requestedFixture = query.get("fixture");
-      const fixture = ["courtyard", "ground"].includes(requestedFixture) ? requestedFixture : "pickup";
+      const fixture = ["courtyard", "ground", "sprite"].includes(requestedFixture) ? requestedFixture : "pickup";
       const controls = document.querySelector("#controls");
       if (query.get("fixture") === "pickup" || ((benchmark === "off" || benchmark === "on") && fixture === "pickup")) {
         go.env.GOJE_PLAYGROUND = "pickup";

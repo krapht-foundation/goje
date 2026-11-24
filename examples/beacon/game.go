@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"io/fs"
 	"log"
 
@@ -14,17 +15,25 @@ import (
 	"github.com/krapht-foundation/goje/level"
 	"github.com/krapht-foundation/goje/platform"
 	"github.com/krapht-foundation/goje/project"
+	"github.com/krapht-foundation/goje/sprite"
 )
 
 //go:embed assets
 var files embed.FS
 
 const (
-	width  = 160
-	height = 96
-	cell   = 32
-	left   = 16
-	top    = 16
+	width   = 160
+	height  = 128
+	cell    = 32
+	left    = 16
+	top     = 16
+	columns = 4
+	rows    = 2
+	// The tomato walks in a clear lane below the board, so it needs no collision rules.
+	// Its anchor is the bottom center of the sprite; bounds keep every frame inside the lane.
+	laneLeft, laneRight = left + 16, width - left - 16
+	laneTop, laneBottom = top + rows*cell + 24, height - 8
+	startX, startY      = laneLeft, 112
 )
 
 var (
@@ -55,7 +64,7 @@ func launch(root fs.FS) (platform.Config, func() *scene, error) {
 		return platform.Config{}, nil, err
 	}
 	w, h := loaded.Level.Size()
-	if w > (width-2*left)/cell || h > (height-2*top)/cell {
+	if w > columns || h > rows {
 		return platform.Config{}, nil, fmt.Errorf(
 			"board %d × %d does not fit the beacon viewport",
 			w,
@@ -72,38 +81,106 @@ func launch(root fs.FS) (platform.Config, func() *scene, error) {
 	if beacon.ID == 0 {
 		return platform.Config{}, nil, errors.New("the beacon game requires a beacon placement")
 	}
+	sheet, err := decodeTomato(root)
+	if err != nil {
+		return platform.Config{}, nil, fmt.Errorf("tomato sprite: %w", err)
+	}
+	idle, idleOK := sheet.Clip("idle")
+	move, moveOK := sheet.Clip("move")
+	if !idleOK || !moveOK {
+		return platform.Config{}, nil, errors.New("tomato sprite needs idle and move clips")
+	}
+	// Pack the ground tile and the sheet below it into the single launch image.
+	ground := loaded.Ground.Bounds()
+	pixels := sheet.Image().Bounds()
+	offset := image.Pt(0, ground.Dy())
+	atlas := image.NewNRGBA(image.Rect(0, 0, max(ground.Dx(), pixels.Dx()), offset.Y+pixels.Dy()))
+	source := image.Rectangle{Max: ground.Size()}
+	draw.Draw(atlas, source, loaded.Ground, ground.Min, draw.Src)
+	draw.Draw(atlas, image.Rectangle{Min: offset, Max: offset.Add(pixels.Size())}, sheet.Image(),
+		pixels.Min, draw.Src)
+	idle, move = idle.InAtlas(offset), move.InAtlas(offset)
 	board := loaded.Level
-	source := image.Rectangle{Max: loaded.Ground.Bounds().Size()}
-	// Capture startup data, not the filesystem. Every restart gets an unlit beacon.
-	factory := func() *scene { return &scene{board: board, source: source, beacon: beacon} }
+	// Capture startup data, not the filesystem. Every restart gets an unlit
+	// beacon and an idle tomato at the lane start.
+	factory := func() *scene {
+		return &scene{
+			board: board, source: source, beacon: beacon,
+			idle: idle, move: move, x: startX, y: startY,
+		}
+	}
 	config := platform.Config{
-		Title: "Goje Beacon · Click the beacon or press Space · R to reset",
-		Width: width, Height: height, Image: loaded.Ground,
+		Title: "Goje Beacon · Click the beacon or press Space · Arrows / WASD: move · R: reset",
+		Width: width, Height: height, Image: atlas,
 	}
 	return config, factory, nil
 }
 
-type scene struct {
-	board  level.Board
-	source image.Rectangle
-	beacon level.Placement
-	on     bool
+func decodeTomato(root fs.FS) (_ *sprite.Sheet, err error) {
+	pixels, err := root.Open("tomato.png")
+	if err != nil {
+		return nil, fmt.Errorf("open tomato PNG: %w", err)
+	}
+	defer func() { err = errors.Join(err, pixels.Close()) }()
+	clips, err := root.Open("tomato.json")
+	if err != nil {
+		return nil, fmt.Errorf("open tomato clips: %w", err)
+	}
+	defer func() { err = errors.Join(err, clips.Close()) }()
+	return sprite.Decode(pixels, clips)
 }
 
-func (*scene) Enter() error { return nil }
-func (*scene) Exit()        {}
+type scene struct {
+	board      level.Board
+	source     image.Rectangle
+	beacon     level.Placement
+	on         bool
+	idle, move sprite.Clip
+	player     sprite.Player
+	x, y       int
+}
+
+func (s *scene) Enter() error {
+	s.player.Step(s.idle)
+	return nil
+}
+
+func (*scene) Exit() {}
 
 func (s *scene) Update(tick engine.Tick) (engine.Transition, error) {
-	if tick.Input.Pressed.Has(engine.KeyR) {
+	input := tick.Input
+	if input.Pressed.Has(engine.KeyR) {
 		return engine.Restart(), nil
 	}
-	press := tick.Input.PrimaryPress
+	press := input.PrimaryPress
 	x, y := float64(left+s.beacon.X*cell), float64(top+s.beacon.Y*cell)
 	clicked := press.Valid && press.X >= x && press.X < x+cell && press.Y >= y && press.Y < y+cell
-	if clicked || tick.Input.Pressed.Has(engine.KeySpace) {
+	if clicked || input.Pressed.Has(engine.KeySpace) {
 		s.on = !s.on
 	}
+	tomatoX := min(laneRight, max(laneLeft,
+		s.x+axis(input.Held, engine.KeyArrowLeft|engine.KeyA, engine.KeyArrowRight|engine.KeyD)))
+	tomatoY := min(laneBottom, max(laneTop,
+		s.y+axis(input.Held, engine.KeyArrowUp|engine.KeyW, engine.KeyArrowDown|engine.KeyS)))
+	// Hop only while actually moving; pushing against the lane edge is idle.
+	if tomatoX != s.x || tomatoY != s.y {
+		s.x, s.y = tomatoX, tomatoY
+		s.player.Step(s.move)
+	} else {
+		s.player.Step(s.idle)
+	}
 	return engine.Transition{}, nil
+}
+
+func axis(held, negative, positive engine.Keys) int {
+	value := 0
+	if held&negative != 0 {
+		value--
+	}
+	if held&positive != 0 {
+		value++
+	}
+	return value
 }
 
 func (s *scene) Draw(canvas engine.Canvas) {
@@ -126,4 +203,7 @@ func (s *scene) Draw(canvas engine.Canvas) {
 	}
 	x, y := float32(left+s.beacon.X*cell), float32(top+s.beacon.Y*cell)
 	canvas.Rect(x+10, y+10, 12, 12, tint)
+	frame, _ := s.player.Frame()
+	tomatoX, tomatoY, tomatoW, tomatoH := frame.Destination(float32(s.x), float32(s.y), 1)
+	canvas.Image(frame.Source, tomatoX, tomatoY, tomatoW, tomatoH)
 }

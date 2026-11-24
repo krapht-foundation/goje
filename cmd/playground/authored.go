@@ -2,9 +2,11 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"io/fs"
 
 	"github.com/krapht-foundation/goje/engine"
@@ -12,9 +14,10 @@ import (
 	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
 	"github.com/krapht-foundation/goje/platform"
 	projectdata "github.com/krapht-foundation/goje/project"
+	"github.com/krapht-foundation/goje/sprite"
 )
 
-//go:embed goje.json levels/*.json art/*.png
+//go:embed goje.json levels/*.json art/*.png art/tomato.json
 var authoredFiles embed.FS
 
 const scoutEdgeTicks = 16
@@ -24,24 +27,27 @@ var destinationColor = color.NRGBA{R: 116, G: 246, B: 144, A: 255}
 // authoredCourtyard keeps the integer route and substep separate from the
 // presentation list. Camera and canvas changes cannot affect that movement.
 type authoredCourtyard struct {
-	layout    courtyardlevel.Layout
-	router    *grid.Router
-	camera    engine.Camera
-	items     []engine.WorldItem
-	ground    []point // Cell centers in projected pixels, independent of the camera.
-	route     []grid.Cell
-	cell      grid.Cell // Last center reached; route[next] is the active edge's endpoint.
-	next      int
-	substep   int
-	zoomLevel int
-	selected  bool
+	layout     courtyardlevel.Layout
+	idle, move sprite.Clip
+	player     sprite.Player
+	router     *grid.Router
+	camera     engine.Camera
+	items      []engine.WorldItem
+	ground     []point // Cell centers in projected pixels, independent of the camera.
+	route      []grid.Cell
+	cell       grid.Cell // Last center reached; route[next] is the active edge's endpoint.
+	next       int
+	substep    int
+	zoomLevel  int
+	selected   bool
 
 	cameraHomeX, cameraHomeY float64
 }
 
 type authoredProject struct {
-	layout courtyardlevel.Layout
-	ground image.Image
+	layout     courtyardlevel.Layout
+	atlas      image.Image
+	idle, move sprite.Clip
 }
 
 // Load the manifest once, then apply courtyard rules before opening a host.
@@ -54,19 +60,63 @@ func loadAuthored(root fs.FS) (authoredProject, error) {
 	if err != nil {
 		return authoredProject{}, fmt.Errorf("resolve courtyard placements: %w", err)
 	}
-	return authoredProject{layout: layout, ground: loaded.Ground}, nil
+	sheet, err := decodeScout(root)
+	if err != nil {
+		return authoredProject{}, fmt.Errorf("load scout sprite: %w", err)
+	}
+	idle, idleOK := sheet.Clip("idle")
+	move, moveOK := sheet.Clip("move")
+	if !idleOK || !moveOK {
+		return authoredProject{}, errors.New("scout sprite must have idle and move clips")
+	}
+	atlas, offset := packCourtyardAtlas(loaded.Ground, sheet.Image())
+	return authoredProject{
+		layout: layout,
+		atlas:  atlas,
+		idle:   idle.InAtlas(offset),
+		move:   move.InAtlas(offset),
+	}, nil
 }
 
-// Restart captures only the validated layout; the host retains the packed atlas.
+func packCourtyardAtlas(ground, pixels image.Image) (*image.NRGBA, image.Point) {
+	// Keep the tile's source region unchanged and leave a transparent column
+	// between the tile and the sprite sheet.
+	offset := image.Pt(groundRegion.Max.X+1, 0)
+	bounds := pixels.Bounds()
+	region := image.Rectangle{Min: offset, Max: offset.Add(bounds.Size())}
+	atlas := image.NewNRGBA(image.Rectangle{Max: groundRegion.Union(region).Max})
+	draw.Draw(atlas, groundRegion, ground, ground.Bounds().Min, draw.Src)
+	draw.Draw(atlas, region, pixels, bounds.Min, draw.Src)
+	return atlas, offset
+}
+
+func decodeScout(root fs.FS) (_ *sprite.Sheet, err error) {
+	pixels, err := root.Open("art/tomato.png")
+	if err != nil {
+		return nil, fmt.Errorf("open tomato PNG: %w", err)
+	}
+	defer func() { err = errors.Join(err, pixels.Close()) }()
+	clips, err := root.Open("art/tomato.json")
+	if err != nil {
+		return nil, fmt.Errorf("open tomato clips: %w", err)
+	}
+	defer func() { err = errors.Join(err, clips.Close()) }()
+	return sprite.Decode(pixels, clips)
+}
+
+// Restart captures the validated layout and clips, not the filesystem or atlas.
 func (p authoredProject) factory() engine.SceneFactory {
-	layout := p.layout
-	return func() engine.Scene { return &authoredCourtyard{layout: layout} }
+	layout, idle, move := p.layout, p.idle, p.move
+	return func() engine.Scene { return &authoredCourtyard{layout: layout, idle: idle, move: move} }
 }
 
 func (p authoredProject) config() platform.Config {
-	config := playgroundConfig(p.ground)
-	config.Title = "Goje Courtyard · Left click: select · Right click: move · Arrows: pan · W/S: zoom · R: reset"
-	return config
+	return platform.Config{
+		Title:  "Goje Courtyard · Left click: select · Right click: move · Arrows: pan · W/S: zoom · R: reset",
+		Width:  width,
+		Height: height,
+		Image:  p.atlas,
+	}
 }
 
 func (s *authoredCourtyard) Enter() error {
@@ -85,11 +135,12 @@ func (s *authoredCourtyard) Enter() error {
 	}
 	scout, lookout := s.layout.Scout, s.layout.Lookout
 	s.cell = grid.Cell{X: scout.X, Y: scout.Y}
+	s.player.Step(s.idle)
 	s.items = append(s.items,
 		engine.WorldItem{
 			ID: uint64(scout.ID), GroundX: float64(scout.X) + 0.5, GroundY: float64(scout.Y) + 0.5,
 			Elevation: 12, Hit: engine.HitSelect,
-			HitBounds: engine.HitRect{Left: -6, Top: -7, Right: 6, Bottom: 5},
+			HitBounds: engine.HitRect{Left: -10, Top: -7, Right: 10, Bottom: 12},
 		},
 		engine.WorldItem{
 			ID: uint64(lookout.ID), GroundX: float64(lookout.X) + 0.5, GroundY: float64(lookout.Y) + 0.5,
@@ -139,6 +190,11 @@ func (s *authoredCourtyard) Update(tick engine.Tick) (engine.Transition, error) 
 		}
 	}
 	moveCourtyardCamera(&s.camera, &s.zoomLevel, input, s.cameraHomeX, s.cameraHomeY)
+	clip := s.idle
+	if s.next < len(s.route) {
+		clip = s.move
+	}
+	s.player.Step(clip)
 	s.advance()
 	return engine.Transition{}, nil
 }
@@ -191,13 +247,8 @@ func (s *authoredCourtyard) advance() {
 }
 
 func (s *authoredCourtyard) Draw(canvas engine.Canvas) {
-	canvas.Clear(color.NRGBA{R: 20, G: 28, B: 41, A: 255})
 	zoom := float32(s.camera.Zoom)
-	for _, tile := range s.ground {
-		x, y := s.camera.ToLogical(tile.x, tile.y)
-		canvas.Image(groundRegion, float32(x)-16*zoom, float32(y)-8*zoom, 32*zoom, 16*zoom)
-	}
-	s.drawGrid(canvas)
+	s.drawGround(canvas, zoom)
 	if s.next < len(s.route) {
 		goal := s.route[len(s.route)-1]
 		px, py := courtyardProjection.Project(float64(goal.X)+0.5, float64(goal.Y)+0.5, 0)
@@ -208,12 +259,19 @@ func (s *authoredCourtyard) Draw(canvas engine.Canvas) {
 	for _, item := range s.items {
 		x, y := s.camera.ToLogical(item.ProjectedAnchor(courtyardProjection))
 		bounds := item.HitBounds
+		if item.ID == uint64(s.layout.Scout.ID) {
+			if frame, ok := s.player.Frame(); ok {
+				// Picking keeps its elevated anchor. The artwork stands at ground level.
+				groundY := float32(y) + float32(item.Elevation)*zoom
+				sx, sy, sw, sh := frame.Destination(float32(x), groundY, 0.75*zoom)
+				canvas.Image(frame.Source, sx, sy, sw, sh)
+			}
+			markerX, markerY = float32(x), float32(y)+float32(bounds.Top)*zoom
+			continue
+		}
 		left, top := float32(x)+float32(bounds.Left)*zoom, float32(y)+float32(bounds.Top)*zoom
 		w, h := float32(bounds.Right-bounds.Left)*zoom, float32(bounds.Bottom-bounds.Top)*zoom
 		switch item.ID {
-		case uint64(s.layout.Scout.ID):
-			canvas.Image(markerRegion, left, top, w, h)
-			markerX, markerY = float32(x), top
 		case uint64(s.layout.Lookout.ID):
 			canvas.Rect(left, top, w, h, tokenColor)
 		default:
@@ -223,6 +281,15 @@ func (s *authoredCourtyard) Draw(canvas engine.Canvas) {
 	if s.selected {
 		canvas.Rect(markerX-4*zoom, markerY-5*zoom, 8*zoom, 3*zoom, selectionColor)
 	}
+}
+
+func (s *authoredCourtyard) drawGround(canvas engine.Canvas, zoom float32) {
+	canvas.Clear(color.NRGBA{R: 20, G: 28, B: 41, A: 255})
+	for _, tile := range s.ground {
+		x, y := s.camera.ToLogical(tile.x, tile.y)
+		canvas.Image(groundRegion, float32(x)-16*zoom, float32(y)-8*zoom, 32*zoom, 16*zoom)
+	}
+	s.drawGrid(canvas)
 }
 
 func (s *authoredCourtyard) drawGrid(canvas engine.Canvas) {

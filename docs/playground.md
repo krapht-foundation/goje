@@ -2,7 +2,7 @@
 
 This repository includes a reference playground built on Goje's public scene runtime and graphical hosts. It is both a runnable example and a smoke fixture for desktop and web. You do not need to ship this command with your game.
 
-The playground opens the authored isometric courtyard. **Left-click** the amber scout to select it, then **right-click** a ground tile on the other side of the wall. The yellow bar shows selection; a green marker shows the accepted destination. The scout follows the shortest walkable route and the marker disappears on arrival. Walls and the cyan lookout block movement. An invalid command leaves the current route intact.
+The playground opens the authored isometric courtyard. **Left-click** the tomato scout to select it, then **right-click** a ground tile on the other side of the wall. The yellow bar shows selection; a green marker shows the accepted destination. The scout blinks while idle and hops along the shortest walkable route. The marker disappears on arrival. Walls and the cyan lookout block movement. An invalid command leaves the current route intact.
 
 Use the arrow keys to pan and **W/S** to zoom around the view center. **R** restores the authored spawns, camera, and empty selection. In the browser, click the canvas to focus it. See the [level authoring guide](levels.md) to edit the courtyard and play the result.
 
@@ -26,7 +26,7 @@ The M2 patrol remains available through `GOJE_PLAYGROUND=courtyard make run-desk
 
 ## Use the playground in your game
 
-The [Beacon example](../examples/beacon/game.go) is a small, top-down 2D game built on the public `project`, `level`, `engine`, and `platform` packages. It owns its layout, rendering, and input rules, and it does not import the reference courtyard. Try the included project with `go run ./examples/beacon`.
+The [Beacon example](../examples/beacon/game.go) is a small, top-down 2D game built on the public `project`, `level`, `engine`, `platform`, and `sprite` packages. It owns its layout, rendering, and input rules, and it does not import the reference courtyard. Try the included project with `go run ./examples/beacon`.
 
 To start a separate module, run these commands from the Goje checkout:
 
@@ -45,7 +45,7 @@ go mod tidy
 go run .
 ```
 
-The local `replace` selects the unreleased Goje revision. Use a published version without `replace` once one is available. Click the beacon or press **Space** to toggle it, and press **R** to reset. The game validates the placement once before opening a window and recreates only scene state on reset.
+The local `replace` selects the unreleased Goje revision. Use a published version without `replace` once one is available. Click the beacon or press **Space** to toggle it. Use the arrow keys or **WASD** to move the tomato in the lane below the board, and press **R** to reset both. The game validates the placement and loads the atlas before opening a window. Reset recreates only scene state.
 
 To use your own assets, open `assets/arena.json` in Level Builder and move the `beacon` to another walkable cell. Save the export as `assets/arena.json` in your module. Use the Tile Maker to draw a PNG and save it as `assets/floor.png`. You can rename either file if you update [`assets/goje.json`](../examples/beacon/assets/goje.json). The example requires exactly one `beacon` and a board of at most 4 × 2 cells. Validate the pair before rebuilding:
 
@@ -63,7 +63,9 @@ node "$goje_root/scripts/playground-server.mjs" 8080 "$PWD/web"
 
 Open `http://127.0.0.1:8080/` and click the canvas to focus it. Both builds embed the same project.
 
-From the Goje checkout, `make setup-web` and `make smoke-beacon` automate the author-to-play workflow using exact editor downloads and a separate Go module. On headless Linux with the native graphics dependencies, use `xvfb-run -a make smoke-beacon`.
+From the Goje checkout, `make setup-web` and `make smoke-beacon` automate the author-to-play workflow using exact editor downloads. The smoke builds Beacon from a separate Go module and checks rendered pixels for the edited board, blink, hop, toggle, and reset. On headless Linux with the native graphics dependencies, use `xvfb-run -a make smoke-beacon`.
+
+Both examples embed the same [tomato sheet and clips](../specs/sprite-sheet-v1.md#loading-and-ownership). To use different art, run `go run ./cmd/spritecheck SHEET.png CLIPS.json`, then replace `tomato.png` and `tomato.json` under `cmd/playground/art/` or Beacon's `assets/` directory. The games expect `idle` and `move` clips. No `goje.json` change is needed.
 
 ## Draw a ground tile in the browser
 
@@ -99,6 +101,6 @@ make setup-web
 make smoke-web
 ```
 
-`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check scripts input snapshots and reads the OpenGL back buffer. The Chromium check uses real keyboard and mouse input and canvas screenshots. Both check the authored scout's selection, detour, arrival, and reset alongside the earlier patrol and pickup fixtures. `make check-example` builds the command from an independent module for the host and for WebAssembly.
+`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check scripts input snapshots and reads the OpenGL back buffer. The Chromium check uses real keyboard and mouse input and canvas screenshots. Both check the authored scout's blink, hop, ground pivot under zoom, wall occlusion, selection, detour, arrival, and reset alongside the earlier patrol and pickup fixtures. `make check-example` builds the command from an independent module for the host and for WebAssembly.
 
 The native smoke fixture is intended for macOS and Linux with X11, including Xvfb; the browser fixture uses Chromium with WebGL 2. Neither smoke check certifies GPU performance or every platform or browser. `make setup-web` installs its Chromium headless shell into `.build/playwright/`, separate from any user-wide cache. See the [playground specification](../specs/playground.md) for acceptance criteria.

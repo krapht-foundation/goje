@@ -17,6 +17,23 @@ Call `platform.Run(ctx, config, factory)` from `main`, importing `github.com/kra
 - **Desktop:** Build and run the game with CGO on macOS or Linux. macOS requires the Xcode Command Line Tools. Linux requires X11 and OpenGL build headers and runtime libraries. See the [feasibility report](../rfcs/0002-graphics-feasibility.md#build-and-distribution-notes) for the tested package list. Call `Run` in the main goroutine because GLFW requires the startup thread.
 - **Browser:** Build the same Go command with `GOOS=js GOARCH=wasm`. Serve it over HTTP as `application/wasm` with the matching `wasm_exec.js` and Go bootstrap. Include `<canvas id="goje" tabindex="0"></canvas>` in the page and give it the intended CSS display size. Focus the canvas to use the arrow keys or WASD and R. The host scales the drawing buffer for the device pixel ratio and stops with an error if WebGL 2 is unavailable or the context is lost.
 
+## Play an animated sprite
+
+Load the PNG and clip JSON with [`sprite.Decode`](../specs/sprite-sheet-v1.md) before launching the host. Copy the sheet into the game's launch image. Resolve each clip name once, check that it exists, then call `clip.InAtlas(offset)` with the sheet's upper-left position in that image. Share the returned clips across actors.
+
+Give each actor a `sprite.Player`. Select the initial clip with `player.Step(idle)` in `Enter`. In each `Update`, call `player.Step` once with the clip the game chose for that tick. Changing clips starts at the first frame; passing the same clip advances it. Restart creates a fresh player, not a new sheet or launch image.
+
+In `Draw`, read `player.Frame()` and skip the sprite if no frame is selected. Align the frame with the actor's logical anchor and pass the resulting rectangle to the existing canvas:
+
+```go
+if frame, ok := player.Frame(); ok {
+    x, y, width, height := frame.Destination(anchorX, anchorY, scale)
+    canvas.Image(frame.Source, x, y, width, height)
+}
+```
+
+Use `scale = 1` for unscaled sprites or the camera zoom for a projected anchor. Keep the actor's ground sort key and hit rectangle independent of the frame's bounds and pivot.
+
 ## Inspect a local run
 
 Give `platform.Config.Logger` your own `*slog.Logger` to receive host startup, shutdown, suspension and resumption, and scene transition events. Goje does not replace the process logger or log every tick. Fatal errors still return to the caller.
@@ -68,3 +85,5 @@ See the [M1 performance baseline](runtime-baseline.md) for the measured cost of 
 See the [M2 world-view measurements](world-view-performance.md) for ordering and hit-query costs, the courtyard density comparison, and the pickup rerun against M1.
 
 See the [M5 ground-art measurements](ground-art-performance.md) for PNG startup cost, warmed allocations, and submission costs on a courtyard and a dense board.
+
+See the [M8 sprite measurements](sprite-performance.md) for sprite import, atlas packing, and the fixed-frame versus animated comparison.

@@ -172,10 +172,11 @@ async function smokeCourtyard(browser, url) {
 async function smokeAuthored(browser, url, shortcut) {
   const page = await browser.newPage({ viewport: { width: 880, height: 400 }, deviceScaleFactor: 2 });
   try {
-    if (shortcut) await page.clock.install();
+    await page.clock.install();
     await page.goto(url, { timeout: 15_000 });
     const canvas = page.locator("#goje");
-    const amber = [248, 164, 76], wall = [148, 122, 105], selected = [255, 235, 87];
+    const tomato = [215, 84, 73], ink = [36, 38, 46], eye = [244, 241, 235];
+    const wall = [148, 122, 105], selected = [255, 235, 87];
     const destination = [116, 246, 144];
     const lookout = [92, 220, 210];
     // Match the highlight drawn through the Tile Maker in the round-trip smoke.
@@ -200,14 +201,17 @@ async function smokeAuthored(browser, url, shortcut) {
         !matches(frame, 192, 114, lookout)
       : matches(frame, 176, 80, wall);
     await waitCourtyard(canvas, "authored spawn", frame =>
-      matches(frame, 144, 64, amber) && layoutMatches(frame) &&
+      matches(frame, 144, 71, tomato) && matches(frame, 139, 70, eye) && layoutMatches(frame) &&
       matches(frame, 141, 41, ground) && matches(frame, 130, 38, background) &&
       matches(frame, 152, 40, grid));
+    await waitCourtyard(canvas, "idle scout blinks", frame =>
+      matches(frame, 139, 70, ink) && matches(frame, 144, 71, tomato));
     // The topmost tile's asymmetric highlight follows the grid while its corners stay clear.
     await page.keyboard.press("w", { delay: 100 });
-    await waitCourtyard(canvas, "ground art under zoom", frame =>
+    await waitCourtyard(canvas, "ground art and planted scout pivot under zoom", frame =>
       matches(frame, 136, 26, ground) && matches(frame, 122, 22, background) &&
-      matches(frame, 150, 25, grid));
+      matches(frame, 150, 25, grid) && matches(frame, 140, 64, tomato) &&
+      matches(frame, 140, 69, ink) && !matches(frame, 140, 70, ink));
     await page.keyboard.press("r", { delay: 100 });
     await waitCourtyard(canvas, "authored camera reset", frame => matches(frame, 141, 41, ground));
     // Observe the real canvas event after its host listener, then separately
@@ -220,48 +224,60 @@ async function smokeAuthored(browser, url, shortcut) {
         if (event.target === document.querySelector("#goje")) window.recordContextMenu(event.defaultPrevented);
       });
     });
-    if (shortcut) {
-      // Pause while the scout is idle. Stepping animation time keeps PNG capture
-      // and runner scheduling from consuming the brief crossing window.
-      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
-    }
+    // Preserve short-lived poses while capturing the canvas on a slow runner.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
     // A press while the other button is held must still reach the host.
     await page.mouse.move(408, 128);
     await page.mouse.down({ button: "left" });
     await page.mouse.click(536, 216, { button: "right" });
     await page.mouse.up({ button: "left" });
-    if (shortcut) await page.clock.runFor(32);
+    await page.clock.runFor(32);
     await waitCourtyard(canvas, "authored command", frame =>
       spriteCenter(frame, selected) !== null && matches(frame, 208, 108, destination));
-    // At 60 ticks/s and 16 ticks per tile, the opening is two tiles (32 ticks)
-    // from the spawn. Advance to that frame before taking a screenshot.
-    if (shortcut) await page.clock.runFor(500);
-    await waitCourtyard(canvas, shortcut ? "exported shortcut crossing" : "authored wall detour", frame => {
-      const scout = spriteCenter(frame, amber);
-      if (scout === null || !matches(frame, 208, 108, destination)) return false;
-      // Check a band around the opening's projected scout anchor (176, 80).
-      // The original bypass instead goes below logical y=100.
-      return shortcut
-        ? Math.abs(scout.x - (240 + 176 * 4)) <= 28 && Math.abs(scout.y - 80 * 4) <= 20
-        : scout.y > 400;
+    await page.clock.runFor(103);
+    await waitCourtyard(canvas, "moving scout hops above its ground anchor", frame => {
+      for (let tick = 5; tick <= 12; tick++) {
+        const x = 144 + tick, y = 76 + Math.floor(tick / 2);
+        if (matches(frame, x, y - 7, tomato) && matches(frame, x, y - 4, ink) &&
+            !matches(frame, x, y - 2, ink)) return true;
+      }
+      return false;
     });
-    if (shortcut) await page.clock.resume();
+    if (shortcut) {
+      // The opening is two 16-tick tiles from spawn. Stop on the crossing.
+      await page.clock.runFor(397);
+      await waitCourtyard(canvas, "exported shortcut crossing", frame => {
+        const scout = spriteCenter(frame, tomato);
+        return scout !== null && matches(frame, 208, 108, destination) &&
+          Math.abs(scout.x - (240 + 176 * 4)) <= 28 && Math.abs(scout.y - 85 * 4) <= 20;
+      });
+    } else {
+      // At the end of the first edge the wall covers the lower part of the scout.
+      await page.clock.runFor(132);
+      await waitCourtyard(canvas, "wall occludes the moving scout", frame =>
+        matches(frame, 159, 78, tomato) && matches(frame, 160, 81, wall));
+    }
+    await page.clock.resume();
+    if (!shortcut) {
+      await waitCourtyard(canvas, "authored wall detour", frame =>
+        matches(frame, 128, 94, tomato) && matches(frame, 208, 108, destination));
+    }
     assert.deepEqual(contextMenus, [true], "the canvas did not suppress the real context menu");
     assert.ok(await page.evaluate(() => document.body.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     )), "the surrounding page suppressed its context menu");
     await waitCourtyard(canvas, "authored arrival", frame =>
-      matches(frame, 208, 96, amber) && !matches(frame, 208, 108, destination));
+      matches(frame, 208, 103, tomato) && !matches(frame, 208, 108, destination));
     await page.mouse.click(30, 216, { button: "right" });
     for (let i = 0; i < 3; i++) {
       const frame = PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
-      assert.ok(matches(frame, 208, 96, amber) && spriteCenter(frame, destination) === null,
+      assert.ok(matches(frame, 208, 103, tomato) && spriteCenter(frame, destination) === null,
         "a secondary press in the bar should not issue an order");
     }
     await page.keyboard.press("ArrowRight", { delay: 100 });
     await page.keyboard.press("r", { delay: 100 });
     await waitCourtyard(canvas, "authored reset", frame =>
-      matches(frame, 144, 64, amber) && layoutMatches(frame) &&
+      matches(frame, 144, 71, tomato) && matches(frame, 139, 70, eye) && layoutMatches(frame) &&
       matches(frame, 141, 41, ground) &&
       !matches(frame, 144, 53, selected) && !matches(frame, 208, 108, destination));
   } finally {

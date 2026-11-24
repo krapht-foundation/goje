@@ -5,6 +5,7 @@ This specification covers the in-repository reference command and its use of the
 ## Behavior
 
 - The command defaults to the [M3 authored courtyard](unit-commands-m3.md). A primary click selects the scout and a secondary click commands it to a ground tile. Arrow keys pan, **W/S** step through zoom levels, and **R** restores the authored layout, spawns, camera, and empty selection.
+- The authored scout plays the [M8 sprite sheet](sprite-sheet-v1.md): it blinks when stationary and hops on ticks that move it. Its sprite pivot follows the ground position without changing route geometry, paint order, or the selection rectangle from frame to frame. Restart restores the first idle frame without reloading the sheet.
 - The same host launches the M1 pickup encounter with `GOJE_PLAYGROUND=pickup` on desktop or `?fixture=pickup` in the browser. It launches the [M2 patrol](world-view-m2.md) with `GOJE_PLAYGROUND=courtyard` or `?fixture=courtyard`. The patrol starts paused; **Space** toggles it.
 - The encounter runs as an `engine.Scene` through `platform.Run`. Its factory supplies fresh mutable state; the host owns ticking, input, presentation, and the shared image. The scene requests `engine.Restart()` instead of reinitializing the host or maintaining a second reset mechanism.
 - The pickup encounter begins with an amber player marker and a cyan token. Arrow keys or WASD move the marker in screen-relative directions. Moving through the token collects it; **R** restores both to their original positions before movement.

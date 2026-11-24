@@ -135,20 +135,27 @@ smoke-beacon: build-level-editor build-tile-maker ## Author and play an independ
 		mkdir -p "$$tmp/assets" "$$tmp/web"; \
 		cp examples/beacon/*.go "$$tmp/"; \
 		cp examples/beacon/assets/goje.json "$$tmp/assets/"; \
+		for asset in tomato.png tomato.json; do \
+			cmp "sprite/testdata/$$asset" "cmd/playground/art/$$asset"; \
+			cmp "sprite/testdata/$$asset" "examples/beacon/assets/$$asset"; \
+		done; \
+		cp examples/beacon/assets/tomato.png examples/beacon/assets/tomato.json "$$tmp/assets/"; \
 		$(NODE) scripts/smoke-beacon.mjs author "$$tmp/assets"; \
 		$(GO) run ./cmd/projectcheck "$$tmp/assets"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
+		$(GO) build -tags goje_smoke,goje_beacon_smoke -o "$$tmp/beacon-smoke" "$$tmp"; \
+		rm "$$tmp/run_smoke.go"; \
 		cd "$$tmp"; \
 		$(GO) mod init example.com/beacon; \
 		$(GO) mod edit -go="$$go_version" \
 			-require=github.com/krapht-foundation/goje@v0.0.0 \
 			-replace=github.com/krapht-foundation/goje="$(CURDIR)"; \
 		$(GO) mod tidy; \
-		$(GO) build -tags goje_beacon_smoke -o beacon .; \
+		$(GO) build .; \
 		GOOS=js GOARCH=wasm $(GO) build -o web/playground.wasm .; \
 		install -m 0644 "$(CURDIR)/examples/beacon/web/index.html" \
 			"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" web/; \
-		$(PYTHON) -c 'import subprocess; subprocess.run(["./beacon"], check=True, timeout=20)'; \
+		$(PYTHON) -c 'import subprocess; subprocess.run(["./beacon-smoke"], check=True, timeout=20)'; \
 		$(NODE) "$(CURDIR)/scripts/smoke-beacon.mjs" play "$$tmp/web"
 
 check-example: ## Build the reference playground from a separate module on desktop and web

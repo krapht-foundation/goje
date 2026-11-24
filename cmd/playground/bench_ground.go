@@ -15,7 +15,7 @@ const denseGroundCells = 128 * 128
 
 // Both modes use the same board, camera and atlas. Only tile quads differ.
 func groundBenchmarkFactory(
-	layout courtyardlevel.Layout,
+	project authoredProject,
 	dense, tiles bool,
 ) (engine.SceneFactory, error) {
 	if dense {
@@ -23,13 +23,14 @@ func groundBenchmarkFactory(
 		if err != nil {
 			return nil, err
 		}
-		layout, err = courtyardlevel.Decode(bytes.NewReader(data))
+		project.layout, err = courtyardlevel.Decode(bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}
 	}
 	return func() engine.Scene {
-		return &groundBenchmark{&authoredCourtyard{layout: layout}, tiles}
+		scene := &authoredCourtyard{layout: project.layout, idle: project.idle, move: project.move}
+		return &groundBenchmark{scene, tiles}
 	}, nil
 }
 

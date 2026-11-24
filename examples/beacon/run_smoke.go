@@ -1,66 +1,113 @@
-//go:build goje_beacon_smoke
+//go:build goje_beacon_smoke && goje_smoke && cgo && (darwin || linux)
 
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"image"
+	"image/color"
 	"log/slog"
 	"time"
 
 	"github.com/krapht-foundation/goje/engine"
+	"github.com/krapht-foundation/goje/internal/platform/desktop"
 	"github.com/krapht-foundation/goje/platform"
 )
 
-// Run the actual host with repeatable input. The browser smoke additionally
-// checks real device input and presented canvas pixels.
+type smokeStage uint8
+
+const (
+	smokeOpen smokeStage = iota
+	smokeBlink
+	smokeHop
+	smokeToggle
+	smokeReset
+	smokeDone
+)
+
 func run(config platform.Config, factory func() *scene) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
 	defer cancel()
-	var seen smokeProgress
-	capture := &platform.Diagnostics{}
-	config.Diagnostics = capture
-	err := platform.Run(ctx, config, func() engine.Scene {
-		return &smokeScene{scene: factory(), progress: &seen, cancel: cancel}
-	})
-	if err != nil {
-		return fmt.Errorf("run native beacon smoke: %w", err)
+	eye := color.NRGBA{R: 244, G: 241, B: 235, A: 255}
+	red := color.NRGBA{R: 215, G: 84, B: 73, A: 255}
+	ink := color.NRGBA{R: 36, G: 38, B: 46, A: 255}
+	accent := color.NRGBA{R: 68, G: 174, B: 145, A: 255}
+	stage, issued := smokeOpen, false
+	ticks := 0
+	var current *scene
+	// Advance from actual framebuffer pixels, not the state that requested a draw.
+	desktop.FrameProbe = func(viewport image.Rectangle) error {
+		pixel := func(x, y int, want color.NRGBA) bool {
+			return desktop.ProbePixel(viewport, image.Pt(width, height), image.Pt(x, y)) == want
+		}
+		board := func(beacon color.NRGBA) bool {
+			return pixel(64, 32, beacon) && pixel(32, 32, floor) &&
+				pixel(24, 25, accent) && pixel(64, 64, wall)
+		}
+		standing := func(x int) bool {
+			return pixel(x-7, startY-9, eye) && pixel(x, startY-1, ink)
+		}
+		var matched bool
+		switch stage {
+		case smokeOpen:
+			matched = board(dormant) && standing(startX)
+		case smokeBlink:
+			// Wait for the first possible blink instead of stalling on GL readback every idle frame.
+			matched = ticks >= 114 && pixel(startX-7, startY-9, red) && pixel(startX, startY-1, ink)
+		case smokeHop:
+			x := current.x
+			matched = x > startX && pixel(x-7, startY-13, eye) && pixel(x, startY-1, background)
+		case smokeToggle:
+			matched = issued && board(lit)
+		case smokeReset:
+			matched = issued && board(dormant) && standing(startX)
+		case smokeDone:
+		}
+		if matched {
+			stage++
+			issued = false
+			if stage == smokeDone {
+				cancel()
+			}
+		}
+		return nil
 	}
-	if !seen.reset || capture.Result.Frames < 3 {
-		return errors.New("the native host did not present the toggle and reset scenario")
+	defer func() { desktop.FrameProbe = nil }()
+	if err := platform.Run(ctx, config, func() engine.Scene {
+		current = factory()
+		return &smokeScene{Scene: current, input: func() engine.Input {
+			ticks++
+			switch {
+			case stage == smokeHop:
+				return engine.Input{Held: engine.KeyArrowRight}
+			case stage == smokeToggle && !issued:
+				issued = true
+				return engine.Input{Pressed: engine.KeySpace}
+			case stage == smokeReset && !issued:
+				issued = true
+				return engine.Input{Pressed: engine.KeyR}
+			}
+			return engine.Input{}
+		}}
+	}); err != nil {
+		return fmt.Errorf("run native Beacon smoke: %w", err)
 	}
-	slog.Info("Native Beacon smoke passed: authored placement, toggle, reset, and presented frames")
+	if stage != smokeDone {
+		return fmt.Errorf("native Beacon smoke ended at checkpoint %d after %d ticks", stage, ticks)
+	}
+	slog.Info(
+		"Native Beacon smoke passed: editor assets, tomato blink and hop, beacon toggle, and reset",
+	)
 	return nil
 }
 
-type smokeProgress struct{ reset bool }
-
 type smokeScene struct {
-	*scene
-	progress *smokeProgress
-	cancel   context.CancelFunc
+	engine.Scene
+	input func() engine.Input
 }
 
 func (s *smokeScene) Update(tick engine.Tick) (engine.Transition, error) {
-	tick.Input = engine.Input{}
-	if s.beacon.X != 1 || s.beacon.Y != 0 {
-		return engine.Transition{}, errors.New("expected the editor-moved beacon at (1, 0)")
-	}
-	switch tick.Number {
-	case 1:
-		tick.Input.PrimaryPress = engine.MousePress{X: 64, Y: 32, Valid: true}
-	case 15:
-		if !s.on {
-			return engine.Transition{}, errors.New("beacon did not toggle on")
-		}
-		tick.Input.Pressed = engine.KeyR
-	case 30:
-		if s.on {
-			return engine.Transition{}, errors.New("beacon did not reset")
-		}
-		s.progress.reset = true
-		s.cancel()
-	}
-	return s.scene.Update(tick)
+	tick.Input = s.input()
+	return s.Scene.Update(tick)
 }
