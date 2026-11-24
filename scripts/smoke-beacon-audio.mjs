@@ -15,42 +15,51 @@ import { servePlayground } from "./playground-server.mjs";
  * @param {number | null} rate - Sample rate to force on the page's audio context, or null for the device's.
  */
 function tapAudio(rate) {
-  const tap = { context: null, analyser: null, starts: 0, stops: 0, requested: 0, rate: 0, samples: [] };
+  const tap = {
+    context: null, analyser: null, recorder: null, starts: 0, stops: 0, requested: 0, rate: 0, samples: [], pending: [],
+  };
   Object.defineProperty(window, "beaconAudioProbe", { value: tap });
-  if (rate !== null) {
-    // Forcing a rate different from the 48 kHz cue exercises the browser's resampler on every machine.
-    window.AudioContext = class extends AudioContext {
-      /** @param {AudioContextOptions} [options] - Options the game asked for. */
-      constructor(options) {
-        super({ ...options, sampleRate: rate });
-      }
-    };
-  }
   const create = BaseAudioContext.prototype.createBufferSource;
   const connect = AudioNode.prototype.connect;
   const start = AudioBufferSourceNode.prototype.start;
   const stop = AudioBufferSourceNode.prototype.stop;
-  BaseAudioContext.prototype.createBufferSource = function () {
-    const source = create.call(this);
-    if (tap.context !== this) {
+  // The worklet runs on the audio thread and posts every block in order, so a busy page
+  // cannot drop samples the way a main-thread script processor does on a slow runner.
+  const processor = `registerProcessor("goje-tap", class extends AudioWorkletProcessor {
+    process(inputs) {
+      this.port.postMessage(inputs[0][0] ? inputs[0][0].slice() : new Float32Array(128));
+      return true;
+    }
+  });`;
+  const Context = window.AudioContext;
+  window.AudioContext = class extends Context {
+    /** @param {AudioContextOptions} [options] - Options the game asked for. */
+    constructor(options) {
+      // Forcing a rate different from the 48 kHz cue exercises the browser's resampler on every machine.
+      super(rate === null ? options : { ...options, sampleRate: rate });
       tap.context = this;
       tap.rate = this.sampleRate;
       tap.analyser = this.createAnalyser();
-      // Copy what the graph renders, from the first audible sample, while the
-      // host's own connection to the destination stays in place. A script processor
-      // runs on the main thread, and a small buffer drops blocks while the page is
-      // busy, which corrupts the capture; 4096 frames tolerates a slow runner.
-      const recorder = this.createScriptProcessor(4096, 1, 1);
-      recorder.onaudioprocess = event => {
-        const input = event.inputBuffer.getChannelData(0);
-        if (!tap.samples.length && !input.some(sample => sample !== 0)) return;
-        if (tap.samples.length < tap.rate) tap.samples.push(...input);
-      };
-      tap.recorder = recorder;
-      connect.call(recorder, this.destination);
+      const module = URL.createObjectURL(new Blob([processor], { type: "text/javascript" }));
+      this.audioWorklet.addModule(module).then(() => {
+        // Copy what the graph renders, from the first audible sample, while the
+        // host's own connection to the destination stays in place.
+        const recorder = new AudioWorkletNode(this, "goje-tap");
+        recorder.port.onmessage = event => {
+          if (!tap.samples.length && !event.data.some(sample => sample !== 0)) return;
+          if (tap.samples.length < tap.rate) for (const sample of event.data) tap.samples.push(sample);
+        };
+        connect.call(recorder, this.destination);
+        tap.recorder = recorder;
+        for (const source of tap.pending) connect.call(source, recorder);
+      });
     }
+  };
+  BaseAudioContext.prototype.createBufferSource = function () {
+    const source = create.call(this);
     connect.call(source, tap.analyser);
-    connect.call(source, tap.recorder);
+    if (tap.recorder) connect.call(source, tap.recorder);
+    else tap.pending.push(source);
     return source;
   };
   AudioBufferSourceNode.prototype.start = function (...args) {
@@ -166,6 +175,9 @@ async function playback(browser, url, expected, forcedRate) {
     await canvas.press("r");
     await beacon(canvas, false);
     assert.equal(await page.evaluate(() => window.beaconAudioProbe.starts), 0, "unlock did not replay the locked cue");
+    // The capture worklet loads asynchronously after the context starts. Wait for it so
+    // the cue's first samples are recorded.
+    await page.waitForFunction(() => window.beaconAudioProbe.recorder);
 
     // Wait from before the real key press so a short buffer cannot go unnoticed.
     const signal = page.waitForFunction(() => {
