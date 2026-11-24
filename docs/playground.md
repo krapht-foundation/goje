@@ -67,6 +67,19 @@ From the Goje checkout, `make setup-web` and `make smoke-beacon` automate the au
 
 Both examples embed the same [tomato sheet and clips](../specs/sprite-sheet-v1.md#loading-and-ownership). To use different art, run `go run ./cmd/spritecheck SHEET.png CLIPS.json`, then replace `tomato.png` and `tomato.json` under `cmd/playground/art/` or Beacon's `assets/` directory. The games expect `idle` and `move` clips. No `goje.json` change is needed.
 
+## Author sprite clips in the browser
+
+Run `make serve-sprite-editor` with Go and Node installed, then open `http://127.0.0.1:8083/`. Set `SPRITE_EDITOR_PORT` to use a different port. The editor runs on loopback and does not upload your files.
+
+1. Choose a sprite sheet PNG and optionally its v1 clip sidecar, then press **Open**. Try the [tomato PNG](../sprite/testdata/tomato.png) and [its sidecar](../sprite/testdata/tomato.json). A PNG without a sidecar starts with no clips.
+2. Select a clip and frame, or name a new clip. Drag a rectangle on the sheet or type exact coordinates. Set a frame-relative pivot, such as the bottom center, and a duration in simulation ticks (60 per second). Press **Apply frame** to commit, or **Add frame** or **Add clip** to create a new entry. The frame list supports duplicate, delete, and move actions. Use **Undo** and **Redo** to recover committed edits.
+3. Select **Play** to loop the clip, or **Step one tick** while paused. The preview places every frame's pivot on the same anchor so you can spot unwanted movement between poses. The preview and its zoom never change the exported metadata.
+4. Choose **Download JSON** and keep the original PNG. Reopen the download with that PNG to keep editing, or run `go run ./cmd/spritecheck SHEET.png CLIPS.json` before embedding the pair. The editor never overwrites either input file.
+
+Run `make setup-web` once, then `make smoke-sprite-editor` to exercise keyboard and pointer editing, preview timing and alignment, and download and reopen in Chromium.
+
+Run `make smoke-sprite-roundtrip` to also play the exact download in scratch builds of Beacon and the authored courtyard on desktop OpenGL and Chromium WebGL. On headless Linux, use `xvfb-run -a make smoke-sprite-roundtrip`. The smoke moves the `move` clip's hop to the first slot, extends it from 8 to 16 ticks, validates the download with `spritecheck`, and embeds it with the original PNG. The actor stays airborne on motion ticks 13 and 16, lands on tick 17, and returns to its starting pose on reset. The checked-in assets are not overwritten.
+
 ## Draw a ground tile in the browser
 
 Run `make serve-tile-maker` with Go and Node installed, then open `http://127.0.0.1:8082/`. Set `TILE_MAKER_PORT` to use a different port. The app runs on loopback and does not upload your files.

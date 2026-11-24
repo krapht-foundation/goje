@@ -70,6 +70,8 @@ jobs:
           fi
       - name: Run browser playground smoke
         run: make smoke-web
+      - name: Play the Sprite Clip Editor export on desktop and web
+        run: xvfb-run -a make smoke-sprite-roundtrip
       - name: Play both browser exports on desktop and web
         run: xvfb-run -a make smoke-level-roundtrip
       - name: Play the independent 2D game on desktop and web

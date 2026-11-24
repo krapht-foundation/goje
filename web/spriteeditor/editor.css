@@ -1,0 +1,20 @@
+:root { color-scheme: light dark; font: 1rem/1.45 system-ui, sans-serif; }
+body { margin: 1rem; }
+main { max-width: 90rem; margin: auto; }
+fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .75rem; }
+button, input, select { font: inherit; }
+button[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: -2px; }
+#status[data-error] { font-weight: bold; }
+.help { margin: 0; font-size: .9rem; flex-basis: 100%; }
+.workspace { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
+.workspace > section { flex: 1 1 20rem; min-width: 0; }
+.fields { display: grid; grid-template-columns: max-content 6rem; gap: .25rem .5rem; align-items: center; flex-basis: 100%; }
+#fields-state { margin: 0; flex-basis: 100%; }
+#fields-state[data-pending] { font-weight: bold; }
+.scroller { max-width: 100%; max-height: 70vh; overflow: auto; outline: 1px solid currentColor; }
+canvas { display: block; image-rendering: pixelated; }
+#sheet, #preview {
+  background: repeating-conic-gradient(#9da2aa 0% 25%, #d0d3d8 0% 50%) 0 0 / 16px 16px;
+}
+#sheet { cursor: crosshair; touch-action: none; }
+#preview { outline: 1px solid currentColor; max-width: 100%; }

@@ -167,9 +167,10 @@ async function smokeCourtyard(browser, url) {
  * @param {import("playwright").Browser} browser - Running Chromium instance.
  * @param {string} url - Loopback playground URL.
  * @param {boolean} shortcut - Whether the build embeds the Level Builder download and custom tile.
+ * @param {boolean} [sprite=false] - Check only the edited move clip's timing and reset.
  * @returns {Promise<void>} Resolves when the authored spawn is restored.
  */
-async function smokeAuthored(browser, url, shortcut) {
+async function smokeAuthored(browser, url, shortcut, sprite = false) {
   const page = await browser.newPage({ viewport: { width: 880, height: 400 }, deviceScaleFactor: 2 });
   try {
     await page.clock.install();
@@ -204,6 +205,65 @@ async function smokeAuthored(browser, url, shortcut) {
       matches(frame, 144, 71, tomato) && matches(frame, 139, 70, eye) && layoutMatches(frame) &&
       matches(frame, 141, 41, ground) && matches(frame, 130, 38, background) &&
       matches(frame, 152, 40, grid));
+    if (sprite) {
+      // Step one 16 ms browser frame per capture, so at most one 60 Hz tick passes between them.
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+      /** @returns {Promise<PNG>} The frame presented after the next browser frame. */
+      const step = async () => {
+        await page.clock.runFor(16);
+        return PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
+      };
+      /**
+       * Step browser frames until one matches.
+       * @param {string} stage - Checkpoint name for failures.
+       * @param {function(PNG): boolean} expected - Frame predicate.
+       */
+      const stepUntil = async (stage, expected) => {
+        for (let i = 0; i < 8; i++) if (expected(await step())) return;
+        assert.fail(`No matching courtyard frame for ${stage}`);
+      };
+      await page.mouse.click(408, 128);
+      await stepUntil("scout selected", frame => spriteCenter(frame, selected) !== null);
+      // Command the straight +board-Y route from cell (2, 2) to (2, 5). Each
+      // motion tick moves the ground anchor 1 px left and half a pixel down.
+      await page.mouse.click(312, 200, { button: "right" });
+      /**
+       * @param {PNG} frame - Decoded canvas screenshot.
+       * @param {number} x - Anchor column.
+       * @param {number} y - Ground row.
+       * @returns {boolean} Whether the hop pose clears the ground.
+       */
+      const hopping = (frame, x, y) =>
+        matches(frame, x, y - 7, tomato) && matches(frame, x, y - 4, ink) && !matches(frame, x, y - 2, ink);
+      // The edited move clip is hop (16 ticks), windup, standing. The original
+      // landed on motion tick 13; the edit stays airborne through tick 16.
+      /** @type {Map<number, [string, function(PNG, number, number): boolean]>} */
+      const checkpoints = new Map([
+        [13, ["airborne where the original clip landed", hopping]],
+        [16, ["airborne on the last hop tick", hopping]],
+        [17, ["planted on the windup pose", (frame, x, y) => !hopping(frame, x, y) &&
+          matches(frame, x, y - 1, ink) && matches(frame, x, y - 4, tomato)]],
+      ]);
+      // The selection marker is centered on the anchor column, so its rendered x names the tick.
+      for (let tick = 0, steps = 0; tick < 17; steps++) {
+        assert.ok(steps < 40, `the scout stalled at motion tick ${tick}`);
+        const frame = await step();
+        const marker = spriteCenter(frame, selected);
+        const next = marker === null ? NaN : 144 - (marker.x + 0.5 - 240) / 4;
+        assert.ok(next === tick || next === tick + 1, `motion tick jumped from ${tick} to ${next}`);
+        tick = next;
+        const checkpoint = checkpoints.get(tick);
+        if (checkpoint) {
+          assert.ok(checkpoint[1](frame, 144 - tick, 76 + tick / 2), `motion tick ${tick}: scout not ${checkpoint[0]}`);
+        }
+      }
+      await page.keyboard.press("r");
+      await stepUntil("sprite reset restores the authored spawn", frame =>
+        matches(frame, 144, 71, tomato) && matches(frame, 139, 70, eye) && layoutMatches(frame) &&
+        matches(frame, 141, 41, ground) && spriteCenter(frame, selected) === null &&
+        !matches(frame, 96, 100, destination) && !matches(frame, 127, 83.5, ink));
+      return;
+    }
     await waitCourtyard(canvas, "idle scout blinks", frame =>
       matches(frame, 139, 70, ink) && matches(frame, 144, 71, tomato));
     // The topmost tile's asymmetric highlight follows the grid while its corners stay clear.
@@ -291,63 +351,72 @@ async function smokeAuthored(browser, url, shortcut) {
   }
 }
 
-const editedDirectory = process.argv[2];
-if (process.argv.length > 3) throw new Error("Usage: node scripts/smoke-web.mjs [EDITED_WEB_DIR]");
+const sprite = process.argv[2] === "--sprite";
+const editedDirectory = process.argv[sprite ? 3 : 2];
+if (process.argv.length > (sprite ? 4 : 3) || (sprite && editedDirectory === undefined)) {
+  throw new Error("Usage: node scripts/smoke-web.mjs [EDITED_WEB_DIR | --sprite SPRITE_WEB_DIR]");
+}
 const server = await servePlayground(0, editedDirectory);
 try {
   const browser = await chromium.launch({ timeout: 15_000 });
   try {
-    const page = await browser.newPage({ viewport: { width: 640, height: 400 } });
-    const errors = [];
-    page.on("pageerror", error => errors.push(error.message));
-    page.on("console", message => {
-      if (message.type() === "error") errors.push(message.text());
-    });
-    await page.goto(`http://127.0.0.1:${server.address().port}/?fixture=pickup`, { timeout: 15_000 });
-    const canvas = page.locator("#goje");
-    await waitForFrame(canvas, "initial spawn", (player, token) =>
-      at(player, 160, 92, 2) && at(token, 192, 108, 2));
-    await canvas.click({ timeout: 3_000 });
-    await page.keyboard.down("ArrowRight");
-    try {
-      await waitForFrame(canvas, "pickup", (player, token) =>
-        player !== null && player.x > 410 && Math.abs(player.y - 184) <= 2 && token === null);
-    } finally {
-      await page.keyboard.up("ArrowRight");
-    }
-    await page.setViewportSize({ width: 880, height: 500 });
-    await waitForFrame(canvas, "resized encounter", (player, token) =>
-      player !== null && player.x > 550 && Math.abs(player.y - 230) <= 2 && token === null);
-    await page.keyboard.press("r", { delay: 100 });
-    await waitForFrame(canvas, "reset", (player, token) =>
-      at(player, 160, 92, 2.5, 40) && at(token, 192, 108, 2.5, 40));
-
-    await page.keyboard.down("ArrowLeft");
-    try {
-      await waitForFrame(canvas, "movement before focus loss", player =>
-        player !== null && player.x < 425);
-      await canvas.blur();
-      const { player: blurred } = await readSprites(canvas);
-      assert.ok(blurred !== null && blurred.x > 140, "player must have room to drift left");
-
-      // Resume while the key is still held. A stale key must not move the
-      // player on any of the following focused ticks.
-      await canvas.focus();
-      for (let i = 0; i < 4; i++) {
-        const { player } = await readSprites(canvas);
-        assert.deepEqual(player, blurred, "the held key survived focus loss");
+    if (sprite) {
+      await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`, false, true);
+      console.log("Browser smoke passed: authored scout hop airborne at motion ticks 13 and 16, " +
+        "planted windup at tick 17, and reset");
+    } else {
+      const page = await browser.newPage({ viewport: { width: 640, height: 400 } });
+      const errors = [];
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("console", message => {
+        if (message.type() === "error") errors.push(message.text());
+      });
+      await page.goto(`http://127.0.0.1:${server.address().port}/?fixture=pickup`, { timeout: 15_000 });
+      const canvas = page.locator("#goje");
+      await waitForFrame(canvas, "initial spawn", (player, token) =>
+        at(player, 160, 92, 2) && at(token, 192, 108, 2));
+      await canvas.click({ timeout: 3_000 });
+      await page.keyboard.down("ArrowRight");
+      try {
+        await waitForFrame(canvas, "pickup", (player, token) =>
+          player !== null && player.x > 410 && Math.abs(player.y - 184) <= 2 && token === null);
+      } finally {
+        await page.keyboard.up("ArrowRight");
       }
-    } finally {
-      await page.keyboard.up("ArrowLeft");
+      await page.setViewportSize({ width: 880, height: 500 });
+      await waitForFrame(canvas, "resized encounter", (player, token) =>
+        player !== null && player.x > 550 && Math.abs(player.y - 230) <= 2 && token === null);
+      await page.keyboard.press("r", { delay: 100 });
+      await waitForFrame(canvas, "reset", (player, token) =>
+        at(player, 160, 92, 2.5, 40) && at(token, 192, 108, 2.5, 40));
+  
+      await page.keyboard.down("ArrowLeft");
+      try {
+        await waitForFrame(canvas, "movement before focus loss", player =>
+          player !== null && player.x < 425);
+        await canvas.blur();
+        const { player: blurred } = await readSprites(canvas);
+        assert.ok(blurred !== null && blurred.x > 140, "player must have room to drift left");
+  
+        // Resume while the key is still held. A stale key must not move the
+        // player on any of the following focused ticks.
+        await canvas.focus();
+        for (let i = 0; i < 4; i++) {
+          const { player } = await readSprites(canvas);
+          assert.deepEqual(player, blurred, "the held key survived focus loss");
+        }
+      } finally {
+        await page.keyboard.up("ArrowLeft");
+      }
+      assert.deepEqual(errors, []);
+      console.log("Browser smoke passed: movement, pickup, resize, reset, and focus loss");
+      await smokeCourtyard(browser, `http://127.0.0.1:${server.address().port}/?fixture=courtyard`);
+      console.log("Browser smoke passed: courtyard overlap, selection, pan, zoom, resize, patrol, and reset");
+      await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`, editedDirectory !== undefined);
+      console.log(editedDirectory === undefined
+        ? "Browser smoke passed: authored courtyard selection, wall detour, arrival, and reset"
+        : "Browser smoke passed: custom ground art, exported lookout, shortcut crossing, arrival, and reset");
     }
-    assert.deepEqual(errors, []);
-    console.log("Browser smoke passed: movement, pickup, resize, reset, and focus loss");
-    await smokeCourtyard(browser, `http://127.0.0.1:${server.address().port}/?fixture=courtyard`);
-    console.log("Browser smoke passed: courtyard overlap, selection, pan, zoom, resize, patrol, and reset");
-    await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`, editedDirectory !== undefined);
-    console.log(editedDirectory === undefined
-      ? "Browser smoke passed: authored courtyard selection, wall detour, arrival, and reset"
-      : "Browser smoke passed: custom ground art, exported lookout, shortcut crossing, arrival, and reset");
   } finally {
     await browser.close();
   }

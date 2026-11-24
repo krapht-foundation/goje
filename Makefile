@@ -13,6 +13,8 @@ EDITOR_WEB_DIR := $(BUILD_DIR)/leveleditor-web
 EDITOR_PORT ?= 8081
 TILE_MAKER_WEB_DIR := $(BUILD_DIR)/tilemaker-web
 TILE_MAKER_PORT ?= 8082
+SPRITE_EDITOR_WEB_DIR := $(BUILD_DIR)/spriteeditor-web
+SPRITE_EDITOR_PORT ?= 8083
 PLAYWRIGHT_CACHE := $(BUILD_DIR)/playwright
 PLAYGROUND := $(BUILD_DIR)/playground$(if $(filter windows,$(shell $(GO) env GOOS)),.exe)
 BENCHMARK := $(BUILD_DIR)/playground-benchmark
@@ -107,6 +109,45 @@ serve-tile-maker: build-tile-maker ## Serve the Tile Maker on loopback (TILE_MAK
 
 smoke-tile-maker: build-tile-maker ## Verify pixel editing, previews, and PNG handoff in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-tile-maker.mjs
+
+.PHONY: build-sprite-editor serve-sprite-editor smoke-sprite-editor smoke-sprite-roundtrip
+build-sprite-editor: ## Build the standalone browser Sprite Clip Editor
+	mkdir -p "$(SPRITE_EDITOR_WEB_DIR)"
+	GOOS=js GOARCH=wasm $(GO) build -o "$(SPRITE_EDITOR_WEB_DIR)/spriteeditor.wasm" ./cmd/spriteeditor
+	install -m 0644 web/spriteeditor/index.html web/spriteeditor/editor.mjs web/spriteeditor/editor.css \
+		"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(SPRITE_EDITOR_WEB_DIR)/"
+
+serve-sprite-editor: build-sprite-editor ## Serve the Sprite Clip Editor on loopback (SPRITE_EDITOR_PORT=8083 by default)
+	$(NODE) scripts/sprite-editor-server.mjs "$(SPRITE_EDITOR_PORT)"
+
+smoke-sprite-editor: build-sprite-editor ## Verify clip editing, playback, and JSON handoff in Chromium
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-sprite-editor.mjs
+
+smoke-sprite-roundtrip: build-sprite-editor ## Play the editor's exact JSON export in both games on desktop and web
+	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/sprite-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
+		mkdir -p "$$tmp/courtyard/web" "$$tmp/beacon/web"; \
+		$(NODE) scripts/smoke-sprite-editor.mjs "$$tmp/tomato.json"; \
+		png=sprite/testdata/tomato.png; \
+		$(GO) run ./cmd/spritecheck "$$png" "$$tmp/tomato.json"; \
+		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/courtyard/"; \
+		cp -R cmd/playground/levels cmd/playground/art "$$tmp/courtyard/"; \
+		cp examples/beacon/*.go "$$tmp/beacon/"; \
+		cp -R examples/beacon/assets "$$tmp/beacon/"; \
+		for assets in "$$tmp/courtyard/art" "$$tmp/beacon/assets"; do \
+			cp "$$png" "$$tmp/tomato.json" "$$assets/"; \
+		done; \
+		$(GO) build -tags goje_smoke -o "$$tmp/courtyard-smoke" "$$tmp/courtyard"; \
+		$(GO) build -tags goje_smoke,goje_beacon_smoke -o "$$tmp/beacon-smoke" "$$tmp/beacon"; \
+		wasm_exec="$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js"; \
+		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/courtyard/web/playground.wasm" "$$tmp/courtyard"; \
+		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/beacon/web/playground.wasm" "$$tmp/beacon"; \
+		install -m 0644 web/playground/index.html "$$wasm_exec" "$$tmp/courtyard/web/"; \
+		install -m 0644 examples/beacon/web/index.html "$$wasm_exec" "$$tmp/beacon/web/"; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/courtyard-smoke" --sprite; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/beacon-smoke" --sprite; \
+		$(NODE) scripts/smoke-web.mjs --sprite "$$tmp/courtyard/web"; \
+		$(NODE) scripts/smoke-beacon.mjs sprite "$$tmp/beacon/web"
 
 smoke-level-roundtrip: build-level-editor build-tile-maker ## Play both browser exports on desktop and web
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/level-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \

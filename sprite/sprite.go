@@ -3,16 +3,11 @@
 package sprite
 
 import (
-	"bytes"
 	"fmt"
 	"image"
-	"image/png"
 	"io"
-)
 
-const (
-	maxPNGBytes = 1 << 20
-	maxAxis     = 512
+	"github.com/krapht-foundation/goje/internal/spriteformat"
 )
 
 // Frame describes a source region in sheet pixels, its frame-relative pivot,
@@ -33,14 +28,14 @@ func (f Frame) Destination(anchorX, anchorY, scale float32) (x, y, width, height
 
 // Clip is a read-only sequence of frames in authored order.
 type Clip struct {
-	frames []Frame
+	frames []spriteformat.Frame
 }
 
 // Len returns the number of frames.
 func (c Clip) Len() int { return len(c.frames) }
 
 // Frame returns the frame at i. The caller must pass an index in [0, Len()).
-func (c Clip) Frame(i int) Frame { return c.frames[i] }
+func (c Clip) Frame(i int) Frame { return Frame(c.frames[i]) }
 
 // InAtlas translates the clip's source rectangles to the sheet's position in
 // a launch image. Prepare and reuse the result across actors at startup.
@@ -49,7 +44,7 @@ func (c Clip) InAtlas(offset image.Point) Clip {
 	if offset == (image.Point{}) || len(c.frames) == 0 {
 		return c
 	}
-	frames := make([]Frame, len(c.frames))
+	frames := make([]spriteformat.Frame, len(c.frames))
 	for i, frame := range c.frames {
 		frame.Source = frame.Source.Add(offset)
 		frames[i] = frame
@@ -75,36 +70,19 @@ func (s *Sheet) Clip(name string) (Clip, bool) {
 // Decode reads one sprite sheet v1 asset. It does not close the input readers.
 // It returns a nil sheet if either input is invalid.
 func Decode(sheetPNG, clipsJSON io.Reader) (*Sheet, error) {
-	data, err := readBounded(sheetPNG, maxPNGBytes)
+	png, err := spriteformat.ReadPNG(sheetPNG)
 	if err != nil {
-		return nil, fmt.Errorf("read sprite PNG: %w", err)
+		return nil, err
 	}
-	config, err := png.DecodeConfig(bytes.NewReader(data))
+	clips := make(map[string]Clip)
+	if decodeErr := spriteformat.DecodeClips(clipsJSON, png.Size(), func(clip spriteformat.Clip) {
+		clips[clip.Name] = Clip{frames: clip.Frames}
+	}); decodeErr != nil {
+		return nil, fmt.Errorf("sprite clips: %w", decodeErr)
+	}
+	pixels, err := png.Decode()
 	if err != nil {
-		return nil, fmt.Errorf("read sprite PNG dimensions: %w", err)
-	}
-	if config.Width < 1 || config.Width > maxAxis || config.Height < 1 || config.Height > maxAxis {
-		return nil, fmt.Errorf("sprite PNG axes must be 1–%d pixels", maxAxis)
-	}
-	clips, err := decodeClips(clipsJSON, image.Pt(config.Width, config.Height))
-	if err != nil {
-		return nil, fmt.Errorf("sprite clips: %w", err)
-	}
-	// Decode the same bounded bytes so the checked header cannot change.
-	pixels, err := png.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("decode sprite PNG: %w", err)
+		return nil, err
 	}
 	return &Sheet{pixels: pixels, clips: clips}, nil
-}
-
-func readBounded(r io.Reader, limit int64) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, limit+1))
-	if err != nil {
-		return nil, fmt.Errorf("read input: %w", err)
-	}
-	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("input exceeds %d bytes", limit)
-	}
-	return data, nil
 }

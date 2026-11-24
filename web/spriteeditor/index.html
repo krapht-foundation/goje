@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goje Sprite Clip Editor</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <main>
+    <h1>Goje Sprite Clip Editor</h1>
+    <p>Author v1 sprite clips for an existing PNG sheet. Files stay in this browser; only the JSON sidecar is downloaded.</p>
+
+    <fieldset id="files" disabled>
+      <legend>Files</legend>
+      <label for="png-file">Sprite sheet PNG</label>
+      <input id="png-file" type="file" accept=".png,image/png">
+      <label for="json-file">Clip sidecar JSON (optional)</label>
+      <input id="json-file" type="file" accept=".json,application/json">
+      <button id="open" type="button">Open</button>
+      <button id="export" type="button">Download JSON</button>
+      <button id="undo" type="button">Undo</button>
+      <button id="redo" type="button">Redo</button>
+    </fieldset>
+    <p id="status" role="status">Loading the Sprite Clip Editor…</p>
+    <p><output id="dirty">Saved</output></p>
+
+    <div class="workspace">
+      <section aria-labelledby="sheet-heading">
+        <h2 id="sheet-heading">Sheet</h2>
+        <fieldset id="view" disabled>
+          <legend>View</legend>
+          <label for="zoom">Zoom</label>
+          <select id="zoom">
+            <option value="1">1×</option>
+            <option value="2">2×</option>
+            <option value="3">3×</option>
+            <option value="4">4×</option>
+            <option value="6">6×</option>
+            <option value="8">8×</option>
+          </select>
+          <label><input id="overlay" type="checkbox" checked> Show clip frames</label>
+        </fieldset>
+        <p id="sheet-help">Drag on the sheet to fill the rectangle fields, or type exact values. Rectangles are in sheet pixels; right and bottom edges are exclusive. Nothing changes until you press a commit button.</p>
+        <div class="scroller">
+          <canvas id="sheet" width="1" height="1" role="img" aria-label="Sprite sheet; drag to select a frame rectangle" aria-describedby="sheet-help"></canvas>
+        </div>
+      </section>
+
+      <section aria-labelledby="edit-heading">
+        <h2 id="edit-heading">Clips and frames</h2>
+        <fieldset id="clips" disabled>
+          <legend>Clip</legend>
+          <label for="clip">Selected clip</label>
+          <select id="clip"></select>
+          <label for="clip-name">Clip name</label>
+          <input id="clip-name" type="text" maxlength="32" pattern="[a-z][a-z0-9_]*" autocomplete="off" spellcheck="false" aria-describedby="clip-help">
+          <p id="clip-help" class="help">Lowercase letter first, then lowercase letters, digits, or underscores (up to 32). Add clip uses the frame fields below as its first frame.</p>
+          <button id="add-clip" type="button">Add clip</button>
+          <button id="rename-clip" type="button">Rename clip</button>
+          <button id="delete-clip" type="button">Delete clip</button>
+        </fieldset>
+
+        <fieldset id="frames" disabled>
+          <legend>Frame</legend>
+          <label for="frame">Selected frame</label>
+          <select id="frame"></select>
+          <div class="fields">
+            <label for="x">X</label><input id="x" type="number" min="0" step="1" required>
+            <label for="y">Y</label><input id="y" type="number" min="0" step="1" required>
+            <label for="width">Width</label><input id="width" type="number" min="1" step="1" required>
+            <label for="height">Height</label><input id="height" type="number" min="1" step="1" required>
+            <label for="pivot-x">Pivot X</label><input id="pivot-x" type="number" min="0" step="1" required aria-describedby="pivot-help">
+            <label for="pivot-y">Pivot Y</label><input id="pivot-y" type="number" min="0" step="1" required aria-describedby="pivot-help">
+            <label for="ticks">Duration (ticks)</label><input id="ticks" type="number" min="1" max="3600" step="1" required aria-describedby="ms">
+          </div>
+          <p class="help"><span id="pivot-help">The pivot is relative to the frame's top-left corner and may sit on its right or bottom edge.</span> <output id="ms">0 ms</output> at 60 ticks per second.</p>
+          <p id="fields-state" aria-live="polite"></p>
+          <button id="apply-frame" type="button">Apply frame</button>
+          <button id="add-frame" type="button">Add frame</button>
+          <button id="duplicate-frame" type="button">Duplicate frame</button>
+          <button id="delete-frame" type="button">Delete frame</button>
+          <button id="move-up" type="button">Move up</button>
+          <button id="move-down" type="button">Move down</button>
+        </fieldset>
+      </section>
+
+      <section aria-labelledby="preview-heading">
+        <h2 id="preview-heading">Preview</h2>
+        <p class="help">Loops the selected clip at 60 ticks per second around the fixed ground anchor.</p>
+        <canvas id="preview" width="320" height="320" role="img" aria-label="Clip preview with ground anchor"></canvas>
+        <p><output id="preview-frame">No clip</output></p>
+        <button id="play" type="button" aria-pressed="false" disabled>Play</button>
+        <button id="step" type="button" disabled>Step one tick</button>
+      </section>
+    </div>
+  </main>
+  <script src="wasm_exec.js"></script>
+  <script type="module" src="editor.mjs"></script>
+</body>
+</html>

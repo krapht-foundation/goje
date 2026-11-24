@@ -44,6 +44,14 @@ type smokeScene struct {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--sprite" {
+		if err := runSpriteSmoke(); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Desktop smoke passed: exported scout clip airborne on motion ticks 13 and 16, " +
+			"planted on tick 17, and reset")
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--shortcut" {
 		if err := runAuthoredSmoke(true); err != nil {
 			log.Fatal(err)

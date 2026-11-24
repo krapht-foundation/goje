@@ -1,4 +1,6 @@
-package sprite
+// Package spriteformat owns the internal sprite sheet v1 codec shared by
+// the runtime and the clip editor.
+package spriteformat
 
 import (
 	"bytes"
@@ -13,23 +15,24 @@ import (
 )
 
 const (
-	maxJSONBytes = 64 << 10
-	maxClips     = 32
-	maxFrames    = 256
+	MaxJSONBytes = 64 << 10
+	MaxClips     = 32
+	MaxFrames    = 256
 	maxTicks     = 3600
 )
 
-func decodeClips(r io.Reader, size image.Point) (map[string]Clip, error) {
-	data, readErr := readBounded(r, maxJSONBytes)
+// DecodeClips visits validated clips in file order. Callers must discard all
+// visited clips if the returned error is non-nil.
+func DecodeClips(r io.Reader, size image.Point, visit func(Clip)) error {
+	data, readErr := readBounded(r, MaxJSONBytes)
 	if readErr != nil {
-		return nil, readErr
+		return readErr
 	}
 	if !utf8.Valid(data) {
-		return nil, errors.New("metadata must be UTF-8")
+		return errors.New("metadata must be UTF-8")
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
-	var clips map[string]Clip
 	parseErr := readObject(d, []string{"version", "clips"}, func(field int) error {
 		if field == 0 {
 			version, err := readInt(d)
@@ -41,28 +44,27 @@ func decodeClips(r io.Reader, size image.Point) (map[string]Clip, error) {
 			}
 			return nil
 		}
-		var err error
-		clips, err = readClips(d, size)
-		return err
+		return readClips(d, size, visit)
 	})
 	if parseErr != nil {
-		return nil, parseErr
+		return parseErr
 	}
 	if _, err := d.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("unexpected data after sprite metadata")
+		return errors.New("unexpected data after sprite metadata")
 	}
-	return clips, nil
+	return nil
 }
 
-func readClips(d *json.Decoder, size image.Point) (map[string]Clip, error) {
+func readClips(d *json.Decoder, size image.Point, visit func(Clip)) error {
 	if err := delimiter(d, '['); err != nil {
-		return nil, err
+		return err
 	}
-	clips := make(map[string]Clip)
+	var names [MaxClips]string
+	count := 0
 	frameCount := 0
 	for d.More() {
-		if len(clips) == maxClips {
-			return nil, fmt.Errorf("asset exceeds %d clips", maxClips)
+		if count == MaxClips {
+			return fmt.Errorf("asset exceeds %d clips", MaxClips)
 		}
 		var name string
 		var frames []Frame
@@ -77,28 +79,27 @@ func readClips(d *json.Decoder, size image.Point) (map[string]Clip, error) {
 				if !ok || !validName(name) {
 					return errors.New("invalid clip name")
 				}
-				if _, exists := clips[name]; exists {
+				if slices.Contains(names[:count], name) {
 					return fmt.Errorf("duplicate clip %q", name)
 				}
 				return nil
 			}
 			var err error
-			frames, err = readFrames(d, size, maxFrames-frameCount)
+			frames, err = readFrames(d, size, MaxFrames-frameCount)
 			return err
 		})
 		if err != nil {
-			return nil, fmt.Errorf("clip %d: %w", len(clips)+1, err)
+			return fmt.Errorf("clip %d: %w", count+1, err)
 		}
-		clips[name] = Clip{frames: frames}
+		visit(Clip{Name: name, Frames: frames})
+		names[count] = name
+		count++
 		frameCount += len(frames)
 	}
-	if len(clips) == 0 {
-		return nil, errors.New("asset must contain a clip")
+	if count == 0 {
+		return errors.New("asset must contain a clip")
 	}
-	if err := delimiter(d, ']'); err != nil {
-		return nil, err
-	}
-	return clips, nil
+	return delimiter(d, ']')
 }
 
 func readFrames(d *json.Decoder, size image.Point, remaining int) ([]Frame, error) {
@@ -108,7 +109,7 @@ func readFrames(d *json.Decoder, size image.Point, remaining int) ([]Frame, erro
 	var frames []Frame
 	for d.More() {
 		if len(frames) == remaining {
-			return nil, fmt.Errorf("asset exceeds %d frame entries", maxFrames)
+			return nil, fmt.Errorf("asset exceeds %d frame entries", MaxFrames)
 		}
 		frame, err := readFrame(d, size)
 		if err != nil {
@@ -142,14 +143,25 @@ func readFrame(d *json.Decoder, size image.Point) (Frame, error) {
 		h > size.Y-y {
 		return Frame{}, errors.New("source rectangle is outside the sprite sheet or empty")
 	}
-	px, py, ticks := values[4], values[5], values[6]
-	if px < 0 || px > w || py < 0 || py > h {
-		return Frame{}, errors.New("pivot is outside frame edges")
+	frame := Frame{
+		Source: image.Rect(x, y, x+w, y+h),
+		Pivot:  image.Pt(values[4], values[5]),
+		Ticks:  values[6],
 	}
-	if ticks < 1 || ticks > maxTicks {
-		return Frame{}, fmt.Errorf("ticks must be 1–%d", maxTicks)
+	if err := frame.validatePose(w, h); err != nil {
+		return Frame{}, err
 	}
-	return Frame{Source: image.Rect(x, y, x+w, y+h), Pivot: image.Pt(px, py), Ticks: ticks}, nil
+	return frame, nil
+}
+
+func (f Frame) validatePose(width, height int) error {
+	if f.Pivot.X < 0 || f.Pivot.X > width || f.Pivot.Y < 0 || f.Pivot.Y > height {
+		return errors.New("pivot is outside frame edges")
+	}
+	if f.Ticks < 1 || f.Ticks > maxTicks {
+		return fmt.Errorf("ticks must be 1–%d", maxTicks)
+	}
+	return nil
 }
 
 // Read only schema-shaped tokens. An unknown key cannot introduce a subtree,

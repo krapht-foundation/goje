@@ -80,8 +80,9 @@ async function author(output) {
 /**
  * Exercise rendered content and real input in the browser.
  * @param {string} directory - Static bundle directory.
+ * @param {boolean} [sprite=false] - Check only the edited move clip's timing and reset.
  */
-async function play(directory) {
+async function play(directory, sprite = false) {
   await withPage(port => servePlayground(port, directory), async page => {
     const canvas = page.locator("#goje");
     const inactive = [91, 141, 209, 255], active = [248, 190, 66, 255];
@@ -169,6 +170,46 @@ async function play(directory) {
         [1, 2, 3, 4].every(lift => shot.is(at.x + 7, ground - lift, background));
     };
 
+    if (sprite) {
+      await frame("the tomato at the lane start", shot => standing(shot, start));
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+      paused = true;
+      await canvas.focus();
+      // Drain the time skipped by the pause before motion starts.
+      await frame("the tomato still at the lane start", shot => standing(shot, start));
+      // The edited move clip is hop (16 ticks), windup, standing. The original
+      // landed on motion tick 13; the edit stays airborne through tick 16.
+      /** @type {Map<number, [string, (shot: Shot, x: number) => boolean]>} */
+      const checkpoints = new Map([
+        [13, ["airborne where the original clip landed", hopping]],
+        [16, ["airborne on the last hop tick", hopping]],
+        [17, ["planted on the windup pose", (shot, x) => shot.eyes()?.y === ground - 10 &&
+          shot.is(x, ground - 1, outline) && shot.is(x, ground - 2, outline)]],
+      ]);
+      await page.keyboard.down("ArrowRight");
+      try {
+        // One 16 ms browser frame runs at most one 60 Hz tick. The anchor
+        // moves 1 px per motion tick, so its rendered column names the tick.
+        for (let tick = 0, steps = 0; tick < 17; steps++) {
+          assert.ok(steps < 40, `the tomato stalled at motion tick ${tick}`);
+          await page.clock.runFor(16);
+          const shot = await shoot();
+          const x = (shot.eyes()?.x ?? NaN) + 7;
+          assert.ok(x - start === tick || x - start === tick + 1,
+            `motion tick jumped from ${tick} to ${x - start}`);
+          tick = x - start;
+          const checkpoint = checkpoints.get(tick);
+          if (checkpoint) assert.ok(checkpoint[1](shot, x), `motion tick ${tick}: tomato not ${checkpoint[0]}`);
+        }
+      } finally {
+        await page.keyboard.up("ArrowRight");
+      }
+      await page.keyboard.press("r");
+      await frame("the tomato restored to the lane start by reset", shot => standing(shot, start) &&
+        shot.is(start + 17, ground - 1, background) && shot.is(start + 17, ground - 2, background));
+      return;
+    }
+
     await frame("the editor assets, an unlit beacon, and the tomato at the lane start",
       shot => board(shot, inactive) && standing(shot, start));
     // Freeze page time; frames now advance only when the smoke steps the clock.
@@ -205,13 +246,16 @@ async function play(directory) {
       shot.is(start - 7, ground - 10, lid) && shot.is(start, ground - 1, outline));
     await frame("the tomato reopening its eyes", shot => standing(shot, start));
   }, { height: 720, clock: true });
-  console.log("Browser Beacon smoke passed: authored art and placement, pointer and keyboard input, " +
-    "tomato blink and hop on a stable anchor, and reset");
+  console.log(sprite
+    ? "Browser Beacon sprite smoke passed: edited hop airborne at motion ticks 13 and 16, " +
+      "planted windup at tick 17, and reset"
+    : "Browser Beacon smoke passed: authored art and placement, pointer and keyboard input, " +
+      "tomato blink and hop on a stable anchor, and reset");
 }
 
 const [mode, directory] = process.argv.slice(2);
-if (!directory || process.argv.length !== 4 || !["author", "play"].includes(mode)) {
-  throw new Error("Usage: node scripts/smoke-beacon.mjs author|play DIRECTORY");
+if (!directory || process.argv.length !== 4 || !["author", "play", "sprite"].includes(mode)) {
+  throw new Error("Usage: node scripts/smoke-beacon.mjs author|play|sprite DIRECTORY");
 }
 if (mode === "author") await author(directory);
-else await play(directory);
+else await play(directory, mode === "sprite");
