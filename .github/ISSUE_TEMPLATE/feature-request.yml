@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose a change to the engine, tools, or developer workflow.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and workflow
+      description: Explain what you are trying to do and what Goje does not let you do today.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the behavior that would solve the problem and which platforms or tools it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and references
+      description: Mention workarounds, related issues or RFCs, and relevant tradeoffs if known.

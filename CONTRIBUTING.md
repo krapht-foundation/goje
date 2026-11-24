@@ -28,4 +28,6 @@ Record accepted behavior and verification criteria in `specs/`, and record archi
 
 The [M1 runtime foundation RFC](rfcs/0002-m1-runtime-foundation.md) keeps the approved milestone plan and links to the accepted runtime specification and architecture decision. Follow that pattern rather than maintaining duplicate contracts.
 
+The [authoring templates](.ai/README.md#authoring-templates) provide starting outlines for specs, decisions, and proposals. Dependabot checks the root Go module, npm tool dependencies, and GitHub Actions weekly. Go tools pinned directly in [`tools.mk`](tools.mk) are updated separately.
+
 By participating, you agree to the [code of conduct](CODE_OF_CONDUCTS.md). Report security concerns through the [security policy](SECURITY.md), not a public issue.
