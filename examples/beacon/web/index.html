@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goje Beacon</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { margin: 1rem; background: #141c29; color: white; font: 1rem system-ui; }
+    #goje { display: block; width: min(100%, 640px); aspect-ratio: 5 / 3; }
+  </style>
+</head>
+<body>
+  <p id="controls">Click the beacon or press Space to toggle it. Press R to reset.</p>
+  <p id="status" role="status">Loading Goje Beacon…</p>
+  <canvas id="goje" tabindex="0" aria-label="Goje Beacon" aria-describedby="controls"></canvas>
+  <script src="wasm_exec.js"></script>
+  <script>
+    /** @file Start the embedded beacon game and report startup errors. */
+    const status = document.querySelector("#status");
+
+    /** @returns {Promise<void>} Resolves when the game exits. */
+    async function start() {
+      const go = new Go();
+      let exitCode = 0;
+      /** @param {number} code - Go program exit status. */
+      go.exit = code => { exitCode = code; };
+      const response = await fetch("playground.wasm");
+      if (!response.ok) throw new Error(`Wasm download failed: HTTP ${response.status}`);
+      const { instance } = await WebAssembly.instantiateStreaming(response, go.importObject);
+      status.hidden = true;
+      await go.run(instance);
+      status.hidden = false;
+      status.textContent = exitCode === 0 ? "The game stopped." : "The game stopped with an error. Check the console.";
+    }
+    start().catch(error => { status.hidden = false; status.textContent = error.message; });
+  </script>
+</body>
+</html>

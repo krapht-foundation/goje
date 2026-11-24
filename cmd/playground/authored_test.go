@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -9,11 +10,25 @@ import (
 	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
 )
 
+// Count opens through the same filesystem that supplies startup data.
+type countingProjectFS struct {
+	fs.FS
+	opens int
+}
+
+func (root *countingProjectFS) Open(path string) (fs.File, error) {
+	root.opens++
+	return root.FS.Open(path)
+}
+
 func TestAuthoredCommandsUseTickStartCameraAndRestoreOnRestart(t *testing.T) {
-	factory, err := authoredFactory()
+	root := &countingProjectFS{FS: authoredFiles}
+	loaded, err := loadAuthored(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	factory := loaded.factory()
+	startupOpens := root.opens
 	var scene *authoredCourtyard
 	runtime, err := engine.Start(func() engine.Scene {
 		scene = factory().(*authoredCourtyard)
@@ -59,13 +74,17 @@ func TestAuthoredCommandsUseTickStartCameraAndRestoreOnRestart(t *testing.T) {
 		len(scene.route) != 0 {
 		t.Fatalf("restart did not restore authored state: %+v", scene)
 	}
+	if root.opens != startupOpens {
+		t.Fatalf("running and resetting reopened %d project files", root.opens-startupOpens)
+	}
 }
 
 func TestAuthoredRedirectsKeepTheCurrentEdge(t *testing.T) {
-	factory, err := authoredFactory()
+	loaded, err := loadAuthored(authoredFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
+	factory := loaded.factory()
 	s := factory().(*authoredCourtyard)
 	if err := s.Enter(); err != nil {
 		t.Fatal(err)
@@ -114,6 +133,11 @@ func TestAuthoredRedirectsKeepTheCurrentEdge(t *testing.T) {
 }
 
 func TestAuthoredWallEditChangesTheScoutRoute(t *testing.T) {
+	data, err := authoredFiles.ReadFile("levels/courtyard.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authoredLevel := string(data)
 	// Remove the middle wall tile without changing the command or spawn.
 	const wall = `"....#...."`
 	_, remainder, found := strings.Cut(authoredLevel, wall)

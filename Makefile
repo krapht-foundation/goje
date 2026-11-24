@@ -111,24 +111,50 @@ smoke-tile-maker: build-tile-maker ## Verify pixel editing, previews, and PNG ha
 smoke-level-roundtrip: build-level-editor build-tile-maker ## Play both browser exports on desktop and web
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/level-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
-		mkdir -p "$$tmp/playground/levels" "$$tmp/playground/art" "$$tmp/web"; \
+		mkdir -p "$$tmp/playground" "$$tmp/web"; \
 		cp cmd/playground/*.go "$$tmp/playground/"; \
-		tile="$$tmp/playground/art/ground.png"; \
+		cp -R cmd/playground/levels cmd/playground/art "$$tmp/playground/"; \
+		printf '%s\n' '{"version":1,"level":"levels/edited.json","ground":"art/edited.png"}' > "$$tmp/playground/goje.json"; \
+		tile="$$tmp/playground/art/edited.png"; \
 		$(NODE) scripts/smoke-tile-maker.mjs "$$tile"; \
 		$(GO) run ./cmd/tilecheck "$$tile"; \
-		level="$$tmp/playground/levels/courtyard.json"; \
+		level="$$tmp/playground/levels/edited.json"; \
 		$(NODE) scripts/smoke-level-editor.mjs "$$level"; \
 		$(GO) run ./cmd/levelcheck "$$level"; \
+		$(GO) run ./cmd/projectcheck "$$tmp/playground"; \
 		$(GO) build -tags goje_smoke -o "$$tmp/playground-smoke" "$$tmp/playground"; \
 		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/web/playground.wasm" "$$tmp/playground"; \
 		install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/web/"; \
 		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/playground-smoke" --shortcut; \
 		$(NODE) scripts/smoke-web.mjs "$$tmp/web"
 
+.PHONY: smoke-beacon
+smoke-beacon: build-level-editor build-tile-maker ## Author and play an independent 2D game on desktop and web
+	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/beacon.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GOWORK=off; \
+		mkdir -p "$$tmp/assets" "$$tmp/web"; \
+		cp examples/beacon/*.go "$$tmp/"; \
+		cp examples/beacon/assets/goje.json "$$tmp/assets/"; \
+		$(NODE) scripts/smoke-beacon.mjs author "$$tmp/assets"; \
+		$(GO) run ./cmd/projectcheck "$$tmp/assets"; \
+		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
+		cd "$$tmp"; \
+		$(GO) mod init example.com/beacon; \
+		$(GO) mod edit -go="$$go_version" \
+			-require=github.com/krapht-foundation/goje@v0.0.0 \
+			-replace=github.com/krapht-foundation/goje="$(CURDIR)"; \
+		$(GO) mod tidy; \
+		$(GO) build -tags goje_beacon_smoke -o beacon .; \
+		GOOS=js GOARCH=wasm $(GO) build -o web/playground.wasm .; \
+		install -m 0644 "$(CURDIR)/examples/beacon/web/index.html" \
+			"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" web/; \
+		$(PYTHON) -c 'import subprocess; subprocess.run(["./beacon"], check=True, timeout=20)'; \
+		$(NODE) "$(CURDIR)/scripts/smoke-beacon.mjs" play "$$tmp/web"
+
 check-example: ## Build the reference playground from a separate module on desktop and web
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go "$$tmp/"; \
-		cp cmd/playground/authored.go "$$tmp/"; \
+		cp cmd/playground/authored.go cmd/playground/goje.json "$$tmp/"; \
 		cp -R cmd/playground/levels cmd/playground/art "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \

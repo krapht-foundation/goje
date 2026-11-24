@@ -72,3 +72,5 @@ jobs:
         run: make smoke-web
       - name: Play both browser exports on desktop and web
         run: xvfb-run -a make smoke-level-roundtrip
+      - name: Play the independent 2D game on desktop and web
+        run: xvfb-run -a make smoke-beacon

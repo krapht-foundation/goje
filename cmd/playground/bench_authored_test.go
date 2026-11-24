@@ -29,10 +29,11 @@ func (s *authoredBenchmark) Update(tick engine.Tick) (engine.Transition, error) 
 }
 
 func BenchmarkAuthoredAdvance(b *testing.B) {
-	factory, err := authoredFactory()
+	loaded, err := loadAuthored(authoredFiles)
 	if err != nil {
 		b.Fatal(err)
 	}
+	factory := loaded.factory()
 	session, err := driver.Start(b.Context(), func() engine.Scene {
 		return &authoredBenchmark{factory().(*authoredCourtyard)}
 	}, driver.Config{ImageSize: groundRegion.Union(markerRegion).Size()})

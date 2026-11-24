@@ -22,6 +22,11 @@ func Decode(r io.Reader) (Layout, error) {
 	if err != nil {
 		return Layout{}, fmt.Errorf("decode courtyard: %w", err)
 	}
+	return Resolve(board)
+}
+
+// Resolve checks the reference game's placement rules on an already decoded board.
+func Resolve(board level.Board) (Layout, error) {
 	layout := Layout{Board: board}
 	for p := range board.Placements() {
 		var spawn *level.Placement

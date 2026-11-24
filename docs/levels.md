@@ -27,6 +27,16 @@ Other games can use `level.Decode` with a reader they supply. The decoder valida
 
 Tools that already hold terrain rows and placements can call `level.Encode`. It validates the same v1 constraints as `Decode`, preserves row and placement order, and returns deterministic JSON bytes. It does not open or overwrite a file. The [Level Builder RFC](../rfcs/0005-m4-level-builder.md) describes the browser editor workflow.
 
+## Validate a project from the command line
+
+Put a Level Builder export and a Tile Maker PNG in the same project directory. Name them in a [`goje.json` manifest](../specs/project-v1.md), then run:
+
+```sh
+go run ./cmd/projectcheck path/to/project
+```
+
+`projectcheck` validates the paths and both assets without rewriting them. Unlike `levelcheck`, it does not enforce the courtyard's placement rules. A Go game can call `project.Load` with a filesystem rooted at its `goje.json` and then validate the placement kinds it supports.
+
 ## Route a unit on the ground grid
 
 Create an `engine/grid.Router` with the board dimensions and keep it for the life of the scene. Pass the ground coordinates from your inverse projection to `router.CellAt`; it rejects points outside the board but does not test for walls.
@@ -68,7 +78,7 @@ GOMAXPROCS=1 GOOS=js GOARCH=wasm go test -tags goje_bench \
 
 ## Play a level edit
 
-Export the edited courtyard from the Level Builder. The playground embeds its level at build time, so test the download in a scratch copy of the command rather than replacing the repository fixture. From the repository root, set `download` to the actual path:
+Export the edited courtyard from the Level Builder. The reference command embeds its project at build time, so use a scratch copy rather than replacing the repository fixture. From the repository root, set `download` to the actual path:
 
 ```sh
 download="$HOME/Downloads/courtyard-edited.json"
@@ -76,21 +86,25 @@ go run ./cmd/levelcheck "$download"
 
 mkdir -p .build
 work=$(mktemp -d "$PWD/.build/play-edited.XXXXXX")
-mkdir -p "$work/playground/levels" "$work/web"
-cp cmd/playground/*.go "$work/playground/"
-cp -R cmd/playground/art "$work/playground/"
-cp "$download" "$work/playground/levels/courtyard.json"
+mkdir -p "$work/playground" "$work/web"
+cp cmd/playground/*.go cmd/playground/goje.json "$work/playground/"
+cp -R cmd/playground/levels cmd/playground/art "$work/playground/"
+cp "$download" "$work/playground/levels/edited.json"
 ```
 
-To try your own ground art in the same build, [draw and export a tile in the Tile Maker](playground.md#draw-a-ground-tile-in-the-browser). Leave the corners transparent so the tiles fit the isometric grid. Set `tile` to the actual download path, then validate and copy it before launching either target:
+In the scratch copy of `goje.json`, set `level` to `levels/edited.json`. Keep `ground` as `art/ground.png` to use the original art, or [draw and export a tile in the Tile Maker](playground.md#draw-a-ground-tile-in-the-browser). Leave the corners transparent so the tiles fit the isometric grid. Set `tile` to the actual download path:
 
 ```sh
 tile="$HOME/Downloads/tile.png"
 go run ./cmd/tilecheck "$tile"
-cp "$tile" "$work/playground/art/ground.png"
+cp "$tile" "$work/playground/art/edited.png"
 ```
 
-The PNG changes how walkable cells look, not which cells are walkable. See [ground art requirements](playground.md#validate-custom-ground-art).
+If you copied a custom tile, set `ground` to `art/edited.png` in the scratch manifest. The PNG changes how walkable cells look, not which cells are walkable. Validate the assembled project before launching either target:
+
+```sh
+go run ./cmd/projectcheck "$work/playground"
+```
 
 - **Desktop:** Run `go run "$work/playground"`.
 - **Browser:** Build the Wasm bundle and serve it on loopback:
@@ -101,8 +115,8 @@ The PNG changes how walkable cells look, not which cells are walkable. See [grou
   node scripts/playground-server.mjs 8080 "$work/web"
   ```
 
-  Open `http://127.0.0.1:8080/`. The browser build does not need to load the JSON separately.
+  Open `http://127.0.0.1:8080/`. The browser build embeds the same project as the desktop build.
 
 Select the scout and right-click the center of ground cell `(6, 2)`, two columns beyond the opening. The scout crosses the opening without going around the wall. Press **R** to restore the scout's spawn and the lookout's edited position. Stop the app before removing the scratch directory.
 
-To automate the workflow, run `make setup-web` once and then `make smoke-level-roundtrip`. The smoke test authors, exports, and reopens a tile in the Tile Maker and an edited courtyard in the Level Builder. It runs `tilecheck` and `levelcheck` on the exact downloads, embeds them without rewriting either file, and checks the rendered accent, transparent corners, moved lookout, shortcut crossing, arrival, and reset on desktop and web. It requires a working native graphics session; on headless Linux with the native smoke dependencies installed, use `xvfb-run -a make smoke-level-roundtrip`.
+To automate the workflow, run `make setup-web` once and then `make smoke-level-roundtrip`. The smoke test authors and reopens both files in the editors, validates the exact downloads with `tilecheck` and `levelcheck`, and points the scratch manifest at their new paths while leaving the original fixtures in place. `projectcheck` validates the assembled project before both builds check the rendered accent, transparent corners, moved lookout, shortcut crossing, arrival, and reset. It requires a working native graphics session; on headless Linux with the native smoke dependencies installed, use `xvfb-run -a make smoke-level-roundtrip`.

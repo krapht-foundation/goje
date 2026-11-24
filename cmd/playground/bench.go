@@ -92,14 +92,15 @@ func runBenchmark() error {
 		}
 		factory = func() engine.Scene { return newBenchmarkCourtyard(worldItems) }
 	case "ground":
-		factory, err = groundBenchmarkFactory(sprites != 0, mode == "on")
+		loaded, loadErr := loadAuthored(authoredFiles)
+		if loadErr != nil {
+			return loadErr
+		}
+		factory, err = groundBenchmarkFactory(loaded.layout, sprites != 0, mode == "on")
 		if err != nil {
 			return err
 		}
-		config, err = authoredConfig()
-		if err != nil {
-			return err
-		}
+		config = loaded.config()
 	default:
 		return fmt.Errorf("unknown benchmark fixture: %q", fixture)
 	}

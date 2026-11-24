@@ -34,15 +34,11 @@ func runPlayground() error {
 		factory = newCourtyard
 		config.Title = "Goje Patrol · Click: select · Arrows: pan · W/S: zoom · Space: patrol · R: reset"
 	default:
-		var err error
-		factory, err = authoredFactory()
+		loaded, err := loadAuthored(authoredFiles)
 		if err != nil {
 			return err
 		}
-		config, err = authoredConfig()
-		if err != nil {
-			return err
-		}
+		config, factory = loaded.config(), loaded.factory()
 	}
 	if os.Getenv("GOJE_DIAGNOSTICS") == "1" {
 		// Keep the demo finite so native and browser users can both inspect a

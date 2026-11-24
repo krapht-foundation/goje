@@ -3,7 +3,7 @@
 package main
 
 import (
-	"strings"
+	"bytes"
 	"testing"
 	"time"
 
@@ -29,7 +29,11 @@ func BenchmarkGroundAdvance(b *testing.B) {
 
 func benchmarkGroundAdvance(b *testing.B, dense, tiles bool) {
 	b.Helper()
-	factory, err := groundBenchmarkFactory(dense, tiles)
+	loaded, err := loadAuthored(authoredFiles)
+	if err != nil {
+		b.Fatal(err)
+	}
+	factory, err := groundBenchmarkFactory(loaded.layout, dense, tiles)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -58,16 +62,20 @@ func benchmarkGroundAdvance(b *testing.B, dense, tiles bool) {
 }
 
 func BenchmarkGroundStartup(b *testing.B) {
+	data, err := authoredFiles.ReadFile("art/ground.png")
+	if err != nil {
+		b.Fatal(err)
+	}
 	b.Run("decode", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			if _, err := tile.Decode(strings.NewReader(authoredTile)); err != nil {
+			if _, err := tile.Decode(bytes.NewReader(data)); err != nil {
 				b.Fatal(err)
 			}
 		}
 	})
 	b.Run("pack", func(b *testing.B) {
-		pixels, err := tile.Decode(strings.NewReader(authoredTile))
+		pixels, err := tile.Decode(bytes.NewReader(data))
 		if err != nil {
 			b.Fatal(err)
 		}
