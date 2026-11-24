@@ -32,7 +32,12 @@ The skill and role adapters are relative symlinks into `.ai/`. Edit the canonica
 
 - [Workspace memory](memories/workspace.md) — how to resume work in a fresh session.
 - [Change reviewer](agents/goje-change-reviewer.md) — review scope, regressions, and platform coverage.
-- [Working memory template](templates/working-memory.md) — capture a handoff tied to an issue or pull request.
+
+## Authoring templates
+
+- Use the [agent](templates/agent.md) and [skill](templates/skill.md) templates for reusable roles and workflows.
+- Use the [memory](templates/memory.md) template for durable orientation and [working memory](templates/working-memory.md) for active handoffs.
+- Use the [spec](templates/spec.md), [ADR](templates/adr.md), [RFC](templates/rfc.md), and [runbook](templates/runbook.md) templates for documents in their corresponding repository directories, not under `.ai/`.
 
 ## Technical skills
 
