@@ -111,7 +111,7 @@ func runWindow(
 	width, height := window.GetFramebufferSize()
 	viewport := driver.Viewport(width, height, config.Width, config.Height)
 	needsDraw := true
-	keepActive := driver.BenchKeepActive()
+	keepActive := driver.BenchKeepActive() || probeKeepsActive()
 	focused := keepActive || window.GetAttrib(glfw.Focused) == glfw.True
 	session.SetActive(focused && !viewport.Empty())
 	window.SetFocusCallback(func(_ *glfw.Window, value bool) {

@@ -28,9 +28,12 @@ func runAuthoredSmoke(shortcut bool) error {
 	tomato := color.NRGBA{R: 215, G: 84, B: 73, A: 255}
 	ink := color.NRGBA{R: 36, G: 38, B: 46, A: 255}
 	eye := color.NRGBA{R: 244, G: 241, B: 235, A: 255}
-	motionTicks := 0
+	var ticks, motionTicks int
+	// Do not stall the host with synchronous pixel reads before the scout can reach a checkpoint.
+	arrivalTicks := 8 * scoutEdgeTicks
 	route := courtyardCheckpoint{name: "wall detour", check: func(v image.Rectangle) bool {
-		return pixelIs(v, 128, 94, tomato) && pixelIs(v, 208, 108, destinationColor)
+		return motionTicks >= 2*scoutEdgeTicks && pixelIs(v, 128, 94, tomato) &&
+			pixelIs(v, 208, 108, destinationColor)
 	}}
 	wallAndLookout := func(v image.Rectangle) bool {
 		return pixelIs(v, 176, 80, courtyardWallColor)
@@ -38,9 +41,11 @@ func runAuthoredSmoke(shortcut bool) error {
 	if shortcut {
 		// Match the highlight drawn through the Tile Maker in the round-trip smoke.
 		groundAccent = color.NRGBA{R: 222, G: 122, B: 66, A: 255}
+		arrivalTicks = 4 * scoutEdgeTicks
 		// The opening's projected scout anchor lies above the original detour.
 		route = courtyardCheckpoint{name: "shortcut crossing", check: func(v image.Rectangle) bool {
-			return pixelIs(v, 176, 85, tomato) && pixelIs(v, 208, 108, destinationColor)
+			return motionTicks >= scoutEdgeTicks && pixelIs(v, 176, 85, tomato) &&
+				pixelIs(v, 208, 108, destinationColor)
 		}}
 		wallAndLookout = func(v image.Rectangle) bool {
 			return !pixelIs(v, 176, 80, courtyardWallColor) && pixelIs(v, 176, 122, tokenColor) &&
@@ -56,7 +61,7 @@ func runAuthoredSmoke(shortcut bool) error {
 	checks := []courtyardCheckpoint{
 		{name: "authored spawn", check: spawn},
 		{name: "idle scout blinks", check: func(v image.Rectangle) bool {
-			return pixelIs(v, 139, 70, ink) && pixelIs(v, 144, 71, tomato)
+			return ticks >= 114 && pixelIs(v, 139, 70, ink) && pixelIs(v, 144, 71, tomato)
 		}},
 		{
 			name:  "ground art and planted scout pivot under zoom",
@@ -101,7 +106,8 @@ func runAuthoredSmoke(shortcut bool) error {
 		courtyardCheckpoint{
 			name: "arrival without destination marker",
 			check: func(v image.Rectangle) bool {
-				return pixelIs(v, 208, 103, tomato) && !pixelIs(v, 208, 108, destinationColor)
+				return motionTicks >= arrivalTicks && pixelIs(v, 208, 103, tomato) &&
+					!pixelIs(v, 208, 108, destinationColor)
 			},
 		},
 		courtyardCheckpoint{
@@ -112,6 +118,7 @@ func runAuthoredSmoke(shortcut bool) error {
 	)
 	index, issued := 0, false
 	input := func() engine.Input {
+		ticks++
 		if motionTicks != 0 {
 			motionTicks++
 		}

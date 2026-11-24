@@ -13,6 +13,9 @@ import (
 // swap. The smoke command installs it before Run; regular builds exclude it.
 var FrameProbe func(viewport image.Rectangle) error
 
+// Scripted framebuffer checks do not depend on which native window has focus.
+func probeKeepsActive() bool { return FrameProbe != nil }
+
 func afterDraw(viewport image.Rectangle) error {
 	if FrameProbe != nil {
 		return FrameProbe(viewport)

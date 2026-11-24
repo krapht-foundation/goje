@@ -256,12 +256,18 @@ async function smokeAuthored(browser, url, shortcut) {
       await page.clock.runFor(132);
       await waitCourtyard(canvas, "wall occludes the moving scout", frame =>
         matches(frame, 159, 78, tomato) && matches(frame, 160, 81, wall));
+      // The detour passes the third tile at tick 48. Sample every browser
+      // frame around it so screenshot latency cannot skip the moving pose.
+      await page.clock.runFor(300);
+      let sawDetour = false;
+      for (let frame = 0; frame < 24 && !sawDetour; frame++) {
+        await page.clock.runFor(16);
+        const shot = PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
+        sawDetour = matches(shot, 128, 94, tomato) && matches(shot, 208, 108, destination);
+      }
+      assert.ok(sawDetour, "No matching courtyard frame for authored wall detour");
     }
     await page.clock.resume();
-    if (!shortcut) {
-      await waitCourtyard(canvas, "authored wall detour", frame =>
-        matches(frame, 128, 94, tomato) && matches(frame, 208, 108, destination));
-    }
     assert.deepEqual(contextMenus, [true], "the canvas did not suppress the real context menu");
     assert.ok(await page.evaluate(() => document.body.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
