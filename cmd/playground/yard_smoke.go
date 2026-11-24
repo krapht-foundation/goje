@@ -172,6 +172,10 @@ func runYardSmoke() error {
 	if err != nil {
 		return err
 	}
+	yardLayout, err := loadYard(authoredFiles)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	script := &yardScript{}
@@ -194,7 +198,7 @@ func runYardSmoke() error {
 	}
 	defer func() { desktop.FrameProbe = nil }()
 	if err := platform.Run(ctx, config, func() engine.Scene {
-		script.yard = &yardCourtyard{layout: loaded.layout, idle: loaded.idle, move: loaded.move}
+		script.yard = &yardCourtyard{layout: yardLayout, idle: loaded.idle, move: loaded.move}
 		return &yardSmokeScene{Scene: script.yard, script: script}
 	}); err != nil {
 		return fmt.Errorf("native yard smoke: %w", err)

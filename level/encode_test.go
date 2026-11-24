@@ -20,7 +20,7 @@ func TestEncodeLargestBoard(t *testing.T) {
 			ID: ^uint32(0) - uint32(i), Kind: strings.Repeat("k", 32), X: 120 + i%8, Y: i / 8,
 		}
 	}
-	data, err := level.Encode(rows, placements)
+	data, err := level.Encode(rows, placements, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestEncodeRejectsInvalidContent(t *testing.T) {
 		{"blocked", []string{"#"}, []level.Placement{p}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if data, err := level.Encode(tc.rows, tc.placements); err == nil || data != nil {
+			if data, err := level.Encode(tc.rows, tc.placements, nil); err == nil || data != nil {
 				t.Fatalf("invalid level returned %q and error %v", data, err)
 			}
 		})

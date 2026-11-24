@@ -38,8 +38,23 @@ func runPlayground() error {
 		if err != nil {
 			return err
 		}
-		config, factory = loaded.config(), loaded.yardFactory()
+		layout, err := loadYard(authoredFiles)
+		if err != nil {
+			return err
+		}
+		config, factory = loaded.config(), loaded.yardFactory(layout)
 		config.Title = "Goje Yard · Arrows / WASD: walk · R: reset"
+	case "skirmish":
+		loaded, err := loadAuthored(authoredFiles)
+		if err != nil {
+			return err
+		}
+		board, err := loadSkirmish(authoredFiles)
+		if err != nil {
+			return err
+		}
+		config, factory = loaded.config(), loaded.skirmishFactory(board)
+		config.Title = "Goje Skirmish · Left click: select · Right click: move · Arrows: pan · W/S: zoom · R: reset"
 	default:
 		loaded, err := loadAuthored(authoredFiles)
 		if err != nil {

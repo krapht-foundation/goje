@@ -9,11 +9,25 @@
  */
 
 /**
+ * @typedef {object} Zone
+ * @property {number} id - Stable zone ID.
+ * @property {string} kind - Game-defined kind, treated as plain text.
+ * @property {"solid" | "trigger"} role - Whether the zone blocks movement or only reports overlaps.
+ * @property {number} x - First column.
+ * @property {number} y - First row.
+ * @property {number} w - Width in cells.
+ * @property {number} h - Height in cells.
+ * @property {number} bottom - Lowest projected pixel of the vertical extent.
+ * @property {number} top - Projected pixel just above the vertical extent.
+ */
+
+/**
  * @typedef {object} EditorState
  * @property {number} width - Board columns.
  * @property {number} height - Board rows.
  * @property {string} terrain - Row-major cells, "." for floor and "#" for wall.
  * @property {Placement[]} placements - Placements in file order.
+ * @property {Zone[]} zones - Zones in file order.
  * @property {boolean} dirty - Whether edits have not been exported.
  * @property {boolean} canUndo - Whether undo has an action.
  * @property {boolean} canRedo - Whether redo has an action.
@@ -27,6 +41,9 @@
  * @property {(x: number, y: number) => string} paint - Paint one stroke cell.
  * @property {(commit: boolean) => void} end - Commit or roll back the stroke.
  * @property {(fromX: number, fromY: number, toX: number, toY: number) => string} move - Move a placement.
+ * @property {(kind: string, role: string, x: number, y: number, w: number, h: number, bottom: number, top: number) => string} addZone - Append a zone.
+ * @property {(id: number, kind: string, role: string, x: number, y: number, w: number, h: number, bottom: number, top: number) => string} editZone - Replace a zone.
+ * @property {(id: number) => string} deleteZone - Remove a zone.
  * @property {() => string} undo - Undo one action.
  * @property {() => string} redo - Redo one action.
  * @property {() => EditorState} state - Snapshot the document.
@@ -47,20 +64,31 @@ const toolButtons = {
   floor: /** @type {HTMLButtonElement} */ (document.querySelector("#floor")),
   wall: /** @type {HTMLButtonElement} */ (document.querySelector("#wall")),
   placement: /** @type {HTMLButtonElement} */ (document.querySelector("#placement")),
+  zone: /** @type {HTMLButtonElement} */ (document.querySelector("#zone")),
 };
 const undoButton = /** @type {HTMLButtonElement} */ (document.querySelector("#undo"));
 const redoButton = /** @type {HTMLButtonElement} */ (document.querySelector("#redo"));
 const exportButton = /** @type {HTMLButtonElement} */ (document.querySelector("#export"));
+const zonePanel = /** @type {HTMLFieldSetElement} */ (document.querySelector("#zones"));
+const zoneSelect = /** @type {HTMLSelectElement} */ (document.querySelector("#zone-select"));
+const zoneKind = /** @type {HTMLInputElement} */ (document.querySelector("#zone-kind"));
+const zoneRole = /** @type {HTMLSelectElement} */ (document.querySelector("#zone-role"));
+const zoneNumbers = ["x", "y", "w", "h", "bottom", "top"].map(
+  name => /** @type {HTMLInputElement} */ (document.querySelector(`#zone-${name}`)),
+);
+const zoneAdd = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-add"));
+const zoneApply = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-apply"));
+const zoneDelete = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-delete"));
 const ctx = /** @type {CanvasRenderingContext2D} */ (board.getContext("2d"));
 
 /** @type {Bridge} */
 let bridge;
 /**
  * Mirror of the Go document used for drawing; refreshed after each change.
- * @type {{width: number, height: number, terrain: Uint8Array, byIndex: Map<number, Placement>, byId: Map<number, Placement>, dirty: boolean, canUndo: boolean, canRedo: boolean} | null}
+ * @type {{width: number, height: number, terrain: Uint8Array, byIndex: Map<number, Placement>, byId: Map<number, Placement>, zones: Zone[], dirty: boolean, canUndo: boolean, canRedo: boolean} | null}
  */
 let doc = null;
-/** @type {"floor" | "wall" | "placement"} */
+/** @type {"floor" | "wall" | "placement" | "zone"} */
 let tool = "floor";
 const cursor = { x: 0, y: 0 };
 /** @type {number | null} ID of the placement chosen for a move. */
@@ -72,6 +100,10 @@ let selectedId = null;
 let stroke = null;
 /** @type {{pointerId: number, x: number, y: number} | null} Pointer that selected a placement and may drag it. */
 let drag = null;
+/** @type {number | null} ID of the zone shown in the form and outlined on the board. */
+let selectedZoneId = null;
+/** @type {{x: number, y: number} | null} First corner of the zone being drawn. */
+let zoneAnchor = null;
 let openSeq = 0;
 let baseName = "level";
 let scale = 1;
@@ -115,11 +147,15 @@ function refresh(replaced = false) {
       changed.add(i);
     }
   }
-  doc = { width: s.width, height: s.height, terrain, byIndex, byId, dirty: s.dirty, canUndo: s.canUndo, canRedo: s.canRedo };
+  const zonesChanged = full || JSON.stringify(s.zones) !== JSON.stringify(doc.zones);
+  doc = { width: s.width, height: s.height, terrain, byIndex, byId, zones: s.zones, dirty: s.dirty, canUndo: s.canUndo, canRedo: s.canRedo };
   if (selectedId !== null && !byId.has(selectedId)) selectedId = null;
-  if (full) {
-    resizeBoard();
+  if (selectedZoneId !== null && !s.zones.some(z => z.id === selectedZoneId)) selectedZoneId = null;
+  if (full) resizeBoard();
+  if (zonesChanged) {
+    // A zone covers many cells, so redraw the whole board and the list together.
     drawAll();
+    updateZoneList();
   } else {
     for (const i of changed) drawCell(i % doc.width, Math.floor(i / doc.width));
   }
@@ -177,6 +213,7 @@ function drawCell(x, y) {
   ctx.strokeStyle = "#8c8572";
   ctx.lineWidth = 1;
   ctx.strokeRect(px + 0.5, py + 0.5, CELL - 1, CELL - 1);
+  drawZones(x, y, px, py);
 
   const p = doc.byIndex.get(i);
   if (p) {
@@ -216,6 +253,9 @@ function updateControls() {
   undoButton.disabled = !open || !doc.canUndo;
   redoButton.disabled = !open || !doc.canRedo;
   exportButton.disabled = !open;
+  zonePanel.disabled = !open;
+  zoneApply.disabled = !open || selectedZoneId === null;
+  zoneDelete.disabled = !open || selectedZoneId === null;
   document.title = open && doc.dirty ? "• Goje Level Editor" : "Goje Level Editor";
 }
 
@@ -226,8 +266,11 @@ function describeCursor() {
   let text = `Cell ${cursor.x}, ${cursor.y}: ${doc.terrain[i] === WALL ? "wall" : "floor"}`;
   const p = doc.byIndex.get(i);
   if (p) text += `, ${p.kind} #${p.id}`;
+  const zones = doc.zones.filter(z => zoneCovers(z, cursor.x, cursor.y));
+  if (zones.length) text += `, inside ${zones.map(z => `${z.role} zone #${z.id} ${z.kind}`).join(" and ")}`;
   const chosen = selectedId === null ? undefined : doc.byId.get(selectedId);
   if (chosen) text += `. Moving ${chosen.kind} #${chosen.id} from ${chosen.x}, ${chosen.y}`;
+  if (zoneAnchor) text += `. Drawing a zone from ${zoneAnchor.x}, ${zoneAnchor.y}`;
   cursorLine.textContent = `${text}.`;
 }
 
@@ -427,13 +470,216 @@ function setSelection(id) {
   describeCursor();
 }
 
+/**
+ * Report whether a zone covers a cell.
+ * @param {Zone} z - Zone to test.
+ * @param {number} x - Column.
+ * @param {number} y - Row.
+ * @returns {boolean} Whether the cell is inside the zone's rectangle.
+ */
+function zoneCovers(z, x, y) {
+  return x >= z.x && y >= z.y && x < z.x + z.w && y < z.y + z.h;
+}
+
+/**
+ * Draw zone overlays on one cell. Solids are hatched and triggers have a dotted border, with an
+ * S or T label and the ID at the zone's first cell, so the role is never shown by color alone.
+ * @param {number} x - Column.
+ * @param {number} y - Row.
+ * @param {number} px - Cell left edge in CSS pixels.
+ * @param {number} py - Cell top edge in CSS pixels.
+ */
+function drawZones(x, y, px, py) {
+  for (const z of doc.zones) {
+    if (!zoneCovers(z, x, y)) continue;
+    const solid = z.role === "solid";
+    ctx.fillStyle = solid ? "rgba(234, 138, 40, 0.38)" : "rgba(56, 189, 248, 0.32)";
+    ctx.fillRect(px, py, CELL, CELL);
+    ctx.strokeStyle = solid ? "#b45309" : "#0369a1";
+    ctx.lineWidth = 2;
+    if (solid) {
+      ctx.beginPath();
+      ctx.moveTo(px, py + CELL);
+      ctx.lineTo(px + CELL, py);
+      ctx.moveTo(px, py + CELL / 2);
+      ctx.lineTo(px + CELL / 2, py);
+      ctx.moveTo(px + CELL / 2, py + CELL);
+      ctx.lineTo(px + CELL, py + CELL / 2);
+      ctx.stroke();
+    } else {
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(px + 2, py + 2, CELL - 4, CELL - 4);
+      ctx.setLineDash([]);
+    }
+    if (x === z.x && y === z.y) {
+      ctx.fillStyle = "#111";
+      ctx.font = "bold 10px system-ui, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(`${solid ? "S" : "T"}${z.id}`, px + 3, py + 3);
+    }
+    if (z.id === selectedZoneId) {
+      ctx.strokeStyle = "#e11d48";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      if (x === z.x) {
+        ctx.moveTo(px + 2, py);
+        ctx.lineTo(px + 2, py + CELL);
+      }
+      if (x === z.x + z.w - 1) {
+        ctx.moveTo(px + CELL - 2, py);
+        ctx.lineTo(px + CELL - 2, py + CELL);
+      }
+      if (y === z.y) {
+        ctx.moveTo(px, py + 2);
+        ctx.lineTo(px + CELL, py + 2);
+      }
+      if (y === z.y + z.h - 1) {
+        ctx.moveTo(px, py + CELL - 2);
+        ctx.lineTo(px + CELL, py + CELL - 2);
+      }
+      ctx.stroke();
+    }
+  }
+  if (zoneAnchor && zoneAnchor.x === x && zoneAnchor.y === y) {
+    ctx.strokeStyle = "#c026d3";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([4, 2]);
+    ctx.strokeRect(px + 3, py + 3, CELL - 6, CELL - 6);
+    ctx.setLineDash([]);
+  }
+}
+
+/** Rebuild the zone list from the mirror, as text, keeping the selection. */
+function updateZoneList() {
+  zoneSelect.replaceChildren(...doc.zones.map(z => {
+    const option = document.createElement("option");
+    option.value = String(z.id);
+    option.textContent = `#${z.id} ${z.kind} (${z.role}) at ${z.x}, ${z.y}, ${z.w} × ${z.h} cells, height ${z.bottom} to ${z.top}`;
+    option.selected = z.id === selectedZoneId;
+    return option;
+  }));
+}
+
+/**
+ * Read the zone form as bridge arguments, or report why it cannot be used.
+ * @returns {[string, string, number, number, number, number, number, number] | null} Kind, role, x, y, w, h, bottom, top.
+ */
+function readZoneForm() {
+  const numbers = zoneNumbers.map(input => input.valueAsNumber);
+  if (!numbers.every(Number.isInteger)) {
+    setStatus("Zone position, size, and heights must be whole numbers.", true);
+    return null;
+  }
+  return [zoneKind.value.trim(), zoneRole.value, numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5]];
+}
+
+/**
+ * Show a zone's values in the form.
+ * @param {Zone} z - Zone to show.
+ */
+function fillZoneForm(z) {
+  zoneKind.value = z.kind;
+  zoneRole.value = z.role;
+  [z.x, z.y, z.w, z.h, z.bottom, z.top].forEach((value, i) => {
+    zoneNumbers[i].value = String(value);
+  });
+}
+
+/**
+ * Choose the zone shown in the form and outlined on the board.
+ * @param {number | null} id - Zone ID, or null to clear.
+ */
+function selectZone(id) {
+  selectedZoneId = id;
+  const z = id === null ? undefined : doc.zones.find(candidate => candidate.id === id);
+  if (z) fillZoneForm(z);
+  drawAll();
+  updateZoneList();
+  updateControls();
+  describeCursor();
+}
+
+/** Add a zone from the form as one action and select it. */
+function addZoneFromForm() {
+  const values = readZoneForm();
+  if (!doc || !values) return;
+  const err = bridge.addZone(...values);
+  if (err) {
+    setStatus(err, true);
+    return;
+  }
+  refresh();
+  const added = doc.zones[doc.zones.length - 1];
+  selectZone(added.id);
+  setStatus(`Added ${added.role} zone #${added.id} ${added.kind}.`);
+}
+
+/** Replace the selected zone with the form's values as one action. */
+function applyZoneForm() {
+  const values = readZoneForm();
+  if (!doc || selectedZoneId === null || !values) return;
+  const err = bridge.editZone(selectedZoneId, ...values);
+  if (err) {
+    setStatus(err, true);
+    return;
+  }
+  refresh();
+  setStatus(`Updated zone #${selectedZoneId}.`);
+}
+
+/** Delete the selected zone as one action. */
+function deleteSelectedZone() {
+  if (!doc || selectedZoneId === null) return;
+  const id = selectedZoneId;
+  const err = bridge.deleteZone(id);
+  if (err) {
+    setStatus(err, true);
+    return;
+  }
+  selectedZoneId = null;
+  refresh();
+  setStatus(`Deleted zone #${id}.`);
+}
+
+/**
+ * Handle a zone-tool choice: the first cell is one corner, and the second is the opposite corner.
+ * @param {number} x - Column.
+ * @param {number} y - Row.
+ * @returns {boolean} Whether this choice started a zone, so a drag can finish it.
+ */
+function chooseZoneCell(x, y) {
+  if (!zoneAnchor) {
+    zoneAnchor = { x, y };
+    drawCell(x, y);
+    describeCursor();
+    setStatus(`Zone corner at ${x}, ${y}. Choose the opposite corner, or press Escape to cancel.`);
+    return true;
+  }
+  const anchor = zoneAnchor;
+  zoneAnchor = null;
+  drawCell(anchor.x, anchor.y);
+  const values = [Math.min(anchor.x, x), Math.min(anchor.y, y), Math.abs(anchor.x - x) + 1, Math.abs(anchor.y - y) + 1];
+  values.forEach((value, i) => {
+    zoneNumbers[i].value = String(value);
+  });
+  addZoneFromForm();
+  return false;
+}
+
 /** Cancel any in-progress gesture: a stroke rolls back, and a placement selection clears. */
 function cancelGesture() {
   const pointerId = drag?.pointerId;
   drag = null;
   if (pointerId !== undefined && board.hasPointerCapture(pointerId)) board.releasePointerCapture(pointerId);
   if (stroke) finishStroke(false);
-  else if (selectedId !== null) {
+  else if (zoneAnchor) {
+    const anchor = zoneAnchor;
+    zoneAnchor = null;
+    drawCell(anchor.x, anchor.y);
+    describeCursor();
+    setStatus("Zone canceled.");
+  } else if (selectedId !== null) {
     setSelection(null);
     setStatus("Move canceled.");
   }
@@ -445,6 +691,10 @@ function cancelGesture() {
 function applyAtCursor() {
   if (tool === "placement") {
     choosePlacementCell(cursor.x, cursor.y);
+    return;
+  }
+  if (tool === "zone") {
+    chooseZoneCell(cursor.x, cursor.y);
     return;
   }
   if (!beginStroke(null)) return;
@@ -469,16 +719,27 @@ function history(action) {
 }
 
 /**
- * Select an editing tool, clearing any pending placement move.
- * @param {"floor" | "wall" | "placement"} name - Tool to select.
+ * Select an editing tool, clearing any pending placement move or zone corner.
+ * @param {"floor" | "wall" | "placement" | "zone"} name - Tool to select.
  */
 function selectTool(name) {
   if (stroke) finishStroke(false);
   drag = null;
+  if (zoneAnchor) {
+    const anchor = zoneAnchor;
+    zoneAnchor = null;
+    drawCell(anchor.x, anchor.y);
+  }
   tool = name;
   if (selectedId !== null) setSelection(null);
   updateControls();
-  setStatus(name === "placement" ? "Move placement: choose a placement, then a floor cell." : `${name === "wall" ? "Wall" : "Floor"} brush selected.`);
+  const messages = {
+    placement: "Move placement: choose a placement, then a floor cell.",
+    zone: "Draw zone: choose one corner, then the opposite corner. Kind, role, and heights come from the Zones panel.",
+    floor: "Floor brush selected.",
+    wall: "Wall brush selected.",
+  };
+  setStatus(messages[name]);
 }
 
 /**
@@ -515,6 +776,8 @@ async function openFile(file) {
   stroke = null;
   drag = null;
   selectedId = null;
+  selectedZoneId = null;
+  zoneAnchor = null;
   cursor.x = 0;
   cursor.y = 0;
   baseName = name.replace(/\.json$/i, "") || "level";
@@ -597,6 +860,13 @@ function onPointerDown(event) {
     }
     return;
   }
+  if (tool === "zone") {
+    if (chooseZoneCell(x, y)) {
+      drag = { pointerId: event.pointerId, x, y };
+      board.setPointerCapture(event.pointerId);
+    }
+    return;
+  }
   if (!beginStroke(event.pointerId)) return;
   board.setPointerCapture(event.pointerId);
   paintCell(x, y);
@@ -628,6 +898,14 @@ function onPointerUp(event) {
     const from = drag;
     drag = null;
     if (board.hasPointerCapture(event.pointerId)) board.releasePointerCapture(event.pointerId);
+    if (tool === "zone") {
+      // Releasing on another cell finishes the rectangle; releasing in place keeps the corner for a second click.
+      if ((x !== from.x || y !== from.y) && inBounds(x, y)) {
+        moveCursor(x, y);
+        chooseZoneCell(x, y);
+      }
+      return;
+    }
     const chosen = selectedId === null ? undefined : doc.byId.get(selectedId);
     if (chosen && (x !== from.x || y !== from.y)) {
       if (inBounds(x, y)) moveCursor(x, y);
@@ -673,11 +951,21 @@ async function start() {
     if (file) openFile(file).catch(error => setStatus(error.message, true));
   });
   for (const [name, button] of Object.entries(toolButtons)) {
-    button.addEventListener("click", () => selectTool(/** @type {"floor" | "wall" | "placement"} */ (name)));
+    button.addEventListener("click", () => selectTool(/** @type {"floor" | "wall" | "placement" | "zone"} */ (name)));
   }
   undoButton.addEventListener("click", () => history("undo"));
   redoButton.addEventListener("click", () => history("redo"));
   exportButton.addEventListener("click", exportLevel);
+  zoneAdd.addEventListener("click", addZoneFromForm);
+  zoneApply.addEventListener("click", applyZoneForm);
+  zoneDelete.addEventListener("click", deleteSelectedZone);
+  zoneSelect.addEventListener("change", () => {
+    const id = Number(zoneSelect.value);
+    const z = doc?.zones.find(candidate => candidate.id === id);
+    if (!z) return;
+    selectZone(id);
+    moveCursor(z.x, z.y);
+  });
   board.addEventListener("keydown", onKeyDown);
   board.addEventListener("pointerdown", onPointerDown);
   board.addEventListener("pointermove", onPointerMove);

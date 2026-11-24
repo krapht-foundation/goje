@@ -108,3 +108,39 @@ button:focus-visible, .group:has(#open:focus-visible) .button, #board:focus-visi
   touch-action: none;
   cursor: crosshair;
 }
+
+.zones {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid #2c3850;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+}
+
+.zones legend {
+  padding: 0 4px;
+}
+
+.zones label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+}
+
+.zone-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.zones input[type="number"] {
+  width: 5.5em;
+}
+
+.zones input,
+.zones select {
+  font: inherit;
+}

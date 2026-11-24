@@ -1,5 +1,5 @@
 // Package level reads and writes Goje level documents without accessing the file system
-// or depending on a graphics host. Games resolve placement kinds themselves.
+// or depending on a graphics host. Games resolve placement and zone kinds themselves.
 package level
 
 import (
@@ -15,11 +15,15 @@ import (
 )
 
 const (
-	// MaxBytes is the maximum v1 document size, including whitespace.
+	// MaxBytes is the maximum document size of any version, including whitespace.
 	MaxBytes = 256 << 10
 
 	maxSide       = 128
 	maxPlacements = 1024
+	// MaxZones is the largest number of zones in a level.
+	MaxZones  = maxZones
+	maxZones  = 1024
+	maxHeight = 1024
 )
 
 // Placement describes a game-defined object at a zero-based ground cell.
@@ -29,10 +33,32 @@ type Placement struct {
 	X, Y int
 }
 
-// Board is a read-only v1 level. A zero Board is empty.
+// Role says whether a zone blocks movement or only reports overlaps.
+type Role string
+
+const (
+	// RoleSolid zones block bodies whose vertical extent overlaps theirs.
+	RoleSolid Role = "solid"
+	// RoleTrigger zones never block; a game reacts when a body overlaps them.
+	RoleTrigger Role = "trigger"
+)
+
+// Zone is a game-defined rectangle of whole cells, [X, X+W) × [Y, Y+H), with a
+// vertical extent [Bottom, Top) in whole projected pixels. It may overlap walls,
+// placements, and other zones.
+type Zone struct {
+	Kind        string
+	ID          uint32
+	Role        Role
+	X, Y, W, H  int
+	Bottom, Top int
+}
+
+// Board is a read-only level of version 1 or 2. A zero Board is empty.
 type Board struct {
 	rows       []string
 	placements []Placement
+	zones      []Zone
 }
 
 // Size returns the ground grid width and height in cells.
@@ -53,8 +79,13 @@ func (b Board) Walkable(x, y int) bool {
 // the backing slice. The iterator is valid for the lifetime of the board.
 func (b Board) Placements() iter.Seq[Placement] { return slices.Values(b.placements) }
 
-// Decode reads exactly one v1 JSON document, including any trailing whitespace.
-// It does not close r. On error the returned board is empty.
+// Zones yields zone values in document order without exposing the backing
+// slice. A version 1 level has none. The iterator is valid for the lifetime of
+// the board.
+func (b Board) Zones() iter.Seq[Zone] { return slices.Values(b.zones) }
+
+// Decode reads exactly one version 1 or 2 JSON document, including any trailing
+// whitespace. It does not close r. On error the returned board is empty.
 func Decode(r io.Reader) (Board, error) {
 	data, err := io.ReadAll(io.LimitReader(r, MaxBytes+1))
 	if err != nil {
@@ -69,25 +100,38 @@ func Decode(r io.Reader) (Board, error) {
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
 	var b Board
-	if err := readObject(d, []string{"version", "rows", "placements"}, func(field string) error {
-		var err error
-		switch field {
-		case "version":
-			v, versionErr := readUint(d, 32)
-			if versionErr != nil {
-				return versionErr
+	var version uint64
+	zonesSeen := false
+	if err := readObject(
+		d,
+		[]string{"version", "rows", "placements", "zones"},
+		3,
+		func(field string) error {
+			var err error
+			switch field {
+			case "version":
+				version, err = readUint(d, 32)
+				if err == nil && version != 1 && version != 2 {
+					err = fmt.Errorf("unsupported level version %d (want 1 or 2)", version)
+				}
+			case "rows":
+				b.rows, err = readRows(d)
+			case "placements":
+				b.placements, err = readPlacements(d)
+			case "zones":
+				zonesSeen = true
+				b.zones, err = readZones(d)
 			}
-			if v != 1 {
-				return fmt.Errorf("unsupported level version %d (want 1)", v)
-			}
-		case "rows":
-			b.rows, err = readRows(d)
-		case "placements":
-			b.placements, err = readPlacements(d)
-		}
-		return err
-	}); err != nil {
+			return err
+		},
+	); err != nil {
 		return Board{}, fmt.Errorf("level: %w", err)
+	}
+	if version == 1 && zonesSeen {
+		return Board{}, errors.New("level: zones need version 2")
+	}
+	if version == 2 && !zonesSeen {
+		return Board{}, errors.New(`level: missing field "zones"`)
 	}
 	if _, err := d.Token(); !errors.Is(err, io.EOF) {
 		if err != nil {
@@ -98,16 +142,25 @@ func Decode(r io.Reader) (Board, error) {
 	if err := b.checkPlacements(); err != nil {
 		return Board{}, err
 	}
+	if err := b.checkZones(); err != nil {
+		return Board{}, err
+	}
 	return b, nil
 }
 
 // Read one schema-defined object. Token parsing catches duplicate fields
 // before they can overwrite data and never descends into unknown structures.
-func readObject(d *json.Decoder, fields []string, readField func(string) error) error {
+// The first required fields of fields must appear; the rest are optional.
+func readObject(
+	d *json.Decoder,
+	fields []string,
+	required int,
+	readField func(string) error,
+) error {
 	if err := delimiter(d, '{'); err != nil {
 		return err
 	}
-	var seen uint8 // Both v1 objects have at most four fields.
+	var seen uint16 // The widest object, a zone, has nine fields.
 	for d.More() {
 		field, err := readString(d)
 		if err != nil {
@@ -117,7 +170,7 @@ func readObject(d *json.Decoder, fields []string, readField func(string) error) 
 		if index < 0 {
 			return fmt.Errorf("unknown field %.64q", field)
 		}
-		mask := uint8(1) << index
+		mask := uint16(1) << index
 		if seen&mask != 0 {
 			return fmt.Errorf("duplicate field %q", field)
 		}
@@ -129,8 +182,8 @@ func readObject(d *json.Decoder, fields []string, readField func(string) error) 
 	if err := delimiter(d, '}'); err != nil {
 		return err
 	}
-	for i, field := range fields {
-		if seen&(uint8(1)<<i) == 0 {
+	for i, field := range fields[:required] {
+		if seen&(uint16(1)<<i) == 0 {
 			return fmt.Errorf("missing field %q", field)
 		}
 	}

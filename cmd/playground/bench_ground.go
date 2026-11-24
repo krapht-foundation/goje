@@ -43,7 +43,7 @@ func denseGroundLevel() ([]byte, error) {
 	return level.Encode(rows[:], []level.Placement{
 		{ID: 1, Kind: "scout", X: 63, Y: 63},
 		{ID: 2, Kind: "lookout", X: 64, Y: 64},
-	})
+	}, nil)
 }
 
 type groundBenchmark struct {

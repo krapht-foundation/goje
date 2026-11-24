@@ -4,30 +4,30 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"io/fs"
 
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/engine/collide"
 	"github.com/krapht-foundation/goje/engine/fixed"
 	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
+	"github.com/krapht-foundation/goje/level"
 )
 
-// The yard is the reference scene for RFC 0013. It reuses the authored
-// courtyard's level, art, and camera, but moves the scout freely with the
-// keyboard through the collision package instead of routing it between tiles.
-// It is a separate fixture, because the courtyard assigns the arrow keys and
-// W/S to camera pan and zoom (see specs/unit-commands-m3.md).
+// The yard is the reference scene for RFC 0013. It uses the courtyard's art and
+// camera, but moves the scout freely with the keyboard through the collision
+// package instead of routing it between tiles. Its terrain, deck, and doorway
+// come from levels/yard.json, a version 2 level that the Level Builder can edit
+// (RFC 0014). It is a separate fixture, because the courtyard assigns the arrow
+// keys and W/S to camera pan and zoom (see specs/unit-commands-m3.md).
 const (
 	yardBodySize      fixed.Num = 96  // 3/8 tile, in 1/256 tile.
 	yardSpeed         fixed.Num = 20  // Units per tick on one ground axis.
 	yardDiagonalScale fixed.Num = 181 // 1/√2 in 1/256, so diagonals are not faster.
 	yardBodyTop                 = 20  // Projected pixels; the scout stands from zero up to here.
 	yardWallTop                 = 32  // Walls and the lookout are tall enough to block the scout.
-	yardDeckBottom              = 24  // The deck clears the scout's head by four pixels.
 	yardDeckHeight              = 28  // Projected pixels the deck is drawn above the ground.
 
-	yardDeckID  uint64 = 1 << 32 // Above every cell-derived solid ID.
-	yardDoorID  uint64 = 1
-	yardDeckLow        = 100 << 32 // Presentation IDs for deck tiles, above wall IDs.
+	yardDeckLow = 100 << 32 // Presentation IDs for deck tiles, above wall IDs.
 )
 
 var (
@@ -47,48 +47,60 @@ type yardSim struct {
 	spawn   fixed.Vec2
 	// deck and door are in ground units; the scene derives its art from them.
 	deck, door fixed.Rect
+	doorID     uint64 // The door trigger zone's ID, from the level.
 	// doorLit is true while the scout overlaps the doorway trigger.
 	doorLit bool
 	// moved is true if the last step changed the scout's position.
 	moved bool
 }
 
+// loadYard reads the yard's level. The level must hold the courtyard's scout
+// and lookout, a trigger zone of kind "door", and a solid zone of kind "deck".
+func loadYard(root fs.FS) (courtyardlevel.Layout, error) {
+	file, err := root.Open("levels/yard.json")
+	if err != nil {
+		return courtyardlevel.Layout{}, fmt.Errorf("open yard level: %w", err)
+	}
+	layout, decodeErr := courtyardlevel.Decode(file)
+	return layout, errors.Join(decodeErr, file.Close())
+}
+
 func newYardSim(layout courtyardlevel.Layout) (*yardSim, error) {
 	w, h := layout.Board.Size()
-	if w < 4 || h < 4 {
-		return nil, errors.New("the yard needs a board at least four tiles on each side")
+	solids, triggers, err := collide.LevelShapes(
+		layout.Board,
+		collide.Interval{Bottom: 0, Top: yardWallTop},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build yard collision shapes: %w", err)
 	}
-	solid := func(id uint64, r fixed.Rect, bottom, top int32) collide.Shape {
-		return collide.Shape{ID: id, Footprint: r, Vertical: collide.Interval{Bottom: bottom, Top: top}}
-	}
-	var solids []collide.Shape
-	cell := uint64(0) // Solid IDs follow the cell order, from one.
-	for y := range h {
-		for x := range w {
-			cell++
-			if !layout.Board.Walkable(x, y) || (x == layout.Lookout.X && y == layout.Lookout.Y) {
-				solids = append(solids, solid(cell, yardTiles(x, y, x+1, y+1), 0, yardWallTop))
-			}
-		}
-	}
+	// The lookout is a placement, not terrain, so the game adds its solid.
+	lookout := layout.Lookout
+	solids = append(solids, collide.Shape{
+		ID:        collide.WallID(w, lookout.X, lookout.Y),
+		Footprint: yardTiles(lookout.X, lookout.Y, lookout.X+1, lookout.Y+1),
+		Vertical:  collide.Interval{Bottom: 0, Top: yardWallTop},
+	})
 	s := &yardSim{
-		// The deck bridges the south of the board; the doorway is the north gap.
-		deck: yardTiles(w/2-1, h-2, w/2+2, h-1),
-		door: yardTiles(w/2, 0, w/2+1, 1),
 		spawn: fixed.Vec2{
 			X: fixed.FromInt(layout.Scout.X) + (fixed.One-yardBodySize)/2,
 			Y: fixed.FromInt(layout.Scout.Y) + (fixed.One-yardBodySize)/2,
 		},
 	}
-	solids = append(solids, solid(yardDeckID, s.deck, yardDeckBottom, yardWallTop))
-	var err error
-	s.world, err = collide.New(
-		w,
-		h,
-		solids,
-		[]collide.Shape{solid(yardDoorID, s.door, 0, yardWallTop)},
-	)
-	if err != nil {
+	for z := range layout.Board.Zones() {
+		switch {
+		case z.Kind == "door" && z.Role == level.RoleTrigger:
+			s.door, s.doorID = yardTiles(z.X, z.Y, z.X+z.W, z.Y+z.H), uint64(z.ID)
+		case z.Kind == "deck" && z.Role == level.RoleSolid:
+			s.deck = yardTiles(z.X, z.Y, z.X+z.W, z.Y+z.H)
+		}
+	}
+	if s.door.Empty() || s.deck.Empty() {
+		return nil, errors.New(
+			"the yard level needs a trigger zone of kind door and a solid zone of kind deck",
+		)
+	}
+	if s.world, err = collide.New(w, h, solids, triggers); err != nil {
 		return nil, fmt.Errorf("build yard collision world: %w", err)
 	}
 	s.tracker = collide.NewTracker(s.world)
@@ -129,7 +141,7 @@ func (s *yardSim) step(held engine.Keys) error {
 	s.bodies[0] = result.Body
 	s.events = s.tracker.Update(s.events[:0], s.bodies[:])
 	for _, event := range s.events {
-		if event.Trigger == yardDoorID {
+		if event.Trigger == s.doorID {
 			s.doorLit = event.Enter
 		}
 	}
@@ -160,8 +172,10 @@ type yardCourtyard struct {
 	sim *yardSim
 }
 
-func (p authoredProject) yardFactory() engine.SceneFactory {
-	layout, idle, move := p.layout, p.idle, p.move
+// yardFactory runs the yard on the given layout, normally from loadYard, with
+// the project's art.
+func (p authoredProject) yardFactory(layout courtyardlevel.Layout) engine.SceneFactory {
+	idle, move := p.idle, p.move
 	return func() engine.Scene {
 		return &yardCourtyard{layout: layout, idle: idle, move: move}
 	}

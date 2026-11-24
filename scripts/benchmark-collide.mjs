@@ -1,4 +1,9 @@
-/** @file Run the collision benchmark program in Chromium and print one JSON report per run. */
+/**
+ * @file Run a Goje benchmark program in Chromium and print one JSON report per run.
+ *
+ * Usage: node scripts/benchmark-collide.mjs WEB_DIR [repetitions] [collidebench | skirmishbench]
+ * The program's WebAssembly build must be in WEB_DIR as PROGRAM.wasm next to wasm_exec.js.
+ */
 
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,14 +13,14 @@ import { chromium } from "playwright";
 
 import { serveAssets } from "./playground-server.mjs";
 
-const page = `<!doctype html>
+const pageFor = program => `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Goje collision benchmark</title></head>
+<head><meta charset="utf-8"><title>Goje benchmark: ${program}</title></head>
 <body>
 <script src="wasm_exec.js"></script>
 <script>
   const go = new Go();
-  WebAssembly.instantiateStreaming(fetch("collidebench.wasm"), go.importObject)
+  WebAssembly.instantiateStreaming(fetch("${program}.wasm"), go.importObject)
     .then(result => go.run(result.instance))
     .catch(error => console.error("GOJE_BENCH_ERROR " + error));
 </script>
@@ -25,15 +30,17 @@ const page = `<!doctype html>
 
 const directory = process.argv[2];
 const repetitions = Number(process.argv[3] ?? 3);
-if (!directory || !Number.isSafeInteger(repetitions) || repetitions < 1 || process.argv.length > 4) {
-  throw new Error("Usage: node scripts/benchmark-collide.mjs WEB_DIR [positive repetition count]");
+const program = process.argv[4] ?? "collidebench";
+if (!directory || !Number.isSafeInteger(repetitions) || repetitions < 1 || process.argv.length > 5 ||
+    !["collidebench", "skirmishbench"].includes(program)) {
+  throw new Error("Usage: node scripts/benchmark-collide.mjs WEB_DIR [positive repetition count] [collidebench | skirmishbench]");
 }
 
-await writeFile(join(directory, "index.html"), page);
+await writeFile(join(directory, "index.html"), pageFor(program));
 const server = await serveAssets(0, directory, new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/wasm_exec.js", ["wasm_exec.js", "text/javascript; charset=utf-8"]],
-  ["/collidebench.wasm", ["collidebench.wasm", "application/wasm"]],
+  [`/${program}.wasm`, [`${program}.wasm`, "application/wasm"]],
 ]));
 try {
   const origin = `http://127.0.0.1:${server.address().port}/`;

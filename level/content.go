@@ -69,7 +69,7 @@ func readPlacements(d *json.Decoder) ([]Placement, error) {
 
 func readPlacement(d *json.Decoder) (Placement, error) {
 	var p Placement
-	err := readObject(d, []string{"id", "kind", "x", "y"}, func(field string) error {
+	err := readObject(d, []string{"id", "kind", "x", "y"}, 4, func(field string) error {
 		if field == "kind" {
 			kind, err := readString(d)
 			if err != nil {
@@ -138,6 +138,120 @@ func (b Board) checkPlacements() error {
 		}
 		ids[p.ID] = struct{}{}
 		occupied[cell] = struct{}{}
+	}
+	return nil
+}
+
+func readZones(d *json.Decoder) ([]Zone, error) {
+	if err := delimiter(d, '['); err != nil {
+		return nil, err
+	}
+	var zones []Zone
+	for d.More() {
+		if len(zones) == maxZones {
+			return nil, fmt.Errorf("at most %d zones are allowed", maxZones)
+		}
+		z, err := readZone(d)
+		if err != nil {
+			return nil, fmt.Errorf("zone %d: %w", len(zones), err)
+		}
+		zones = append(zones, z)
+	}
+	return zones, delimiter(d, ']')
+}
+
+func readZone(d *json.Decoder) (Zone, error) {
+	var z Zone
+	fields := []string{"id", "kind", "role", "x", "y", "w", "h", "bottom", "top"}
+	err := readObject(d, fields, len(fields), func(field string) error {
+		if field == "kind" || field == "role" {
+			text, err := readString(d)
+			if err != nil {
+				return err
+			}
+			if field == "kind" {
+				z.Kind = text
+			} else {
+				z.Role = Role(text)
+			}
+			return nil
+		}
+		// Each width is just enough for the largest valid value of its field.
+		bits := 11
+		switch field {
+		case "id":
+			bits = 32
+		case "x", "y":
+			bits = 7
+		case "w", "h":
+			bits = 8
+		}
+		n, err := readUint(d, bits)
+		if err != nil {
+			return err
+		}
+		// #nosec G115 -- readUint enforced the width above, and every width fits an int.
+		v := int(n)
+		switch field {
+		case "id":
+			z.ID = uint32(n) // #nosec G115 -- readUint enforced 32 bits for ID.
+		case "x":
+			z.X = v
+		case "y":
+			z.Y = v
+		case "w":
+			z.W = v
+		case "h":
+			z.H = v
+		case "bottom":
+			z.Bottom = v
+		case "top":
+			z.Top = v
+		}
+		return nil
+	})
+	return z, err
+}
+
+// Check reports whether the zone is valid on a board of width × height cells:
+// a positive ID, a valid kind and role, a rectangle inside the board, and a
+// vertical extent of 0 <= Bottom < Top <= 1,024. It does not check that the ID
+// is unique among a level's zones.
+func (z Zone) Check(width, height int) error {
+	if z.ID == 0 {
+		return errors.New("zone ID must be positive")
+	}
+	if !validKind(z.Kind) {
+		return fmt.Errorf("zone ID %d: invalid kind identifier", z.ID)
+	}
+	if z.Role != RoleSolid && z.Role != RoleTrigger {
+		return fmt.Errorf("zone ID %d: role must be %q or %q", z.ID, RoleSolid, RoleTrigger)
+	}
+	if z.W < 1 || z.H < 1 || z.X < 0 || z.Y < 0 || z.X+z.W > width || z.Y+z.H > height {
+		return fmt.Errorf("zone ID %d: cells (%d, %d) to (%d, %d) are not inside the %d × %d board",
+			z.ID, z.X, z.Y, z.X+z.W-1, z.Y+z.H-1, width, height)
+	}
+	if z.Bottom < 0 || z.Top <= z.Bottom || z.Top > maxHeight {
+		return fmt.Errorf("zone ID %d: vertical extent [%d, %d) must satisfy 0 <= bottom < top <= %d",
+			z.ID, z.Bottom, z.Top, maxHeight)
+	}
+	return nil
+}
+
+func (b Board) checkZones() error {
+	if len(b.zones) > maxZones {
+		return fmt.Errorf("at most %d zones are allowed", maxZones)
+	}
+	width, height := b.Size()
+	ids := make(map[uint32]struct{}, len(b.zones))
+	for _, z := range b.zones {
+		if err := z.Check(width, height); err != nil {
+			return err
+		}
+		if _, ok := ids[z.ID]; ok {
+			return fmt.Errorf("duplicate zone ID %d", z.ID)
+		}
+		ids[z.ID] = struct{}{}
 	}
 	return nil
 }

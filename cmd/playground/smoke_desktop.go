@@ -52,6 +52,15 @@ func main() {
 			"on motion ticks 13 and 16, planted on tick 17, and reset")
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == "--yard" {
+		if err := runYardSmoke(); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(
+			"Desktop smoke passed: yard zones from the Level Builder drove the slide, doorway lamp, and deck",
+		)
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--shortcut" {
 		if err := runAuthoredSmoke(true); err != nil {
 			log.Fatal(err)
@@ -78,6 +87,12 @@ func main() {
 	}
 	fmt.Println(
 		"Desktop smoke passed: yard slide along a wall, doorway lamp, walk beneath a raised deck, and reset",
+	)
+	if err := runSkirmishSmoke(); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(
+		"Desktop smoke passed: skirmish selection, order, alarm, bolts, damage, defeat, and reset",
 	)
 }
 

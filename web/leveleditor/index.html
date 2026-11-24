@@ -18,6 +18,7 @@
       <button id="floor" type="button" aria-pressed="true" disabled>Floor</button>
       <button id="wall" type="button" aria-pressed="false" disabled>Wall</button>
       <button id="placement" type="button" aria-pressed="false" disabled>Move placement</button>
+      <button id="zone" type="button" aria-pressed="false" disabled>Draw zone</button>
     </div>
     <div class="group" role="group" aria-label="History">
       <button id="undo" type="button" aria-keyshortcuts="Control+Z Meta+Z" disabled>Undo</button>
@@ -29,10 +30,33 @@
   </header>
   <p id="status" role="status">Loading editor…</p>
   <p id="cursor" aria-live="polite">No level open.</p>
+  <fieldset id="zones" class="zones" disabled>
+    <legend>Zones</legend>
+    <label>Zones in this level
+      <select id="zone-select" size="5"></select>
+    </label>
+    <div class="zone-fields">
+      <label>Kind <input id="zone-kind" type="text" value="deck" maxlength="32" autocomplete="off"></label>
+      <label>Role
+        <select id="zone-role"><option value="solid">solid</option><option value="trigger">trigger</option></select>
+      </label>
+      <label>X <input id="zone-x" type="number" min="0" max="127" value="0"></label>
+      <label>Y <input id="zone-y" type="number" min="0" max="127" value="0"></label>
+      <label>Width <input id="zone-w" type="number" min="1" max="128" value="1"></label>
+      <label>Height <input id="zone-h" type="number" min="1" max="128" value="1"></label>
+      <label>Bottom <input id="zone-bottom" type="number" min="0" max="1023" value="0"></label>
+      <label>Top <input id="zone-top" type="number" min="1" max="1024" value="32"></label>
+    </div>
+    <div class="group">
+      <button id="zone-add" type="button">Add zone</button>
+      <button id="zone-apply" type="button" disabled>Apply to selected zone</button>
+      <button id="zone-delete" type="button" disabled>Delete selected zone</button>
+    </div>
+  </fieldset>
   <div id="scroller" class="scroller">
     <canvas id="board" tabindex="0" role="application" aria-label="Level grid" aria-describedby="cursor help" hidden></canvas>
   </div>
-  <p id="help">Arrows move the cell cursor. Space or Enter applies the tool; with Move placement, choose a placement and then its target. Escape cancels. Ctrl or ⌘ + Z undoes; add Shift to redo.</p>
+  <p id="help">Arrows move the cell cursor. Space or Enter applies the tool; with Move placement, choose a placement and then its target; with Draw zone, choose one corner and then the opposite corner, using the kind, role, and heights in the Zones panel. Escape cancels. Ctrl or ⌘ + Z undoes; add Shift to redo.</p>
   <script src="wasm_exec.js"></script>
   <script type="module" src="editor.mjs"></script>
 </body>

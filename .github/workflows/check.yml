@@ -80,6 +80,8 @@ jobs:
         run: xvfb-run -a make smoke-sprite-roundtrip
       - name: Play both browser exports on desktop and web
         run: xvfb-run -a make smoke-level-roundtrip
+      - name: Play Level Builder zones on desktop and web
+        run: xvfb-run -a make smoke-zone-roundtrip
       - name: Play the independent 2D game on desktop and web
         run: xvfb-run -a make smoke-beacon
       - name: Verify Beacon audio on desktop and in Chromium

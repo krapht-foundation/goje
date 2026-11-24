@@ -7,6 +7,7 @@ import (
 
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/engine/fixed"
+	courtyardlevel "github.com/krapht-foundation/goje/examples/courtyard"
 )
 
 // yardHistory is a recorded input history. It walks the scout into the wall and
@@ -38,11 +39,11 @@ type yardReplay struct {
 
 func replayYard(t *testing.T) yardReplay {
 	t.Helper()
-	project, err := loadAuthored(authoredFiles)
+	layout, err := loadYard(authoredFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sim, err := newYardSim(project.layout)
+	sim, err := newYardSim(layout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +115,11 @@ func TestYardRestartRestoresTheSpawnAndDoorway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	factory := project.yardFactory()
+	layout, err := loadYard(authoredFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := project.yardFactory(layout)
 	var scene *yardCourtyard
 	runtime, err := engine.Start(func() engine.Scene {
 		scene = factory().(*yardCourtyard)
@@ -152,5 +157,41 @@ func TestYardRestartRestoresTheSpawnAndDoorway(t *testing.T) {
 	}
 	if !previous.sim.doorLit {
 		t.Error("the restart tick moved the previous scene")
+	}
+}
+
+// The yard reuses the courtyard's art, camera, and spawns, so its level must keep
+// the courtyard's terrain and placements. Only the zones are new.
+func TestYardLevelKeepsTheCourtyardTerrainAndPlacements(t *testing.T) {
+	t.Parallel()
+
+	yard, err := loadYard(authoredFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := authoredFiles.Open("levels/courtyard.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	courtyard, err := courtyardlevel.Decode(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yw, yh := yard.Board.Size()
+	cw, ch := courtyard.Board.Size()
+	if yw != cw || yh != ch {
+		t.Fatalf("yard board is %d×%d, courtyard %d×%d", yw, yh, cw, ch)
+	}
+	for y := range yh {
+		for x := range yw {
+			if yard.Board.Walkable(x, y) != courtyard.Board.Walkable(x, y) {
+				t.Fatalf("terrain differs at (%d, %d)", x, y)
+			}
+		}
+	}
+	if yard.Scout != courtyard.Scout || yard.Lookout != courtyard.Lookout {
+		t.Errorf("placements differ: yard %+v %+v, courtyard %+v %+v",
+			yard.Scout, yard.Lookout, courtyard.Scout, courtyard.Lookout)
 	}
 }

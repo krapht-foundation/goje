@@ -1,6 +1,10 @@
 package leveleditor
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/krapht-foundation/goje/level"
+)
 
 const (
 	maxTransactions = 64
@@ -8,12 +12,21 @@ const (
 )
 
 // A stroke stores each changed cell once, since the old terrain must be the
-// other brush value. A placement move needs only its source and destination.
+// other brush value. A placement move needs only its source and destination,
+// and a zone edit its index and the zone before and after.
 type transaction struct {
 	cells         []int
 	from, to      int
 	before, after uint64
 	tile          byte
+	zone          *zoneEdit
+}
+
+// zoneEdit is nil-free for a replacement. Before is nil for an addition and
+// After is nil for a deletion.
+type zoneEdit struct {
+	index         int
+	before, after *level.Zone
 }
 
 func (tx transaction) changes() int { return max(1, len(tx.cells)) }
@@ -72,6 +85,21 @@ func (d *Document) record(tx transaction) {
 }
 
 func (d *Document) apply(tx transaction, forward bool) {
+	if tx.zone != nil {
+		from, to := tx.zone.before, tx.zone.after
+		if !forward {
+			from, to = to, from
+		}
+		switch {
+		case from == nil:
+			d.zones = slices.Insert(d.zones, tx.zone.index, *to)
+		case to == nil:
+			d.zones = slices.Delete(d.zones, tx.zone.index, tx.zone.index+1)
+		default:
+			d.zones[tx.zone.index] = *to
+		}
+		return
+	}
 	if tx.tile != 0 {
 		tile := tx.tile
 		if !forward {

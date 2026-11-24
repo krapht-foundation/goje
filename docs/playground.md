@@ -24,7 +24,13 @@ The original pickup encounter remains available through `GOJE_PLAYGROUND=pickup 
 
 The M2 patrol remains available through `GOJE_PLAYGROUND=courtyard make run-desktop` or `http://127.0.0.1:8080/?fixture=courtyard`. Click either visible unit to select it, **Space** to start or pause patrol, and **R** to restore the original overlap. Click the exposed wall to see it block selection of the unit behind it.
 
-The M12 yard is available through `GOJE_PLAYGROUND=yard make run-desktop` or `http://127.0.0.1:8080/?fixture=yard`. Walk the scout with the arrow keys or **WASD**, and press **R** to restart. The scout stops against walls and slides along them, lights a lamp in the north doorway, and walks beneath the raised deck in the south. See [Move and collide in your game](collision.md) to use the same packages.
+The M12 yard is available through `GOJE_PLAYGROUND=yard make run-desktop` or `http://127.0.0.1:8080/?fixture=yard`. Walk the scout with the arrow keys or **WASD**, and press **R** to restart. The scout stops against walls and slides along them, lights a lamp in the north doorway, and walks beneath the raised deck in the south. See [Move and collide in your game](collision.md) to use the same packages. The yard's deck and doorway are zones in a [version 2 level](levels.md#draw-zones).
+
+## The skirmish
+
+The M13 skirmish is available through `GOJE_PLAYGROUND=skirmish make run-desktop` or `http://127.0.0.1:8080/?fixture=skirmish`. Two blue scouts face two red guards on a small board with a wall, a raised deck, and a line of purple cells that is an alarm. It keeps the courtyard's controls: **left-click** a scout to select it, **right-click** a cell to order it there, the arrow keys pan, **W/S** zoom, and **R** restarts. Scouts fire automatically at the nearest guard within four tiles, and guards wake when a scout comes within six tiles or crosses the alarm line. Bolts are the small pale squares, health bars show green for health and dark red for what is gone, and a defeated unit disappears. Bolts hurt friends too, pass under the deck, and stop at the wall.
+
+Try it: select the upper-left scout and order it to the cell just past the alarm line, in the same row. The scout crosses the line, both guards wake, and the fight plays out. In the recorded history the ordered scout and both guards fall and the second scout survives with 20 health. Units cannot share ground, so when they meet they stop, wait, and then look for a way around; a unit that finds none gives up and stays. The level, including the deck and the alarm, is [`levels/skirmish.json`](../cmd/playground/levels/skirmish.json), a version 2 level whose zones the Level Builder can edit. The rules live in [`examples/skirmish`](../examples/skirmish/sim.go) and are specified in the [skirmish specification](../specs/skirmish-m13.md).
 
 ## Use the playground in your game
 
@@ -155,6 +161,6 @@ make setup-web
 make smoke-web
 ```
 
-`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check scripts input snapshots and reads the OpenGL back buffer. The Chromium check uses real keyboard and mouse input and canvas screenshots. Both check the authored scout's blink, hop, ground pivot under zoom, wall occlusion, selection, detour, arrival, and reset alongside the earlier patrol and pickup fixtures. `make check-example` builds the command from an independent module for the host and for WebAssembly.
+`make check` does not rewrite source. Use `make fmt` to apply formatting. The native smoke check scripts input snapshots and reads the OpenGL back buffer. The Chromium check uses real keyboard and mouse input and canvas screenshots. Both check the authored scout's blink, hop, ground pivot under zoom, wall occlusion, selection, detour, arrival, and reset alongside the earlier patrol and pickup fixtures, the yard, and the skirmish's selection, order, alarm line, bolts, health bars, defeat, and reset. `make test-wasm` runs the simulation tests as WebAssembly, and `make benchmark-skirmish` measures a 128 against 128 battle. `make check-example` builds the command from an independent module for the host and for WebAssembly.
 
 The native smoke fixture is intended for macOS and Linux with X11, including Xvfb; the browser fixture uses Chromium with WebGL 2. Neither smoke check certifies GPU performance or every platform or browser. `make setup-web` installs its Chromium headless shell into `.build/playwright/`, separate from any user-wide cache. See the [playground specification](../specs/playground.md) for acceptance criteria.

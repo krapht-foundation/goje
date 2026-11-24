@@ -1,4 +1,4 @@
-// Command levelcheck validates a Goje v1 level for the reference playground.
+// Command levelcheck validates a Goje level, version 1 or 2, for the reference playground.
 package main
 
 import (
@@ -32,7 +32,17 @@ func check(path string) (err error) {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	w, h := layout.Board.Size()
-	_, err = fmt.Printf("%s: valid v1 level (%d × %d cells, 2 placements)\n", path, w, h)
+	zones := 0
+	for range layout.Board.Zones() {
+		zones++
+	}
+	_, err = fmt.Printf(
+		"%s: valid level (%d × %d cells, 2 placements, %d zones)\n",
+		path,
+		w,
+		h,
+		zones,
+	)
 	if err != nil {
 		return fmt.Errorf("write validation result: %w", err)
 	}

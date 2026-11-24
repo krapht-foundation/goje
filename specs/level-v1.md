@@ -1,6 +1,6 @@
 # Goje level JSON, version 1
 
-The [M3 RFC](../rfcs/0004-m3-levels-and-unit-commands.md) defines the first author-to-play workflow. [ADR 0004](../decisions/0004-level-data-and-game-rules.md) describes the boundary between level data and game rules.
+Version 2 of the format adds optional collision zones and is specified in [level-v2.md](level-v2.md); this document remains the contract for version 1, and `level.Decode` reads both. The [M3 RFC](../rfcs/0004-m3-levels-and-unit-commands.md) defines the first author-to-play workflow. [ADR 0004](../decisions/0004-level-data-and-game-rules.md) describes the boundary between level data and game rules.
 
 A document is one UTF-8 JSON object, at most 256 KiB including whitespace. It requires exactly these case-sensitive fields, in any order:
 

@@ -296,6 +296,130 @@ async function smokeYard(browser, url) {
 }
 
 /**
+ * Play the skirmish with real mouse and keyboard input while page time is paused, so each step
+ * advances about one 60 Hz tick. Scout 1 is selected and ordered across the alarm line, the guards
+ * wake and shoot, and the fight runs to its recorded end: both guards and scout 1 fall and scout 2
+ * survives. Logical coordinates are 320 × 200; the camera is centered on the 10 × 8 board, so a
+ * ground point (x, y) in tiles at a height appears at logical (16 (x − y) + 144, 8 (x + y) + 28 − height).
+ * @param {import("playwright").Browser} browser - Running Chromium instance.
+ * @param {string} url - Loopback skirmish URL.
+ * @returns {Promise<void>} Resolves after selection, order, alarm, bolts, damage, defeat, and reset.
+ */
+async function smokeSkirmish(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 2 });
+  try {
+    const errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.clock.install();
+    await page.goto(url, { timeout: 15_000 });
+    const canvas = page.locator("#goje");
+    const scout = [80, 160, 255], guard = [232, 84, 84], bolt = [255, 255, 190];
+    const healthy = [96, 220, 96], backing = [70, 24, 24];
+    const quiet = [96, 74, 120], loud = [255, 96, 200];
+    const selection = [255, 235, 87], destination = [116, 246, 144];
+    const deck = [186, 142, 92], wall = [148, 122, 105];
+    const scale = 4;
+    /** @returns {Promise<PNG>} The presented frame. */
+    const shoot = async () => PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
+    /**
+     * @param {number} x - Ground column in tiles.
+     * @param {number} y - Ground row in tiles.
+     * @param {number} [height=0] - Height in projected pixels.
+     * @returns {[number, number]} Logical pixel.
+     */
+    const screen = (x, y, height = 0) => [Math.floor(16 * (x - y) + 144), Math.floor(8 * (x + y) + 28 - height)];
+    /**
+     * @param {PNG} frame - Decoded screenshot.
+     * @param {[number, number]} point - Logical pixel.
+     * @param {number[]} color - Expected RGB.
+     * @returns {boolean} Whether the logical pixel's center has the color.
+     */
+    const is = (frame, [x, y], color) => pixelIs(frame, x * scale + scale / 2, y * scale + scale / 2, color);
+    /**
+     * @param {PNG} frame - Decoded screenshot.
+     * @param {number[]} color - RGB to count.
+     * @returns {number} Device pixels within two levels of the color on every channel.
+     */
+    const count = ({ data }, color) => {
+      let total = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] === 255 && Math.abs(data[i] - color[0]) <= 2 &&
+            Math.abs(data[i + 1] - color[1]) <= 2 && Math.abs(data[i + 2] - color[2]) <= 2) total++;
+      }
+      return total;
+    };
+    // Feet of each unit at spawn; the body is drawn 14 pixels tall above, with a 12-pixel health bar.
+    const units = [[1.5, 2.5, scout], [1.5, 5.5, scout], [8.5, 2.5, guard], [8.5, 5.5, guard]];
+    const wallPoint = screen(3.5, 2.5);
+    /** @param {PNG} frame - Decoded screenshot. @returns {boolean} Whether the frame shows the opening. */
+    const atSpawn = frame => units.every(([x, y, color]) => {
+      const [sx, sy] = screen(x, y);
+      return is(frame, [sx, sy - 7], color) && is(frame, [sx - 5, sy - 17], healthy) &&
+        is(frame, [sx + 5, sy - 17], healthy);
+    }) && count(frame, quiet) > 0 && count(frame, loud) === 0 && count(frame, selection) === 0 &&
+      is(frame, [wallPoint[0], wallPoint[1] - 9], wall) && is(frame, screen(6.5, 3.5, 28), deck);
+    /**
+     * Advance one browser frame and read it.
+     * @returns {Promise<PNG>} The presented frame.
+     */
+    const step = async () => {
+      await page.clock.runFor(17);
+      return shoot();
+    };
+    /**
+     * Step until a frame satisfies a condition.
+     * @param {string} description - Expected state for the failure message.
+     * @param {(frame: PNG) => boolean} matches - Frame predicate.
+     * @param {number} [limit=300] - Maximum steps.
+     * @returns {Promise<PNG>} The matching frame.
+     */
+    const until = async (description, matches, limit = 300) => {
+      for (let i = 0; i < limit; i++) {
+        const frame = await step();
+        if (matches(frame)) return frame;
+      }
+      return assert.fail(`The skirmish never showed ${description}`);
+    };
+
+    // Unpaused frames settle the first draw; then freeze time so steps are explicit.
+    const deadline = Date.now() + 8_000;
+    while (!atSpawn(await shoot())) assert.ok(Date.now() < deadline, "The skirmish never showed its spawn");
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    await until("the spawn after the paused clock started", atSpawn);
+
+    // Left click on scout 1 selects it; the marker appears over its health bar.
+    const [feetX, feetY] = screen(1.5, 2.5);
+    await canvas.click({ position: { x: feetX * 2, y: (feetY - 7) * 2 } });
+    await until("the selection marker", frame => count(frame, selection) > 0);
+    // Right click on the cell at 6, 2 orders it across the alarm line.
+    const [goalX, goalY] = screen(6.5, 2.5);
+    await canvas.click({ position: { x: goalX * 2, y: goalY * 2 }, button: "right" });
+    await until("the destination marker", frame => is(frame, [goalX, goalY], destination));
+
+    // Fight to the end, keeping what each frame showed: the alarm line lit, a bolt, a damaged bar.
+    const seen = { alarm: false, bolt: false, damage: false };
+    const final = await until("both guards defeated", frame => {
+      seen.alarm ||= count(frame, loud) > 0;
+      seen.bolt ||= count(frame, bolt) >= 64;
+      seen.damage ||= count(frame, backing) >= 16;
+      return count(frame, guard) === 0;
+    }, 900);
+    assert.deepEqual(seen, { alarm: true, bolt: true, damage: true }, "The fight did not show every effect");
+    assert.ok(count(final, scout) > 0, "The surviving scout is missing");
+    assert.equal(count(final, selection), 0, "The selection marker outlived its scout");
+    assert.equal(count(final, quiet), 0, "The alarm line was still quiet after the alarm");
+
+    // Reset restores the opening.
+    await canvas.focus();
+    await page.keyboard.press("r");
+    await until("the spawn after reset", atSpawn);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
+/**
  * Select the scout, command it across the authored courtyard, then reset.
  * @param {import("playwright").Browser} browser - Running Chromium instance.
  * @param {string} url - Loopback playground URL.
@@ -496,16 +620,21 @@ async function smokeAuthored(browser, url, shortcut, sprite = false) {
   }
 }
 
-const sprite = process.argv[2] === "--sprite";
-const editedDirectory = process.argv[sprite ? 3 : 2];
-if (process.argv.length > (sprite ? 4 : 3) || (sprite && editedDirectory === undefined)) {
-  throw new Error("Usage: node scripts/smoke-web.mjs [EDITED_WEB_DIR | --sprite SPRITE_WEB_DIR]");
+const mode = ["--sprite", "--yard"].find(flag => flag === process.argv[2]);
+const sprite = mode === "--sprite";
+const editedDirectory = process.argv[mode ? 3 : 2];
+if (process.argv.length > (mode ? 4 : 3) || (mode && editedDirectory === undefined)) {
+  throw new Error("Usage: node scripts/smoke-web.mjs [EDITED_WEB_DIR | --sprite SPRITE_WEB_DIR | --yard YARD_WEB_DIR]");
 }
 const server = await servePlayground(0, editedDirectory);
 try {
   const browser = await chromium.launch({ timeout: 15_000 });
   try {
-    if (sprite) {
+    if (mode === "--yard") {
+      await smokeYard(browser, `http://127.0.0.1:${server.address().port}/?fixture=yard`);
+      console.log("Browser smoke passed: Level Builder zones drove the yard's slide along a wall, doorway lamp, " +
+        "walk beneath a raised deck, reset, and focus loss");
+    } else if (sprite) {
       await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`, false, true);
       console.log("Browser smoke passed: authored scout hop airborne with cyan paint at motion ticks 13 and 16, " +
         "unpainted planted windup at tick 17, and reset");
@@ -565,6 +694,8 @@ try {
         await smokeYard(browser, `http://127.0.0.1:${server.address().port}/?fixture=yard`);
         console.log("Browser smoke passed: yard slide along a wall, doorway lamp, walk beneath a raised deck, " +
           "reset, and focus loss");
+        await smokeSkirmish(browser, `http://127.0.0.1:${server.address().port}/?fixture=skirmish`);
+        console.log("Browser smoke passed: skirmish selection, order, alarm, bolts, damage, defeat, and reset");
       }
     }
   } finally {

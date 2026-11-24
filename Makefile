@@ -51,7 +51,7 @@ test: ## Run headless Go tests
 
 test-wasm: ## Run the simulation tests as WebAssembly under Node
 	GOOS=js GOARCH=wasm $(GO) test -exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" \
-		./engine/fixed ./engine/collide ./internal/collidebench ./cmd/playground
+		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./cmd/playground
 
 test-race: ## Run Go tests with the native race detector
 	$(GO) test -race ./...
@@ -75,7 +75,7 @@ run-desktop: build-desktop ## Open the native playground window
 smoke-desktop: ## Check all playground fixtures in native windows
 	mkdir -p "$(BUILD_DIR)"
 	$(GO) build -tags goje_smoke -o "$(BUILD_DIR)/playground-smoke" ./cmd/playground
-	$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1]], check=True, timeout=20)' "$(BUILD_DIR)/playground-smoke"
+	$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1]], check=True, timeout=60)' "$(BUILD_DIR)/playground-smoke"
 
 build-web: ## Build the playground Wasm and browser files
 	mkdir -p "$(WEB_DIR)"
@@ -203,6 +203,23 @@ smoke-level-roundtrip: build-level-editor build-tile-maker ## Play both browser 
 		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/playground-smoke" --shortcut; \
 		$(NODE) scripts/smoke-web.mjs "$$tmp/web"
 
+.PHONY: smoke-zone-roundtrip
+smoke-zone-roundtrip: build-level-editor ## Author the yard's zones in the Level Builder and play them on desktop and web
+	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/zone-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
+		mkdir -p "$$tmp/playground" "$$tmp/web"; \
+		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/playground/"; \
+		cp -R cmd/playground/levels cmd/playground/art "$$tmp/playground/"; \
+		level="$$tmp/playground/levels/yard.json"; \
+		rm "$$level"; \
+		$(NODE) scripts/smoke-zone-editor.mjs "$$level"; \
+		$(GO) run ./cmd/levelcheck "$$level"; \
+		$(GO) build -tags goje_smoke -o "$$tmp/playground-smoke" "$$tmp/playground"; \
+		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/web/playground.wasm" "$$tmp/playground"; \
+		install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/web/"; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/playground-smoke" --yard; \
+		$(NODE) scripts/smoke-web.mjs --yard "$$tmp/web"
+
 .PHONY: smoke-beacon
 smoke-beacon: build-level-editor build-tile-maker ## Author and play an independent 2D game on desktop and web
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/beacon.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
@@ -278,7 +295,7 @@ benchmark-beacon-audio: ## Compare audio off, idle, and burst modes on desktop a
 check-example: ## Build the reference playground from a separate module on desktop and web
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go "$$tmp/"; \
-		cp cmd/playground/authored.go cmd/playground/yard.go cmd/playground/goje.json "$$tmp/"; \
+		cp cmd/playground/authored.go cmd/playground/yard.go cmd/playground/skirmish.go cmd/playground/goje.json "$$tmp/"; \
 		cp -R cmd/playground/levels cmd/playground/art "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \
@@ -322,3 +339,14 @@ benchmark-collide: ## Measure collision with 2,048 bodies natively and in Chromi
 	GOOS=js GOARCH=wasm $(GO) build -o "$(BUILD_DIR)/collide-web/collidebench.wasm" ./cmd/collidebench
 	install -m 0644 "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(BUILD_DIR)/collide-web/"
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/benchmark-collide.mjs "$(BUILD_DIR)/collide-web" "$(BENCHMARK_REPEATS)"
+
+.PHONY: benchmark-skirmish
+benchmark-skirmish: ## Measure a 128 against 128 battle natively, in Node as WebAssembly, and in Chromium
+	$(GO) build -o "$(BUILD_DIR)/skirmishbench" ./cmd/skirmishbench
+	i=0; while [ $$i -lt "$(BENCHMARK_REPEATS)" ]; do "$(BUILD_DIR)/skirmishbench"; i=$$((i + 1)); done
+	GOOS=js GOARCH=wasm $(GO) build -o "$(BUILD_DIR)/skirmishbench.wasm" ./cmd/skirmishbench
+	GOOS=js GOARCH=wasm $(GO) run -exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" ./cmd/skirmishbench
+	mkdir -p "$(BUILD_DIR)/skirmish-web"
+	cp "$(BUILD_DIR)/skirmishbench.wasm" "$(BUILD_DIR)/skirmish-web/"
+	install -m 0644 "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(BUILD_DIR)/skirmish-web/"
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/benchmark-collide.mjs "$(BUILD_DIR)/skirmish-web" "$(BENCHMARK_REPEATS)" skirmishbench

@@ -138,7 +138,7 @@ func TestHistoryEvictsCompleteOldestActions(t *testing.T) {
 					cells = append(cells, [2]int{x, y})
 				}
 			}
-			data, err := level.Encode(rows, nil)
+			data, err := level.Encode(rows, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

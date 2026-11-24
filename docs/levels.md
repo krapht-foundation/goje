@@ -11,21 +11,37 @@ Run `make serve-level-editor` with Go and Node installed, then open `http://127.
 
 Run `make setup-web` once to install the test browser, then `make smoke-level-editor` to exercise local file selection, editing, and export in Chromium.
 
+## Draw zones
+
+A zone is a tile-aligned rectangle with a game-defined kind, a role, and a vertical extent. A **solid** zone blocks bodies whose height overlaps its own, such as a raised deck that characters walk beneath. A **trigger** zone blocks nothing and reports when a body enters or leaves, such as a doorway or an alarm line. A level that has zones is a [version 2 level](../specs/level-v2.md). The Level Builder reads both versions, writes version 1 when a level has no zones, and keeps zones you do not touch.
+
+1. Open a level, such as the [courtyard](../cmd/playground/levels/courtyard.json) or the [yard](../cmd/playground/levels/yard.json).
+2. In the **Zones** panel, set the kind, the role, and the **Bottom** and **Top** heights in projected pixels. A deck that characters walk under might be `deck`, solid, 24 to 32. A doorway is `door`, trigger, 0 to 32.
+3. Select **Draw zone**. Drag a rectangle on the grid, or click one corner and then the opposite corner. With the keyboard, press **Enter** or **Space** on one corner and again on the other. **Escape** cancels a pending corner. You can also type the column, row, width, and height and choose **Add zone**.
+4. Choose a zone in the list to see its outline and values. Change the fields and choose **Apply to selected zone** to replace it, or **Delete selected zone** to remove it. Every add, apply, and delete is one action that **Undo** and **Redo** step through. A zone that leaves the board, has no cells, or has an empty height range is rejected with a message, and nothing changes.
+5. Solids appear hatched with an `S` and the zone's ID, and triggers appear with a dotted border and a `T`, so the role does not depend on color.
+
+Placements stay move-only in the editor. A game that wants more units than the courtyard's two lists them in the level file by hand, as the [skirmish level](../cmd/playground/levels/skirmish.json) does. The decoder checks only that a kind is well formed, so a game must reject the kinds it does not support.
+
+To use zones in a game, call `collide.FromLevel` or `collide.LevelShapes`, then read `board.Zones()` to give each zone ID a meaning. See [Move and collide in your game](collision.md#build-a-world-from-a-level).
+
+Run `make smoke-zone-roundtrip` to author the yard's deck and doorway in Chromium, export them, reopen the download, check it with `levelcheck`, and play it in scratch builds on desktop and web. It needs a working native graphics session; on headless Linux, use `xvfb-run -a make smoke-zone-roundtrip`.
+
 The smoke test reports edit and export timings separately for a 128 × 128 level with 1,024 placements. One run on an Apple M4 Pro with Go 1.27.4 and Chromium 159 measured 59 ms for a 41-cell stroke and 33 ms from clicking **Export** to the download event. The stroke timing includes Playwright input and two animation frames. These are browser workflow measurements, not Go CPU timings or performance thresholds.
 
 ## Validate a level from the command line
 
-A Goje v1 level is a JSON document with walkable cells, walls, and named placements. Edit the [authored courtyard](../cmd/playground/levels/courtyard.json) in a text editor, then validate it from the repository root:
+A Goje level is a JSON document with walkable cells, walls, named placements, and, from version 2, collision zones. Edit the [authored courtyard](../cmd/playground/levels/courtyard.json) in a text editor, then validate it from the repository root:
 
 ```sh
 go run ./cmd/levelcheck cmd/playground/levels/courtyard.json
 ```
 
-Replace a `#` with `.` in one of the courtyard rows to open that ground cell. `levelcheck` reports the board size and placement count, or points to a malformed field or invalid cell. The reference game needs one `scout` and one `lookout`; the validator checks the same rule and never rewrites the file.
+Replace a `#` with `.` in one of the courtyard rows to open that ground cell. `levelcheck` reports the board size, placement count, and zone count, or points to a malformed field or invalid cell. The courtyard needs one `scout` and one `lookout`; the validator checks the same rule and never rewrites the file, so it rejects the skirmish level, which lists several scouts and guards.
 
-Other games can use `level.Decode` with a reader they supply. The decoder validates geometry and identifier syntax; the game must decide which placement kinds it can instantiate. See the [v1 format specification](../specs/level-v1.md) for coordinates, bounds, and compatibility.
+Other games can use `level.Decode` with a reader they supply. The decoder validates geometry and identifier syntax; the game must decide which placement kinds it can instantiate. See the [v1](../specs/level-v1.md) and [v2](../specs/level-v2.md) format specifications for coordinates, bounds, and compatibility.
 
-Tools that already hold terrain rows and placements can call `level.Encode`. It validates the same v1 constraints as `Decode`, preserves row and placement order, and returns deterministic JSON bytes. It does not open or overwrite a file. The [Level Builder RFC](../rfcs/0005-m4-level-builder.md) describes the browser editor workflow.
+Tools that already hold terrain rows, placements, and zones can call `level.Encode`. It validates the same constraints as `Decode`, preserves row, placement, and zone order, writes version 1 when there are no zones and version 2 otherwise, and returns deterministic JSON bytes. It does not open or overwrite a file. The [Level Builder RFC](../rfcs/0005-m4-level-builder.md) describes the browser editor workflow.
 
 ## Validate a project from the command line
 

@@ -71,11 +71,15 @@ type Hit struct {
 type Contact struct {
 	// Blocked is true when the move was shortened.
 	Blocked bool
-	// Edge is true when the board edge stopped the move. Solid is then zero.
+	// Edge is true when the board edge stopped the move. Solid and Body are then zero.
 	Edge bool
 	// Solid is the ID of the nearest solid that stopped the move, with the
 	// lowest ID winning a tie.
 	Solid uint64
+	// Body is the nonzero ID of the nearest body that stopped the move, with the
+	// lowest ID winning a tie. A solid or the board edge at the same distance
+	// is reported instead, and Body is then zero.
+	Body uint64
 }
 
 // Result is the outcome of World.Move.
@@ -149,6 +153,18 @@ func compareHits(a, b Hit) int { return cmp.Compare(a.ID, b.ID) }
 // Move returns ErrOutside if the body is not inside the board and ErrEmbedded,
 // wrapped with the solid's ID, if it already overlaps a solid.
 func (w *World) Move(body Shape, dx, dy fixed.Num) (Result, error) {
+	return w.MoveAmong(nil, body, dx, dy)
+}
+
+// MoveAmong is Move for a body that must also stop flush against other moving
+// bodies. A body in bodies blocks the mover only if its vertical extent
+// overlaps the mover's. An entry with the mover's own ID is ignored, so a
+// stored body can move without being removed first. MoveAmong does not store the
+// result; the caller does that with Bodies.Set. A nil set behaves like Move.
+//
+// A body that already overlaps another body returns ErrEmbedded, as it does
+// for a solid. Games must not place bodies on top of each other.
+func (w *World) MoveAmong(bodies *Bodies, body Shape, dx, dy fixed.Num) (Result, error) {
 	fp := body.Footprint
 	if fp.Empty() || body.Vertical.Empty() {
 		return Result{}, fmt.Errorf("%w: body %d is empty", ErrInvalid, body.ID)
@@ -166,11 +182,21 @@ func (w *World) Move(body Shape, dx, dy fixed.Num) (Result, error) {
 	if embedded {
 		return Result{}, fmt.Errorf("%w: body %d and solid %d", ErrEmbedded, body.ID, blocker)
 	}
+	embedded = false
+	bodies.each(fp, body.Vertical, body.ID, func(s *Shape) bool {
+		if !embedded || s.ID < blocker {
+			embedded, blocker = true, s.ID
+		}
+		return true
+	})
+	if embedded {
+		return Result{}, fmt.Errorf("%w: body %d and body %d", ErrEmbedded, body.ID, blocker)
+	}
 
 	var result Result
-	result.Moved.X, result.X = w.sweep(body, false, dx)
+	result.Moved.X, result.X = w.sweep(bodies, body, false, dx)
 	body.Footprint = body.Footprint.Translate(fixed.Vec2{X: result.Moved.X})
-	result.Moved.Y, result.Y = w.sweep(body, true, dy)
+	result.Moved.Y, result.Y = w.sweep(bodies, body, true, dy)
 	body.Footprint = body.Footprint.Translate(fixed.Vec2{Y: result.Moved.Y})
 	result.Body = body
 	return result, nil
@@ -178,7 +204,7 @@ func (w *World) Move(body Shape, dx, dy fixed.Num) (Result, error) {
 
 // sweep moves body along one axis. It works in the X axis and transposes the
 // rectangles when moving along Y, so both axes share one implementation.
-func (w *World) sweep(body Shape, vertical bool, d fixed.Num) (fixed.Num, Contact) {
+func (w *World) sweep(bodies *Bodies, body Shape, vertical bool, d fixed.Num) (fixed.Num, Contact) {
 	if d == 0 {
 		return 0, Contact{}
 	}
@@ -225,6 +251,22 @@ func (w *World) sweep(body Shape, vertical bool, d fixed.Num) (fixed.Num, Contac
 	if edge < best {
 		best, contact = edge, Contact{Blocked: true, Edge: true}
 	}
+	// Solids and the edge win ties, so a body only shortens the move if it is
+	// strictly nearer, or ties with another body that has a higher ID.
+	bodies.each(region, body.Vertical, body.ID, func(s *Shape) bool {
+		sf := s.Footprint
+		if vertical {
+			sf = transpose(sf)
+		}
+		distance := sf.Min.X.Sub(fp.Max.X)
+		if d < 0 {
+			distance = fp.Min.X.Sub(sf.Max.X)
+		}
+		if distance < best || (contact.Body != 0 && distance == best && s.ID < contact.Body) {
+			best, contact = distance, Contact{Blocked: true, Body: s.ID}
+		}
+		return true
+	})
 	if d < 0 {
 		best = best.Neg()
 	}

@@ -1,6 +1,6 @@
 # Goje project manifest, version 1
 
-A project is a directory containing `goje.json`, one [v1 level](level-v1.md), and one [ground tile PNG](../docs/playground.md#validate-custom-ground-art). The [M7 RFC](../rfcs/0008-m7-game-projects.md) defines how games use these files together.
+A project is a directory containing `goje.json`, one [v1](level-v1.md) or [v2](level-v2.md) level, and one [ground tile PNG](../docs/playground.md#validate-custom-ground-art). The [M7 RFC](../rfcs/0008-m7-game-projects.md) defines how games use these files together.
 
 ```json
 {
