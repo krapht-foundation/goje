@@ -1,4 +1,4 @@
-//go:build !goje_beacon_smoke
+//go:build !goje_beacon_smoke && !goje_bench
 
 package main
 

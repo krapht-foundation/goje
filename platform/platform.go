@@ -11,9 +11,11 @@ import (
 	"image/draw"
 	"log/slog"
 
+	"github.com/krapht-foundation/goje/audio"
 	"github.com/krapht-foundation/goje/diagnostics"
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/internal/platform/driver"
+	"github.com/krapht-foundation/goje/internal/sound"
 )
 
 // Config describes the initial window and logical viewport. Image is optional;
@@ -24,6 +26,9 @@ type Config struct {
 	Title         string
 	Width, Height int
 	Image         image.Image
+	// Sounds supplies up to 16 prepared cues, identified by zero-based index.
+	// Leave it empty to disable playback. Do not modify it during Run.
+	Sounds []audio.Clip
 	// Logger receives lifecycle messages; nil disables logging.
 	Logger *slog.Logger
 	// Diagnostics collects counters and optionally a bounded trace. Nil disables
@@ -65,6 +70,10 @@ func Run(ctx context.Context, config Config, scene engine.SceneFactory) error {
 	if err != nil {
 		return err
 	}
+	soundQueue, err := sound.New(config.Sounds)
+	if err != nil {
+		return err
+	}
 	var capture *driver.Capture
 	if config.Diagnostics != nil {
 		capture, err = driver.NewCapture(config.Diagnostics.TraceCapacity)
@@ -84,7 +93,7 @@ func Run(ctx context.Context, config Config, scene engine.SceneFactory) error {
 	return run(ctx, driver.Config{
 		Title: config.Title, Width: config.Width, Height: config.Height,
 		Texture: texture, ImageSize: imageSize,
-		Logger: config.Logger, Capture: capture,
+		Logger: config.Logger, Capture: capture, Sound: soundQueue,
 	}, scene)
 }
 

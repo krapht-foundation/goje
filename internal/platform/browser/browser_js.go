@@ -46,11 +46,14 @@ func Run(ctx context.Context, config driver.Config, factory engine.SceneFactory)
 	if ctx.Err() != nil {
 		return nil
 	}
+	// Prepare clips before the first tick; a missing backend leaves the queue disabled.
+	sounds := newWebAudio(ctx, window, config.Sound, config.Logger)
+	defer sounds.close()
 	session, err := driver.Start(ctx, factory, config)
 	if err != nil {
 		return fmt.Errorf("browser: %w", err)
 	}
-	return runLoop(ctx, window, document, canvas, session, graphics)
+	return runLoop(ctx, window, document, canvas, session, graphics, sounds)
 }
 
 func webGLContext(canvas js.Value) (gl js.Value, err error) {
@@ -76,10 +79,13 @@ func runLoop(
 	window, document, canvas js.Value,
 	session *driver.Session,
 	graphics *renderer,
+	sounds *webAudio,
 ) (err error) {
 	updateActive := func() {
 		session.SetActive(!document.Get("hidden").Bool() &&
 			document.Call("hasFocus").Bool() && document.Get("activeElement").Equal(canvas))
+		// Frames may stop while hidden, so apply a cleared queue now.
+		sounds.poll()
 	}
 	lost := make(chan struct{}, 1)
 	event := js.FuncOf(func(_ js.Value, args []js.Value) any {
@@ -88,9 +94,13 @@ func runLoop(
 		switch kind {
 		case "blur":
 			session.SetActive(false)
+			sounds.poll()
 		case "focus", "visibilitychange":
 			updateActive()
 		case "keydown", "keyup":
+			if kind == "keydown" && !e.Get("repeat").Bool() && e.Get("isTrusted").Bool() {
+				sounds.unlock(window)
+			}
 			if key := gameKey(e.Get("code").String()); key != 0 {
 				e.Call("preventDefault")
 				if kind == "keydown" {
@@ -107,6 +117,9 @@ func runLoop(
 			if kind == "pointerdown" {
 				if e.Get("pointerType").String() != "mouse" {
 					break
+				}
+				if e.Get("isTrusted").Bool() {
+					sounds.unlock(window)
 				}
 			} else if mask := 1 << (button / 2); e.Get("buttons").Int()&^mask == 0 {
 				// Pointerdown reports the first physical button. Mousedown
@@ -127,6 +140,11 @@ func runLoop(
 			} else {
 				session.Loop.PressSecondary(x, y)
 			}
+		case "pointerup":
+			// Touch and pen activation is granted on release, not on press.
+			if e.Get("pointerType").String() != "mouse" && e.Get("isTrusted").Bool() {
+				sounds.unlock(window)
+			}
 		case "contextmenu":
 			e.Call("preventDefault")
 		case "webglcontextlost":
@@ -144,6 +162,7 @@ func runLoop(
 		{canvas, "keydown"},
 		{canvas, "keyup"},
 		{canvas, "pointerdown"},
+		{canvas, "pointerup"},
 		{canvas, "mousedown"},
 		{canvas, "contextmenu"},
 		{canvas, "focus"},
@@ -226,6 +245,7 @@ func runLoop(
 			if err != nil {
 				return fmt.Errorf("browser: %w", err)
 			}
+			sounds.poll()
 			submission := session.StartSubmission()
 			drawErr := graphics.present(window, canvas, batch)
 			session.FinishSubmission(submission)

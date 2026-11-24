@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"image/color"
 	"log/slog"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/krapht-foundation/goje/engine"
@@ -29,6 +31,10 @@ const (
 )
 
 func run(config platform.Config, factory func() *scene) error {
+	if len(os.Args) == 2 && os.Args[1] == "--audio" {
+		return runAudio(config, factory)
+	}
+	config.Sounds = nil
 	if len(os.Args) == 2 && os.Args[1] == "--sprite" {
 		return runSprite(config, factory)
 	}
@@ -105,6 +111,86 @@ func run(config platform.Config, factory func() *scene) error {
 		"Native Beacon smoke passed: editor assets, tomato blink and hop, beacon toggle, and reset",
 	)
 	return nil
+}
+
+// runAudio watches real device callbacks without requiring speakers in CI.
+func runAudio(config platform.Config, factory func() *scene) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	clip := config.Sounds[toggleCue].PCM()
+	offset := firstSignal(clip)
+	start := time.Now()
+	var requested, received atomic.Int64
+	var complete, wrong atomic.Bool
+	desktop.AudioNull = os.Getenv("GOJE_AUDIO_DEVICE") != "default"
+	desktop.AudioProbe = func(pcm []byte) {
+		if received.Load() == 0 {
+			pcm = pcm[firstSignal(pcm):]
+			if len(pcm) == 0 {
+				return
+			}
+			received.Store(int64(time.Since(start)))
+		}
+		n := min(len(pcm), len(clip)-offset)
+		if !bytes.Equal(pcm[:n], clip[offset:offset+n]) || firstSignal(pcm[n:]) < len(pcm)-n {
+			wrong.Store(true)
+		}
+		offset += n
+		if offset == len(clip) {
+			complete.Store(true)
+		}
+	}
+	// Keep the runtime running under headless window managers. The callback
+	// acknowledges the buffer independently of how fast the window presents.
+	desktop.FrameProbe = func(image.Rectangle) error { return nil }
+	defer func() {
+		desktop.AudioProbe, desktop.FrameProbe, desktop.AudioNull = nil, nil, false
+	}()
+
+	var current *scene
+	resetAt := time.Duration(0)
+	if err := platform.Run(ctx, config, func() engine.Scene {
+		current = factory()
+		return &smokeScene{Scene: current, input: func() engine.Input {
+			switch {
+			case requested.Load() == 0:
+				requested.Store(int64(time.Since(start)))
+				return engine.Input{
+					Pressed: engine.KeySpace,
+					PrimaryPress: engine.MousePress{
+						X: float64(left + current.beacon.X*cell + 1),
+						Y: float64(top + current.beacon.Y*cell + 1), Valid: true,
+					},
+				}
+			case complete.Load() && resetAt == 0:
+				if !current.on {
+					wrong.Store(true)
+				}
+				resetAt = time.Since(start)
+				return engine.Input{Pressed: engine.KeyR}
+			case resetAt != 0 && time.Since(start)-resetAt > 150*time.Millisecond:
+				cancel()
+			}
+			return engine.Input{}
+		}}
+	}); err != nil {
+		return fmt.Errorf("run native audio smoke: %w", err)
+	}
+	if !complete.Load() || wrong.Load() || resetAt == 0 || current.on {
+		return errors.New("native audio smoke: expected one exact cue and silence after reset")
+	}
+	slog.Info("Beacon audio smoke passed", "null_device", desktop.AudioNull,
+		"request_to_callback", time.Duration(received.Load()-requested.Load()))
+	return nil
+}
+
+func firstSignal(pcm []byte) int {
+	for i := 0; i < len(pcm); i += 2 {
+		if pcm[i] != 0 || pcm[i+1] != 0 {
+			return i
+		}
+	}
+	return len(pcm)
 }
 
 type smokeScene struct {

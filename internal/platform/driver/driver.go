@@ -12,6 +12,7 @@ import (
 	"github.com/krapht-foundation/goje/diagnostics"
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/internal/platform/loop"
+	"github.com/krapht-foundation/goje/internal/sound"
 )
 
 // Config describes validated host startup settings. Texture pixels are tightly
@@ -24,6 +25,7 @@ type Config struct {
 	ImageSize     image.Point
 	Logger        *slog.Logger
 	Capture       *Capture
+	Sound         *sound.Queue
 }
 
 // Session owns the fixed-step policy, runtime, and reusable frame batch.
@@ -35,6 +37,7 @@ type Session struct {
 	capture *Capture
 	logger  *slog.Logger
 	ctx     context.Context
+	sound   *sound.Queue
 }
 
 // Start enters the first scene after the host has initialized its resources.
@@ -43,18 +46,28 @@ func Start(ctx context.Context, factory engine.SceneFactory, config Config) (*Se
 	if err != nil {
 		return nil, err
 	}
+	if config.Sound != nil {
+		r.SetSoundOutput(config.Sound)
+	}
 	return &Session{
 		runtime: r,
 		frame:   Frame{imageSize: config.ImageSize},
 		capture: config.Capture,
 		logger:  config.Logger,
 		ctx:     ctx,
+		sound:   config.Sound,
 	}, nil
 }
 
 // SetActive applies focus and visibility changes, logging only on a transition.
 func (s *Session) SetActive(active bool) {
-	if !s.Loop.SetActive(active) || s.logger == nil {
+	if !s.Loop.SetActive(active) {
+		return
+	}
+	if !active && s.sound != nil {
+		s.sound.Clear()
+	}
+	if s.logger == nil {
 		return
 	}
 	if active {

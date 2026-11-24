@@ -32,6 +32,23 @@ type SceneFactory func() Scene
 type Tick struct {
 	Number uint64
 	Input  Input
+	sound  SoundOutput
+}
+
+// PlaySound requests a prepared, zero-based cue for this update. Missing
+// devices and dropped cues never affect gameplay. Do not retain the Tick to
+// request sound outside Update.
+func (t Tick) PlaySound(cue int) {
+	if t.sound != nil {
+		t.sound.Play(cue)
+	}
+}
+
+// SoundOutput is the host's nonblocking bridge from simulation to playback.
+// Clear discards pending requests and invalidates the current cue on scene exit.
+type SoundOutput interface {
+	Play(cue int)
+	Clear()
 }
 
 type transitionKind uint8
@@ -64,6 +81,7 @@ type Runtime struct {
 	scene      Scene
 	logContext context.Context
 	logger     *slog.Logger
+	sound      SoundOutput
 	tick       uint64
 	busy       bool
 }
@@ -87,6 +105,10 @@ func StartWithLogger(
 	return r, nil
 }
 
+// SetSoundOutput installs the host's sound bridge before the first Step.
+// Headless callers can leave the bridge unset.
+func (r *Runtime) SetSoundOutput(output SoundOutput) { r.sound = output }
+
 // Step executes one update. A transition happens only after a successful
 // update, and the resulting scene will not update until the next call. An
 // update or transition error stops the runtime; it cannot be stepped again.
@@ -101,7 +123,7 @@ func (r *Runtime) Step(input Input) error {
 	defer func() { r.busy = false }()
 
 	r.tick++
-	transition, err := r.scene.Update(Tick{Number: r.tick, Input: input})
+	transition, err := r.scene.Update(Tick{Number: r.tick, Input: input, sound: r.sound})
 	if err != nil {
 		r.exit()
 		return fmt.Errorf("update scene at tick %d: %w", r.tick, err)
@@ -175,6 +197,9 @@ func (r *Runtime) exit() {
 	if scene := r.scene; scene != nil {
 		// Drop ownership before the callback so a failed transition cannot restore this scene.
 		r.factory, r.scene = nil, nil
+		if r.sound != nil {
+			r.sound.Clear()
+		}
 		scene.Exit()
 	}
 }

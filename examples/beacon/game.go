@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log"
 
+	"github.com/krapht-foundation/goje/audio"
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/level"
 	"github.com/krapht-foundation/goje/platform"
@@ -34,6 +35,7 @@ const (
 	laneLeft, laneRight = left + 16, width - left - 16
 	laneTop, laneBottom = top + rows*cell + 24, height - 8
 	startX, startY      = laneLeft, 112
+	toggleCue           = 0
 )
 
 var (
@@ -100,6 +102,10 @@ func launch(root fs.FS) (platform.Config, func() *scene, error) {
 	draw.Draw(atlas, image.Rectangle{Min: offset, Max: offset.Add(pixels.Size())}, sheet.Image(),
 		pixels.Min, draw.Src)
 	idle, move = idle.InAtlas(offset), move.InAtlas(offset)
+	cue, err := loadToggleCue(root)
+	if err != nil {
+		return platform.Config{}, nil, err
+	}
 	board := loaded.Level
 	// Capture startup data, not the filesystem. Every restart gets an unlit
 	// beacon and an idle tomato at the lane start.
@@ -112,8 +118,18 @@ func launch(root fs.FS) (platform.Config, func() *scene, error) {
 	config := platform.Config{
 		Title: "Goje Beacon · Click the beacon or press Space · Arrows / WASD: move · R: reset",
 		Width: width, Height: height, Image: atlas,
+		Sounds: []audio.Clip{cue},
 	}
 	return config, factory, nil
+}
+
+func loadToggleCue(root fs.FS) (_ audio.Clip, err error) {
+	file, err := root.Open("toggle.wav")
+	if err != nil {
+		return audio.Clip{}, fmt.Errorf("open beacon cue: %w", err)
+	}
+	defer func() { err = errors.Join(err, file.Close()) }()
+	return audio.DecodeWAV(file)
 }
 
 func decodeTomato(root fs.FS) (_ *sprite.Sheet, err error) {
@@ -157,6 +173,7 @@ func (s *scene) Update(tick engine.Tick) (engine.Transition, error) {
 	clicked := press.Valid && press.X >= x && press.X < x+cell && press.Y >= y && press.Y < y+cell
 	if clicked || input.Pressed.Has(engine.KeySpace) {
 		s.on = !s.on
+		tick.PlaySound(toggleCue)
 	}
 	tomatoX := min(laneRight, max(laneLeft,
 		s.x+axis(input.Held, engine.KeyArrowLeft|engine.KeyA, engine.KeyArrowRight|engine.KeyD)))

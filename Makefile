@@ -196,11 +196,12 @@ smoke-beacon: build-level-editor build-tile-maker ## Author and play an independ
 			cmp "sprite/testdata/$$asset" "examples/beacon/assets/$$asset"; \
 		done; \
 		cp examples/beacon/assets/tomato.png examples/beacon/assets/tomato.json "$$tmp/assets/"; \
+		cp examples/beacon/assets/toggle.wav "$$tmp/assets/"; \
 		$(NODE) scripts/smoke-beacon.mjs author "$$tmp/assets"; \
 		$(GO) run ./cmd/projectcheck "$$tmp/assets"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		$(GO) build -tags goje_smoke,goje_beacon_smoke -o "$$tmp/beacon-smoke" "$$tmp"; \
-		rm "$$tmp/run_smoke.go"; \
+		rm "$$tmp/run_smoke.go" "$$tmp/run_bench.go"; \
 		cd "$$tmp"; \
 		$(GO) mod init example.com/beacon; \
 		$(GO) mod edit -go="$$go_version" \
@@ -213,6 +214,30 @@ smoke-beacon: build-level-editor build-tile-maker ## Author and play an independ
 			"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" web/; \
 		$(PYTHON) -c 'import subprocess; subprocess.run(["./beacon-smoke"], check=True, timeout=20)'; \
 		$(NODE) "$(CURDIR)/scripts/smoke-beacon.mjs" play "$$tmp/web"
+
+.PHONY: smoke-beacon-audio
+smoke-beacon-audio: ## Verify Beacon PCM output on desktop and in Chromium
+	@set -eu; mkdir -p "$(BUILD_DIR)"; \
+		tmp=$$(mktemp -d "$(BUILD_DIR)/beacon-audio.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		$(GO) build -tags goje_smoke,goje_beacon_smoke -o "$$tmp/beacon" ./examples/beacon; \
+		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/playground.wasm" ./examples/beacon; \
+		install -m 0644 examples/beacon/web/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/"; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1], "--audio"], check=True, timeout=10)' "$$tmp/beacon"; \
+		PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-beacon-audio.mjs "$$tmp"
+
+.PHONY: benchmark-beacon-audio
+benchmark-beacon-audio: ## Compare audio off, idle, and burst modes on desktop and in Chromium
+	@set -eu; mkdir -p "$(BUILD_DIR)"; \
+		tmp=$$(mktemp -d "$(BUILD_DIR)/beacon-audio-bench.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		$(GO) build -tags goje_bench -o "$$tmp/beacon" ./examples/beacon; \
+		GOOS=js GOARCH=wasm $(GO) build -tags goje_bench -o "$$tmp/playground.wasm" ./examples/beacon; \
+		install -m 0644 examples/beacon/web/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/"; \
+		i=0; while [ $$i -lt "$(BENCHMARK_REPEATS)" ]; do \
+			if [ $$((i % 2)) -eq 0 ]; then modes='off idle burst'; else modes='burst idle off'; fi; \
+			for mode in $$modes; do GOJE_BENCH_MODE=$$mode "$$tmp/beacon"; done; \
+			i=$$((i + 1)); \
+		done; \
+		PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/benchmark-web.mjs "$$tmp" "$(BENCHMARK_REPEATS)" beacon
 
 check-example: ## Build the reference playground from a separate module on desktop and web
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \

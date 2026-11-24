@@ -67,6 +67,12 @@ From the Goje checkout, `make setup-web` and `make smoke-beacon` automate the au
 
 Both examples embed the same [tomato sheet and clips](../specs/sprite-sheet-v1.md#loading-and-ownership). To use different art, run `go run ./cmd/spritecheck SHEET.png CLIPS.json`, then replace `tomato.png` and `tomato.json` under `cmd/playground/art/` or Beacon's `assets/` directory. The games expect `idle` and `move` clips. No `goje.json` change is needed.
 
+### Play a sound in Beacon
+
+Click the beacon or press **Space** to play its short, synthesized [`toggle.wav`](../examples/beacon/assets/toggle.wav). Reset does not play the cue. Beacon decodes the file at startup with [`audio.DecodeWAV`](../audio/wav.go), passes the clip in `platform.Config.Sounds`, and requests playback from the scene with `Tick.PlaySound`. Use mono, 48 kHz, signed 16-bit PCM WAV of at most three seconds for your own cues. Leaving `Sounds` empty disables audio.
+
+On desktop, Goje uses the available native audio device. In the browser, a trusted click, tap, or key press unlocks Web Audio; input that arrives before unlock is not queued for later. Sound is optional: Beacon still works when audio is unavailable. Run `make setup-web` once, then `make smoke-beacon-audio` to verify the desktop callback and Chromium output. The desktop smoke uses a silent device by default; set `GOJE_AUDIO_DEVICE=default` to exercise the system device. Run `make benchmark-beacon-audio` to compare audio disabled, idle, and burst frame pacing.
+
 ## Draw pixel art in the browser
 
 Run `make serve-pixel-art` with Go and Node installed, then open `http://127.0.0.1:8084/`. Set `PIXEL_ART_PORT` to use a different port. The editor runs on loopback and never uploads your files.

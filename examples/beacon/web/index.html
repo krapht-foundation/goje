@@ -22,6 +22,8 @@
     /** @returns {Promise<void>} Resolves when the game exits. */
     async function start() {
       const go = new Go();
+      const bench = new URLSearchParams(location.search).get("bench");
+      if (bench) go.env.GOJE_BENCH_MODE = bench;
       let exitCode = 0;
       /** @param {number} code - Go program exit status. */
       go.exit = code => { exitCode = code; };

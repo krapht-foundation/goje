@@ -54,6 +54,11 @@ func Run(ctx context.Context, config driver.Config, factory engine.SceneFactory)
 	if ctx.Err() != nil {
 		return nil
 	}
+	// Disabled audio does no device work. Opened before the session so its
+	// callbacks stop only after the last tick.
+	if config.Sound != nil {
+		defer openSpeaker(ctx, config.Logger, config.Sound).close()
+	}
 
 	session, err := driver.Start(ctx, factory, config)
 	if err != nil {
