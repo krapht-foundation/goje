@@ -70,7 +70,9 @@ jobs:
           fi
       - name: Run browser playground smoke
         run: make smoke-web
-      - name: Play the Sprite Clip Editor export on desktop and web
+      - name: Run Pixel Art Maker smoke
+        run: make smoke-pixel-art
+      - name: Play the Pixel Art Maker and Sprite Clip Editor exports on desktop and web
         run: xvfb-run -a make smoke-sprite-roundtrip
       - name: Play both browser exports on desktop and web
         run: xvfb-run -a make smoke-level-roundtrip

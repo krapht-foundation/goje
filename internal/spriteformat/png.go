@@ -11,7 +11,8 @@ import (
 // MaxPNGBytes is the v1 limit on encoded sheet bytes.
 const MaxPNGBytes = 1 << 20
 
-const maxAxis = 512
+// MaxPNGAxis is the largest supported width or height in sheet pixels.
+const MaxPNGAxis = 512
 
 // PNG retains the checked bytes so callers can validate metadata before
 // allocating decoded pixels. Its zero value is not an opened image.
@@ -30,8 +31,9 @@ func ReadPNG(r io.Reader) (PNG, error) {
 	if err != nil {
 		return PNG{}, fmt.Errorf("read sprite PNG dimensions: %w", err)
 	}
-	if config.Width < 1 || config.Width > maxAxis || config.Height < 1 || config.Height > maxAxis {
-		return PNG{}, fmt.Errorf("sprite PNG axes must be 1–%d pixels", maxAxis)
+	if config.Width < 1 || config.Width > MaxPNGAxis || config.Height < 1 ||
+		config.Height > MaxPNGAxis {
+		return PNG{}, fmt.Errorf("sprite PNG axes must be 1–%d pixels", MaxPNGAxis)
 	}
 	return PNG{data: data, size: image.Pt(config.Width, config.Height)}, nil
 }

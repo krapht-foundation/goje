@@ -48,8 +48,8 @@ func main() {
 		if err := runSpriteSmoke(); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("Desktop smoke passed: exported scout clip airborne on motion ticks 13 and 16, " +
-			"planted on tick 17, and reset")
+		fmt.Println("Desktop smoke passed: exported scout clip airborne with its painted cyan stripe " +
+			"on motion ticks 13 and 16, planted on tick 17, and reset")
 		return
 	}
 	if len(os.Args) == 2 && os.Args[1] == "--shortcut" {

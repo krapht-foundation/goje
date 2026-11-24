@@ -67,6 +67,16 @@ From the Goje checkout, `make setup-web` and `make smoke-beacon` automate the au
 
 Both examples embed the same [tomato sheet and clips](../specs/sprite-sheet-v1.md#loading-and-ownership). To use different art, run `go run ./cmd/spritecheck SHEET.png CLIPS.json`, then replace `tomato.png` and `tomato.json` under `cmd/playground/art/` or Beacon's `assets/` directory. The games expect `idle` and `move` clips. No `goje.json` change is needed.
 
+## Draw pixel art in the browser
+
+Run `make serve-pixel-art` with Go and Node installed, then open `http://127.0.0.1:8084/`. Set `PIXEL_ART_PORT` to use a different port. The editor runs on loopback and never uploads your files.
+
+1. Enter a width and height and choose **New sheet**, or choose **Open PNG**. Each axis can be 1–512 pixels. Imports and downloads must fit within 1 MiB. Opening a file or creating a sheet never overwrites the original.
+2. Choose a palette color or set your own. Click or drag to draw with the **Pencil** or clear pixels with the **Eraser**. To work by keyboard, focus the sheet and use the arrow keys and **Enter** or **Space**. **Undo** and **Redo** operate on whole strokes or individual keyboard edits.
+3. Inspect the zoomed sheet and the 1× preview, then choose **Download PNG**. The download contains only the artwork, without the checkerboard or pixel grid. To animate it, open the exact PNG in the [Sprite Clip Editor](#author-sprite-clips-in-the-browser).
+
+Run `make setup-web` once, then `make smoke-pixel-art` to edit, download, and reopen artwork in Chromium. The smoke reports edit-to-preview and download-handoff timings for a small sheet and a 512 × 512 sheet; these are observations, not CI limits.
+
 ## Author sprite clips in the browser
 
 Run `make serve-sprite-editor` with Go and Node installed, then open `http://127.0.0.1:8083/`. Set `SPRITE_EDITOR_PORT` to use a different port. The editor runs on loopback and does not upload your files.
@@ -74,11 +84,17 @@ Run `make serve-sprite-editor` with Go and Node installed, then open `http://127
 1. Choose a sprite sheet PNG and optionally its v1 clip sidecar, then press **Open**. Try the [tomato PNG](../sprite/testdata/tomato.png) and [its sidecar](../sprite/testdata/tomato.json). A PNG without a sidecar starts with no clips.
 2. Select a clip and frame, or name a new clip. Drag a rectangle on the sheet or type exact coordinates. Set a frame-relative pivot, such as the bottom center, and a duration in simulation ticks (60 per second). Press **Apply frame** to commit, or **Add frame** or **Add clip** to create a new entry. The frame list supports duplicate, delete, and move actions. Use **Undo** and **Redo** to recover committed edits.
 3. Select **Play** to loop the clip, or **Step one tick** while paused. The preview places every frame's pivot on the same anchor so you can spot unwanted movement between poses. The preview and its zoom never change the exported metadata.
-4. Choose **Download JSON** and keep the original PNG. Reopen the download with that PNG to keep editing, or run `go run ./cmd/spritecheck SHEET.png CLIPS.json` before embedding the pair. The editor never overwrites either input file.
+4. Choose **Download JSON** and keep the source PNG. Reopen the download with that PNG to keep editing, or run `go run ./cmd/spritecheck SHEET.png CLIPS.json` before embedding the pair. The editor never overwrites either input file.
 
 Run `make setup-web` once, then `make smoke-sprite-editor` to exercise keyboard and pointer editing, preview timing and alignment, and download and reopen in Chromium.
 
-Run `make smoke-sprite-roundtrip` to also play the exact download in scratch builds of Beacon and the authored courtyard on desktop OpenGL and Chromium WebGL. On headless Linux, use `xvfb-run -a make smoke-sprite-roundtrip`. The smoke moves the `move` clip's hop to the first slot, extends it from 8 to 16 ticks, validates the download with `spritecheck`, and embeds it with the original PNG. The actor stays airborne on motion ticks 13 and 16, lands on tick 17, and returns to its starting pose on reset. The checked-in assets are not overwritten.
+## Paint, animate, and play a sprite
+
+1. In the **Pixel Art Maker**, open the [tomato PNG](../sprite/testdata/tomato.png), repaint part of the sheet, and choose **Download PNG**.
+2. In the **Sprite Clip Editor**, open the downloaded PNG with the [original sidecar](../sprite/testdata/tomato.json). Edit the clip frames or their timing and choose **Download JSON**.
+3. Validate the two downloads together with `go run ./cmd/spritecheck SHEET.png CLIPS.json`. To see them in a game, copy the files as `tomato.png` and `tomato.json` into a scratch copy of the courtyard's `cmd/playground/art/` or Beacon's `examples/beacon/assets/` and rebuild.
+
+Run `make smoke-sprite-roundtrip` to exercise this workflow in Chromium and play both exact downloads in scratch builds of Beacon and the authored courtyard on desktop OpenGL and Chromium WebGL. On headless Linux, use `xvfb-run -a make smoke-sprite-roundtrip`. The smoke paints a cyan stripe on the tomato's hop, moves the hop to the first slot of `move`, and extends it from 8 to 16 ticks. Both games show the stripe and the clear space below the actor at motion ticks 13 and 16, land on tick 17, and return to the standing pose on reset. The checked-in assets are not overwritten.
 
 ## Draw a ground tile in the browser
 

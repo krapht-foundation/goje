@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	"io"
 
+	"github.com/krapht-foundation/goje/internal/pixelstroke"
 	"github.com/krapht-foundation/goje/tile"
 )
 
@@ -99,7 +100,7 @@ func (d *Document) Extend(at image.Point) {
 		return
 	}
 	if d.connected {
-		d.line(d.last, at)
+		pixelstroke.Line(d.last, at, d.paint)
 	} else {
 		d.paint(at)
 	}
@@ -170,29 +171,4 @@ func pixelImage(pixels *Pixels) *image.NRGBA {
 func (d *Document) paint(at image.Point) {
 	i := 4 * (at.Y*tile.Width + at.X)
 	d.pixels[i], d.pixels[i+1], d.pixels[i+2], d.pixels[i+3] = d.ink.R, d.ink.G, d.ink.B, d.ink.A
-}
-
-// Rasterize in integer coordinates so fast pointer motion cannot skip pixels.
-func (d *Document) line(from, to image.Point) {
-	dx, sx := to.X-from.X, 1
-	if dx < 0 {
-		dx, sx = -dx, -1
-	}
-	dy, sy := to.Y-from.Y, 1
-	if dy < 0 {
-		dy, sy = -dy, -1
-	}
-	balance := dx - dy
-	for from != to {
-		twice := 2 * balance
-		if twice > -dy {
-			balance -= dy
-			from.X += sx
-		}
-		if twice < dx {
-			balance += dx
-			from.Y += sy
-		}
-		d.paint(from)
-	}
 }

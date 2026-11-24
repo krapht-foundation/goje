@@ -15,6 +15,8 @@ TILE_MAKER_WEB_DIR := $(BUILD_DIR)/tilemaker-web
 TILE_MAKER_PORT ?= 8082
 SPRITE_EDITOR_WEB_DIR := $(BUILD_DIR)/spriteeditor-web
 SPRITE_EDITOR_PORT ?= 8083
+PIXEL_ART_WEB_DIR := $(BUILD_DIR)/pixelart-web
+PIXEL_ART_PORT ?= 8084
 PLAYWRIGHT_CACHE := $(BUILD_DIR)/playwright
 PLAYGROUND := $(BUILD_DIR)/playground$(if $(filter windows,$(shell $(GO) env GOOS)),.exe)
 BENCHMARK := $(BUILD_DIR)/playground-benchmark
@@ -110,6 +112,19 @@ serve-tile-maker: build-tile-maker ## Serve the Tile Maker on loopback (TILE_MAK
 smoke-tile-maker: build-tile-maker ## Verify pixel editing, previews, and PNG handoff in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-tile-maker.mjs
 
+.PHONY: build-pixel-art serve-pixel-art smoke-pixel-art
+build-pixel-art: ## Build the standalone browser Pixel Art Maker
+	mkdir -p "$(PIXEL_ART_WEB_DIR)"
+	GOOS=js GOARCH=wasm $(GO) build -o "$(PIXEL_ART_WEB_DIR)/pixelart.wasm" ./cmd/pixelart
+	install -m 0644 web/pixelart/index.html web/pixelart/editor.mjs web/pixelart/editor.css \
+		"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(PIXEL_ART_WEB_DIR)/"
+
+serve-pixel-art: build-pixel-art ## Serve the Pixel Art Maker on loopback (PIXEL_ART_PORT=8084 by default)
+	$(NODE) scripts/pixel-art-server.mjs "$(PIXEL_ART_PORT)"
+
+smoke-pixel-art: build-pixel-art ## Verify artwork editing and PNG handoff in Chromium
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-pixel-art.mjs
+
 .PHONY: build-sprite-editor serve-sprite-editor smoke-sprite-editor smoke-sprite-roundtrip
 build-sprite-editor: ## Build the standalone browser Sprite Clip Editor
 	mkdir -p "$(SPRITE_EDITOR_WEB_DIR)"
@@ -123,12 +138,12 @@ serve-sprite-editor: build-sprite-editor ## Serve the Sprite Clip Editor on loop
 smoke-sprite-editor: build-sprite-editor ## Verify clip editing, playback, and JSON handoff in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-sprite-editor.mjs
 
-smoke-sprite-roundtrip: build-sprite-editor ## Play the editor's exact JSON export in both games on desktop and web
+smoke-sprite-roundtrip: build-pixel-art build-sprite-editor ## Paint, animate, and play both editor downloads on desktop and web
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/sprite-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
 		mkdir -p "$$tmp/courtyard/web" "$$tmp/beacon/web"; \
-		$(NODE) scripts/smoke-sprite-editor.mjs "$$tmp/tomato.json"; \
-		png=sprite/testdata/tomato.png; \
+		$(NODE) scripts/smoke-sprite-editor.mjs "$$tmp"; \
+		png="$$tmp/tomato.png"; \
 		$(GO) run ./cmd/spritecheck "$$png" "$$tmp/tomato.json"; \
 		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/courtyard/"; \
 		cp -R cmd/playground/levels cmd/playground/art "$$tmp/courtyard/"; \

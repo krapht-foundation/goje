@@ -47,6 +47,7 @@ func runSpriteSmoke() error {
 	tomato := color.NRGBA{R: 215, G: 84, B: 73, A: 255}
 	ink := color.NRGBA{R: 36, G: 38, B: 46, A: 255}
 	eye := color.NRGBA{R: 244, G: 241, B: 235, A: 255}
+	cyan := color.NRGBA{R: 22, G: 216, B: 255, A: 255}
 	spawn := func(v image.Rectangle) bool {
 		return pixelIs(v, 144, 71, tomato) && pixelIs(v, 139, 70, eye) &&
 			pixelIs(v, 176, 80, courtyardWallColor) && pixelIs(v, 141, 41, groundAccent) &&
@@ -91,13 +92,16 @@ func runSpriteSmoke() error {
 			case 1:
 				name, ok = "route to (2,5)", pixelIs(v, 96, 100, destinationColor)
 			case 13, 16:
-				name = "airborne hop"
-				ok = pixelIs(v, x, y-7, tomato) && pixelIs(v, x, y-4, ink) &&
+				name = "painted airborne hop"
+				// The two painted rows span anchor Y−7.5 to Y−6 at 0.75×,
+				// covering this pixel center on both whole and half-pixel anchors.
+				ok = pixelIs(v, x, y-7, cyan) && pixelIs(v, x, y-4, ink) &&
 					!pixelIs(v, x, y-2, ink) && !pixelIs(v, x, y-1, ink)
 			case spriteLanding:
 				name = "planted windup"
 				// Sample the planted body away from the fractional-width sprite edge.
-				ok = pixelIs(v, x, y-1, ink) && pixelIs(v, x, y-4, tomato)
+				ok = pixelIs(v, x, y-1, ink) && pixelIs(v, x, y-4, tomato) &&
+					!pixelIs(v, x, y-7, cyan)
 			default:
 				return nil
 			}

@@ -228,21 +228,23 @@ async function smokeAuthored(browser, url, shortcut, sprite = false) {
       // Command the straight +board-Y route from cell (2, 2) to (2, 5). Each
       // motion tick moves the ground anchor 1 px left and half a pixel down.
       await page.mouse.click(312, 200, { button: "right" });
+      const cyan = [22, 216, 255];
       /**
+       * At 0.75× the two painted rows span anchor Y−7.5 to Y−6.
        * @param {PNG} frame - Decoded canvas screenshot.
        * @param {number} x - Anchor column.
        * @param {number} y - Ground row.
-       * @returns {boolean} Whether the hop pose clears the ground.
+       * @returns {boolean} Whether the hop shows the cyan stripe and clears the ground.
        */
-      const hopping = (frame, x, y) =>
-        matches(frame, x, y - 7, tomato) && matches(frame, x, y - 4, ink) && !matches(frame, x, y - 2, ink);
+      const hopping = (frame, x, y) => matches(frame, x, y - 7, cyan) &&
+        matches(frame, x, y - 4, ink) && !matches(frame, x, y - 2, ink);
       // The edited move clip is hop (16 ticks), windup, standing. The original
       // landed on motion tick 13; the edit stays airborne through tick 16.
       /** @type {Map<number, [string, function(PNG, number, number): boolean]>} */
       const checkpoints = new Map([
-        [13, ["airborne where the original clip landed", hopping]],
-        [16, ["airborne on the last hop tick", hopping]],
-        [17, ["planted on the windup pose", (frame, x, y) => !hopping(frame, x, y) &&
+        [13, ["airborne and painted where the original clip landed", hopping]],
+        [16, ["airborne and painted on the last hop tick", hopping]],
+        [17, ["planted on the unpainted windup pose", (frame, x, y) => !matches(frame, x, y - 7, cyan) &&
           matches(frame, x, y - 1, ink) && matches(frame, x, y - 4, tomato)]],
       ]);
       // The selection marker is centered on the anchor column, so its rendered x names the tick.
@@ -372,8 +374,8 @@ try {
   try {
     if (sprite) {
       await smokeAuthored(browser, `http://127.0.0.1:${server.address().port}/`, false, true);
-      console.log("Browser smoke passed: authored scout hop airborne at motion ticks 13 and 16, " +
-        "planted windup at tick 17, and reset");
+      console.log("Browser smoke passed: authored scout hop airborne with cyan paint at motion ticks 13 and 16, " +
+        "unpainted planted windup at tick 17, and reset");
     } else {
       const page = await browser.newPage({ viewport: { width: 640, height: 400 } });
       const errors = [];

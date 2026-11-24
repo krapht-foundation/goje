@@ -169,6 +169,14 @@ async function play(directory, sprite = false) {
       return at !== null && at.x + 7 > start && at.y === ground - 15 &&
         [1, 2, 3, 4].every(lift => shot.is(at.x + 7, ground - lift, background));
     };
+    const cyan = [22, 216, 255, 255];
+    /**
+     * The painted stripe crosses the hop center 10 pixels above the ground at native scale.
+     * @param {Shot} shot - Presented frame.
+     * @param {number} x - Anchor column.
+     * @returns {boolean} Whether the stripe reaches its expected center.
+     */
+    const painted = (shot, x) => shot.is(x, ground - 10, cyan);
 
     if (sprite) {
       await frame("the tomato at the lane start", shot => standing(shot, start));
@@ -181,10 +189,11 @@ async function play(directory, sprite = false) {
       // landed on motion tick 13; the edit stays airborne through tick 16.
       /** @type {Map<number, [string, (shot: Shot, x: number) => boolean]>} */
       const checkpoints = new Map([
-        [13, ["airborne where the original clip landed", hopping]],
-        [16, ["airborne on the last hop tick", hopping]],
-        [17, ["planted on the windup pose", (shot, x) => shot.eyes()?.y === ground - 10 &&
-          shot.is(x, ground - 1, outline) && shot.is(x, ground - 2, outline)]],
+        [13, ["airborne and painted where the original clip landed", (shot, x) => hopping(shot) && painted(shot, x)]],
+        [16, ["airborne and painted on the last hop tick", (shot, x) => hopping(shot) && painted(shot, x)]],
+        [17, ["planted on the unpainted windup pose", (shot, x) => shot.eyes()?.y === ground - 10 &&
+          shot.is(x, ground - 1, outline) && shot.is(x, ground - 2, outline) &&
+          !painted(shot, x)]],
       ]);
       await page.keyboard.down("ArrowRight");
       try {
@@ -247,8 +256,8 @@ async function play(directory, sprite = false) {
     await frame("the tomato reopening its eyes", shot => standing(shot, start));
   }, { height: 720, clock: true });
   console.log(sprite
-    ? "Browser Beacon sprite smoke passed: edited hop airborne at motion ticks 13 and 16, " +
-      "planted windup at tick 17, and reset"
+    ? "Browser Beacon sprite smoke passed: edited hop airborne with cyan paint at motion ticks 13 and 16, " +
+      "unpainted planted windup at tick 17, and reset"
     : "Browser Beacon smoke passed: authored art and placement, pointer and keyboard input, " +
       "tomato blink and hop on a stable anchor, and reset");
 }

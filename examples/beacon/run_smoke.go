@@ -128,6 +128,7 @@ func runSprite(config platform.Config, factory func() *scene) error {
 	defer cancel()
 	eye := color.NRGBA{R: 244, G: 241, B: 235, A: 255}
 	ink := color.NRGBA{R: 36, G: 38, B: 46, A: 255}
+	cyan := color.NRGBA{R: 22, G: 216, B: 255, A: 255}
 	stage, motion, probed, issued := "standing spawn", 0, 0, false
 	desktop.FrameProbe = func(viewport image.Rectangle) error {
 		pixel := func(x, y int, want color.NRGBA) bool {
@@ -152,12 +153,14 @@ func runSprite(config platform.Config, factory func() *scene) error {
 			var ok bool
 			switch motion {
 			case 13, 16:
-				name = "airborne hop"
-				ok = pixel(x-7, startY-13, eye) && pixel(x, startY-1, background) &&
-					pixel(x, startY-2, background)
+				name = "painted airborne hop"
+				// The painted stripe crosses the hop center 10 pixels above the ground.
+				ok = pixel(x, startY-10, cyan) && pixel(x-7, startY-13, eye) &&
+					pixel(x, startY-1, background) && pixel(x, startY-2, background)
 			case spriteLanding:
 				name = "planted windup"
-				ok = pixel(x-5, startY-6, eye) && pixel(x, startY-1, ink) && pixel(x, startY-2, ink)
+				ok = !pixel(x, startY-10, cyan) && pixel(x-5, startY-6, eye) &&
+					pixel(x, startY-1, ink) && pixel(x, startY-2, ink)
 			default:
 				return nil
 			}
@@ -204,8 +207,8 @@ func runSprite(config platform.Config, factory func() *scene) error {
 		return fmt.Errorf("native Beacon sprite smoke ended at %s checkpoint after motion tick %d",
 			stage, motion)
 	}
-	slog.Info("Native Beacon sprite smoke passed: exported hop airborne on motion ticks " +
-		"13 and 16, planted on tick 17, and reset")
+	slog.Info("Native Beacon sprite smoke passed: exported hop airborne with its painted cyan " +
+		"stripe on motion ticks 13 and 16, planted on tick 17, and reset")
 	return nil
 }
 

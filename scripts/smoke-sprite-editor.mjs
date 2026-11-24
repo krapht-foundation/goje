@@ -1,13 +1,15 @@
-/** @file Exercise sprite editing, fixed-tick preview, and the exact downloaded sidecar in Chromium. */
+/** @file Verify sprite clip editing and optionally carry exact artwork and sidecar downloads into the games. */
 
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { chromium } from "playwright";
 import { PNG } from "pngjs";
 
+import { servePixelArt } from "./pixel-art-server.mjs";
 import { serveSpriteEditor } from "./sprite-editor-server.mjs";
 
 const pngPath = fileURLToPath(new URL("../sprite/testdata/tomato.png", import.meta.url));
@@ -63,12 +65,65 @@ async function anchoredPose(page, frame) {
 }
 
 /**
+ * Repaint the hop in the Pixel Art Maker and keep the exact PNG download.
+ * @param {import("playwright").Browser} browser - Chromium instance shared by the two editors.
+ * @param {string} output - Path to the scratch PNG for the clip editor and games.
+ * @returns {Promise<void>} Resolves after validating and saving the browser download.
+ */
+async function repaint(browser, output) {
+  const page = await browser.newPage({ acceptDownloads: true });
+  page.setDefaultTimeout(8_000);
+  const server = await servePixelArt(0);
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const status = page.locator("#status");
+    await status.filter({ hasText: "Ready." }).waitFor();
+    await page.locator("#file").setInputFiles(pngPath);
+    await status.filter({ hasText: "Opened tomato.png." }).waitFor();
+    await page.getByLabel("Color", { exact: true }).fill("#16d8ff");
+
+    // The two-row stripe stays visible when the courtyard draws the sprite at 0.75×.
+    // It leaves the eyes, outline, and open space below the hop unchanged.
+    const grid = page.locator("#grid");
+    await grid.scrollIntoViewIfNeeded();
+    const box = await grid.boundingBox();
+    assert.ok(box);
+    for (const row of [14, 15]) {
+      const y = box.y + (row + 0.5) * box.height / tomato.height;
+      await page.mouse.move(box.x + 84.5 * box.width / tomato.width, y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + 87.5 * box.width / tomato.width, y);
+      await page.mouse.up();
+    }
+
+    const pending = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download PNG" }).click();
+    const download = await pending;
+    const bytes = await readFile(await download.path());
+    const painted = PNG.sync.read(bytes);
+    assert.deepEqual([painted.width, painted.height], [tomato.width, tomato.height]);
+    const expected = Buffer.from(tomato.data);
+    for (const row of [14, 15]) {
+      for (let x = 84; x <= 87; x++) expected.set([22, 216, 255, 255], (row * tomato.width + x) * 4);
+    }
+    assert.deepEqual(painted.data, expected, "download preserves every pixel outside the painted stripe");
+    await writeFile(output, bytes, { flag: "wx" });
+    console.log("Pixel Art Maker exported the repainted tomato PNG");
+  } finally {
+    // Closing this page's context first releases its loopback connections.
+    await page.close();
+    await promisify(server.close.bind(server))();
+  }
+}
+
+/**
  * Test import, editing, preview, undo safety, and the downloaded asset.
  * @param {import("playwright").Page} page - Isolated Chromium page.
  * @param {string} url - Loopback address of the editor.
+ * @param {string} sheet - Exact input PNG, original or the Pixel Art Maker download.
  * @returns {Promise<Buffer>} Exact browser download, for subsequent game smoke coverage.
  */
-async function author(page, url) {
+async function author(page, url, sheet) {
   await page.goto(url);
   const pngInput = page.locator("#png-file");
   const jsonInput = page.locator("#json-file");
@@ -81,7 +136,7 @@ async function author(page, url) {
   const previewFrame = page.locator("#preview-frame");
   const status = page.locator("#status");
   await status.filter({ hasText: "Ready." }).waitFor();
-  await pngInput.setInputFiles(pngPath);
+  await pngInput.setInputFiles(sheet);
   await jsonInput.setInputFiles(jsonPath);
   await open.click();
   await status.filter({ hasText: "Opened tomato.png and tomato.json" }).waitFor();
@@ -170,16 +225,18 @@ async function author(page, url) {
 }
 
 const output = process.argv[2];
-if (process.argv.length > 3) throw new Error("Usage: node scripts/smoke-sprite-editor.mjs [EXPORT_PATH]");
+if (process.argv.length > 3) throw new Error("Usage: node scripts/smoke-sprite-editor.mjs [ROUNDTRIP_DIR]");
 
 const server = await serveSpriteEditor(0);
 try {
   const browser = await chromium.launch({ timeout: 15_000 });
   try {
+    const sheet = output ? join(output, "tomato.png") : pngPath;
+    if (output) await repaint(browser, sheet);
     const page = await browser.newPage({ acceptDownloads: true });
     page.setDefaultTimeout(8_000);
-    const data = await author(page, `http://127.0.0.1:${server.address().port}/`);
-    if (output) await writeFile(output, data, { flag: "wx" });
+    const data = await author(page, `http://127.0.0.1:${server.address().port}/`, sheet);
+    if (output) await writeFile(join(output, "tomato.json"), data, { flag: "wx" });
     console.log("Sprite Clip Editor smoke passed: keyboard and pointer edits, history, stable anchor, tick boundary, replacement safety, download, and reopen");
   } finally {
     await browser.close();

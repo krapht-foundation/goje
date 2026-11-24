@@ -42,7 +42,7 @@ The first slice is implemented in the [headless edit model](../internal/spriteed
 
 The second slice is implemented in the [browser Sprite Clip Editor](../docs/playground.md#author-sprite-clips-in-the-browser). `make smoke-sprite-editor` edits and reorders frames through the UI, checks the edited tick boundary and rendered anchor, tests replacement safety, and reopens the exact download.
 
-`make smoke-sprite-roundtrip` completes the third slice. It validates that exact download with `spritecheck`, embeds it with the unchanged PNG in scratch builds of both games, and checks rendered pixels on desktop OpenGL and Chromium WebGL. The edited pose remains airborne on motion tick 13, where the original would land, and on tick 16. It lands on tick 17 and resets to the original spawn.
+At M9 closure, `make smoke-sprite-roundtrip` validated the exact JSON download with `spritecheck`, embedded it with the unchanged PNG in scratch builds of both games, and checked rendered pixels on desktop OpenGL and Chromium WebGL. The edited pose remained airborne on motion tick 13, where the original would land, and on tick 16. It landed on tick 17 and reset to the original spawn. [M10](0011-m10-pixel-art-maker.md) extends the same check with an edited PNG download.
 
 ## Out of scope
 
