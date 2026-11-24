@@ -6,6 +6,8 @@ The [runtime guide](runtime.md) explains how to step a scene headlessly, launch 
 
 The [level authoring guide](levels.md) shows how to open, edit, and export a Goje v1 level in the browser Level Builder, then validate and play it.
 
+The [brand asset guide](brand/) covers the Goje logo and the Android, iOS, and web icon sets.
+
 ## What Goje aims to provide
 
 - A game framework and reusable tools for building a playground inside your own game. The first [playground prototype](playground.md#use-the-playground-in-your-game) supports replaying a configured encounter.

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="125" viewBox="0 0 380 125" role="img" aria-labelledby="title">
+  <title id="title">Goje</title>
+  <style>
+    svg { color: #24262e; }
+    @media (prefers-color-scheme: dark) {
+      svg { color: #f4f1eb; }
+    }
+  </style>
+  <g shape-rendering="crispEdges">
+    <g id="mascot" transform="translate(20 17) scale(4.5)">
+      <path fill="currentColor" d="M11 0h3v2h2v2h3v2h3v2h2v8h-2v2h-2v2H4v-2H2v-2H0V9h2V7h2V5h4V3h3z"/>
+      <path fill="#d75449" d="M5 7h14v1h2v2h1v5h-2v2h-2v1H6v-1H4v-2H2v-5h2V8h1z"/>
+      <path fill="#58a85e" d="M12 2h1v2h2v1h3v2h-6V6H8V5h4z"/>
+      <path fill="#f4f1eb" d="M6 9h3v1h-2v3h2v1H6v-1H5v-3h1z M15 9h3v1h-2v3h2v1h-3v-1h-1v-3h1z"/>
+      <path fill="#24262e" d="M7 10h3v3H7z M16 10h3v3h-3z"/>
+    </g>
+    <g transform="translate(153 43) scale(6.5)" fill="currentColor">
+      <path d="M1 0h6v2H2v5h3V5H4V3h3v5H6v1H1V8H0V1h1z"/>
+      <path fill-rule="evenodd" d="M9 0h5v1h1v7h-1v1H9V8H8V1h1z M10 2v5h3V2z"/>
+      <path d="M19 0h4v8h-1v1h-5V8h-1V5h2v2h3V2h-2z M24 0h7v2h-5v1.5h4v2h-4V7h5v2h-7z"/>
+    </g>
+  </g>
+</svg>
