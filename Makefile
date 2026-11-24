@@ -17,6 +17,8 @@ SPRITE_EDITOR_WEB_DIR := $(BUILD_DIR)/spriteeditor-web
 SPRITE_EDITOR_PORT ?= 8083
 PIXEL_ART_WEB_DIR := $(BUILD_DIR)/pixelart-web
 PIXEL_ART_PORT ?= 8084
+SOUND_MAKER_WEB_DIR := $(BUILD_DIR)/soundmaker-web
+SOUND_MAKER_PORT ?= 8085
 PLAYWRIGHT_CACHE := $(BUILD_DIR)/playwright
 PLAYGROUND := $(BUILD_DIR)/playground$(if $(filter windows,$(shell $(GO) env GOOS)),.exe)
 BENCHMARK := $(BUILD_DIR)/playground-benchmark
@@ -125,6 +127,19 @@ serve-pixel-art: build-pixel-art ## Serve the Pixel Art Maker on loopback (PIXEL
 smoke-pixel-art: build-pixel-art ## Verify artwork editing and PNG handoff in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-pixel-art.mjs
 
+.PHONY: build-sound-maker serve-sound-maker smoke-sound-maker
+build-sound-maker: ## Build the standalone browser Sound Maker
+	mkdir -p "$(SOUND_MAKER_WEB_DIR)"
+	GOOS=js GOARCH=wasm $(GO) build -o "$(SOUND_MAKER_WEB_DIR)/soundmaker.wasm" ./cmd/soundmaker
+	install -m 0644 web/soundmaker/index.html web/soundmaker/editor.mjs web/soundmaker/editor.css \
+		"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(SOUND_MAKER_WEB_DIR)/"
+
+serve-sound-maker: build-sound-maker ## Serve the Sound Maker on loopback (SOUND_MAKER_PORT=8085 by default)
+	$(NODE) scripts/sound-maker-server.mjs "$(SOUND_MAKER_PORT)"
+
+smoke-sound-maker: build-sound-maker ## Verify effect editing, preview, and WAV downloads in Chromium
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-sound-maker.mjs
+
 .PHONY: build-sprite-editor serve-sprite-editor smoke-sprite-editor smoke-sprite-roundtrip
 build-sprite-editor: ## Build the standalone browser Sprite Clip Editor
 	mkdir -p "$(SPRITE_EDITOR_WEB_DIR)"
@@ -224,6 +239,23 @@ smoke-beacon-audio: ## Verify Beacon PCM output on desktop and in Chromium
 		install -m 0644 examples/beacon/web/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/"; \
 		$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1], "--audio"], check=True, timeout=10)' "$$tmp/beacon"; \
 		PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-beacon-audio.mjs "$$tmp"
+
+.PHONY: smoke-sound-roundtrip
+smoke-sound-roundtrip: build-sound-maker ## Make a sound in the Sound Maker, then play that download in Beacon on desktop and web
+	@set -eu; mkdir -p "$(BUILD_DIR)"; \
+		tmp=$$(mktemp -d "$(BUILD_DIR)/sound-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
+		mkdir -p "$$tmp/beacon/web"; \
+		$(NODE) scripts/smoke-sound-maker.mjs "$$tmp/toggle.wav"; \
+		if cmp -s "$$tmp/toggle.wav" examples/beacon/assets/toggle.wav; then echo 'the export must differ from the shipped cue' >&2; exit 1; fi; \
+		cp examples/beacon/*.go "$$tmp/beacon/"; \
+		cp -R examples/beacon/assets "$$tmp/beacon/"; \
+		cp "$$tmp/toggle.wav" "$$tmp/beacon/assets/toggle.wav"; \
+		$(GO) build -tags goje_smoke,goje_beacon_smoke -o "$$tmp/beacon-smoke" "$$tmp/beacon"; \
+		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/beacon/web/playground.wasm" "$$tmp/beacon"; \
+		install -m 0644 examples/beacon/web/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/beacon/web/"; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1], "--audio"], check=True, timeout=10)' "$$tmp/beacon-smoke"; \
+		$(NODE) scripts/smoke-beacon-audio.mjs "$$tmp/beacon/web" "$$tmp/toggle.wav"
 
 .PHONY: benchmark-beacon-audio
 benchmark-beacon-audio: ## Compare audio off, idle, and burst modes on desktop and in Chromium

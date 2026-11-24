@@ -1,0 +1,9 @@
+:root { color-scheme: light dark; font: 1rem/1.45 system-ui, sans-serif; }
+body { margin: 1rem; }
+main { max-width: 64rem; margin: auto; }
+fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+button, input, select { font: inherit; }
+input[type="number"] { width: 5em; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid Highlight; outline-offset: 1px; }
+#status[data-error] { font-weight: bold; }
+canvas { display: block; max-width: 100%; outline: 1px solid currentColor; }

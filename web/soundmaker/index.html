@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goje Sound Maker</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <main>
+    <h1>Goje Sound Maker</h1>
+    <p>Shape a short sound effect, preview it, and download it as a WAV file. Sounds stay in this browser.</p>
+    <form id="controls" novalidate>
+      <fieldset disabled>
+        <legend>Effect</legend>
+        <label>Waveform
+          <select id="waveform">
+            <option value="sine">sine</option>
+            <option value="triangle">triangle</option>
+            <option value="square">square</option>
+          </select>
+        </label>
+        <label>Start pitch (Hz) <input id="start-hz" type="number" step="1" required></label>
+        <label>End pitch (Hz) <input id="end-hz" type="number" step="1" required></label>
+        <label>Duration (ms) <input id="duration" type="number" step="1" required></label>
+        <label>Attack (ms) <input id="attack" type="number" step="1" required></label>
+        <label>Release (ms) <input id="release" type="number" step="1" required></label>
+        <button id="apply" type="submit">Apply</button>
+      </fieldset>
+    </form>
+    <p>
+      <button id="play" type="button" disabled>Play</button>
+      <button id="download" type="button" disabled>Download WAV</button>
+    </p>
+    <p id="status" role="status">Loading the Sound Maker…</p>
+    <p>Current sound: <output id="summary" for="controls"></output></p>
+    <canvas id="wave" width="640" height="160" aria-label="Waveform of the current sound"></canvas>
+  </main>
+  <script src="wasm_exec.js"></script>
+  <script type="module" src="editor.mjs"></script>
+</body>
+</html>

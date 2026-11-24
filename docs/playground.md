@@ -73,6 +73,23 @@ Click the beacon or press **Space** to play its short, synthesized [`toggle.wav`
 
 On desktop, Goje uses the available native audio device. In the browser, a trusted click, tap, or key press unlocks Web Audio; input that arrives before unlock is not queued for later. Sound is optional: Beacon still works when audio is unavailable. Run `make setup-web` once, then `make smoke-beacon-audio` to verify the desktop callback and Chromium output. The desktop smoke uses a silent device by default; set `GOJE_AUDIO_DEVICE=default` to exercise the system device. Run `make benchmark-beacon-audio` to compare audio disabled, idle, and burst frame pacing.
 
+## Make a sound effect in the browser
+
+Run `make serve-sound-maker` with Go and Node installed, then open `http://127.0.0.1:8085/`. Set `SOUND_MAKER_PORT` to use a different port. The editor runs on loopback and never uploads your files.
+
+1. Choose a waveform (sine, triangle, or square), a start and end pitch from 20 to 10,000 Hz, a duration from 10 to 3,000 ms, and an attack and release in milliseconds. The pitch glides in a straight line from start to end, and the attack and release must fit within the duration.
+2. Press **Apply** or **Enter**. The controls are a draft until you apply them. If a value is out of range, the status explains why, your draft stays in the fields so you can correct it, and the current sound is not changed.
+3. Choose **Play** to preview the sound. The preview plays the same samples that the download contains. If the browser has no Web Audio, the preview reports that it is unavailable and everything else still works.
+4. Choose **Download WAV**. The file is mono, 48 kHz, signed 16-bit PCM, so Beacon and your own games can load it with [`audio.DecodeWAV`](../audio/wav.go). The same settings always produce the same bytes. The editor cannot reopen a WAV to recover its settings, so note the settings you want to keep.
+
+Run `make setup-web` once, then `make smoke-sound-maker` to exercise the keyboard controls, preview, and downloads in Chromium. The smoke decodes the WAV and compares it with the preview samples, and checks that rejected settings leave the sound unchanged.
+
+### Play a Sound Maker download in Beacon
+
+Download a WAV from the Sound Maker, then replace Beacon's `assets/toggle.wav` with it in your own module and rebuild. The file must stay mono, 48 kHz, signed 16-bit PCM and at most three seconds, and Beacon reports a clear startup error for any other file. Nothing else needs to change: the toggle plays whatever clip is in `platform.Config.Sounds`.
+
+From the Goje checkout, `make smoke-sound-roundtrip` automates this on scratch copies. It makes a short square-wave effect in the Sound Maker, checks that the download differs from the shipped cue, embeds it unchanged in a separate Beacon build, and plays it with real input on both targets. On desktop, the device callback must receive exactly the downloaded samples once, then silence, and reset must not play it. In Chromium, the samples that Web Audio renders must equal the download bit for bit when the context runs at 48 kHz. The smoke falls back to a small interpolation tolerance if a browser resamples. The checked-in assets are never modified. On headless Linux, use `xvfb-run -a make smoke-sound-roundtrip`.
+
 ## Draw pixel art in the browser
 
 Run `make serve-pixel-art` with Go and Node installed, then open `http://127.0.0.1:8084/`. Set `PIXEL_ART_PORT` to use a different port. The editor runs on loopback and never uploads your files.

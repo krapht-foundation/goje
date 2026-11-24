@@ -12,6 +12,6 @@ The [brand asset guide](brand/) covers the Goje logo and the Android, iOS, and w
 
 - A game framework and reusable tools for building a playground inside your own game. The first [playground prototype](playground.md#use-the-playground-in-your-game) supports replaying a configured encounter.
 - A [Level Builder](levels.md) for v1 maps and a [Tile Maker](playground.md#draw-a-ground-tile-in-the-browser) for ground art.
-- A browser [Sprite Clip Editor](playground.md#author-sprite-clips-in-the-browser) for authoring and previewing clips from existing PNG sprite sheets. Sound, video, and sprite painting tools are planned.
+- A browser [Sprite Clip Editor](playground.md#author-sprite-clips-in-the-browser) for authoring and previewing clips from existing PNG sprite sheets, a [Pixel Art Maker](playground.md#draw-pixel-art-in-the-browser) for sprite sheets, and a [Sound Maker](playground.md#make-a-sound-effect-in-the-browser) for short WAV effects. Video tools are planned.
 
 The full framework and remaining editors are still in development. See [Contributing to Goje](../CONTRIBUTING.md) to discuss the design or submit a change.

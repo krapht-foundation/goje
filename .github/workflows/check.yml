@@ -72,6 +72,8 @@ jobs:
         run: make smoke-web
       - name: Run Pixel Art Maker smoke
         run: make smoke-pixel-art
+      - name: Run Sound Maker smoke
+        run: make smoke-sound-maker
       - name: Play the Pixel Art Maker and Sprite Clip Editor exports on desktop and web
         run: xvfb-run -a make smoke-sprite-roundtrip
       - name: Play both browser exports on desktop and web
@@ -80,3 +82,5 @@ jobs:
         run: xvfb-run -a make smoke-beacon
       - name: Verify Beacon audio on desktop and in Chromium
         run: xvfb-run -a make smoke-beacon-audio
+      - name: Play the Sound Maker export on desktop and web
+        run: xvfb-run -a make smoke-sound-roundtrip

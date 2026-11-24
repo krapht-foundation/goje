@@ -1,6 +1,6 @@
 # RFC 0012: M11 — Game audio and Sound Maker
 
-**Status:** Accepted. The playback foundation is implemented; Sound Maker and its export-to-game round trip are the remaining slices.
+**Status:** Implemented and verified for M11. The native output backend passed the playback feasibility check.
 
 ## Problem and goal
 
@@ -38,6 +38,10 @@ Goje can take painted and animated assets from its browser editors into [Beacon 
 | 1. Playback foundation | Prove one prepared cue in Beacon on desktop and Chromium. Verify PCM limits, one cue per toggle, bounded overflow, reset and suspension, the pre-unlock drop, and silent operation without a usable device. Demonstrate that the real backend submits non-silent samples after the toggle; no hardware speaker is required in CI. Record the backend choice and the performance observations. |
 | 2. Browser Sound Maker | Use keyboard-accessible controls to produce and preview a short effect in Chromium. Download it twice and compare the actual files; decode one to verify its waveform, envelope, duration, and format. Confirm invalid settings do not discard the current sound. |
 | 3. Sound-to-play round trip | Embed the exact WAV download in a scratch copy of Beacon. On desktop and Chromium, trigger it with real input and compare captured output against the downloaded samples, accounting for device sample-rate conversion where applicable. Verify no cue on reset or resume and leave checked-in assets unchanged. Document the authoring and playback workflow. |
+
+The second slice is implemented in the [Sound Maker](../docs/playground.md#make-a-sound-effect-in-the-browser). Go owns settings validation, deterministic synthesis, and WAV encoding ([`internal/soundmaker`](../internal/soundmaker/document.go) and [`audio.EncodeWAV`](../audio/encode.go)); the page only edits a draft, draws the waveform, and plays and downloads the same bytes. `make smoke-sound-maker` applies settings, downloads twice and compares the files, decodes one to check format, envelope, duration, and pitch phase, compares the preview buffer with the WAV samples, and confirms rejected settings and a missing Web Audio API change nothing else.
+
+The third slice is implemented in [Play a Sound Maker download in Beacon](../docs/playground.md#play-a-sound-maker-download-in-beacon). `make smoke-sound-roundtrip` exports a square-wave effect from the Sound Maker, embeds that exact file in scratch copies of Beacon, and plays it with real input. On macOS with CoreAudio's callback path and miniaudio's Null device, and in Chromium WebGL with Web Audio at 48 kHz, the rendered samples equal the downloaded samples exactly, and the reset and focus-loss checks from the foundation slice still pass. A one-bit change to the expected file fails the Chromium check. The resampling tolerance for browsers that run at another rate, a real Linux audio device, and speaker latency were not exercised.
 
 ## Playback foundation results
 
