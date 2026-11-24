@@ -87,3 +87,5 @@ See the [M2 world-view measurements](world-view-performance.md) for ordering and
 See the [M5 ground-art measurements](ground-art-performance.md) for PNG startup cost, warmed allocations, and submission costs on a courtyard and a dense board.
 
 See the [M8 sprite measurements](sprite-performance.md) for sprite import, atlas packing, and the fixed-frame versus animated comparison.
+
+See the [M12 collision measurements](collision-performance.md) for 2,048 moving bodies with solids and triggers on desktop and in Chromium.

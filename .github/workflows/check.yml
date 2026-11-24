@@ -46,6 +46,8 @@ jobs:
           fi
       - name: Run Go checks
         run: make check test-race vuln check-example
+      - name: Run simulation tests as WebAssembly
+        run: make test-wasm
       - name: Run desktop smoke
         run: xvfb-run -a make smoke-desktop
       - name: Cache the pinned Chromium build

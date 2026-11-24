@@ -40,6 +40,9 @@
       } else if (query.get("fixture") === "courtyard") {
         go.env.GOJE_PLAYGROUND = "courtyard";
         controls.textContent = "Click to select · Arrows to pan · W/S to zoom · Space to patrol · R to reset";
+      } else if (query.get("fixture") === "yard") {
+        go.env.GOJE_PLAYGROUND = "yard";
+        controls.textContent = "Arrows or WASD to walk · R to reset";
       }
       if (diagnosticRun) go.env.GOJE_DIAGNOSTICS = "1";
       if (benchmark === "off" || benchmark === "on") {

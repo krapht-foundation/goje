@@ -8,6 +8,8 @@ The [level authoring guide](levels.md) shows how to open, edit, and export a Goj
 
 The [brand asset guide](brand/) covers the Goje logo and the Android, iOS, and web icon sets.
 
+The [collision guide](collision.md) explains how to move bodies against walls and trigger zones with exact, repeatable arithmetic.
+
 ## What Goje aims to provide
 
 - A game framework and reusable tools for building a playground inside your own game. The first [playground prototype](playground.md#use-the-playground-in-your-game) supports replaying a configured encounter.

@@ -73,6 +73,12 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("Desktop smoke passed: authored courtyard selection, wall detour, arrival, and reset")
+	if err := runYardSmoke(); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(
+		"Desktop smoke passed: yard slide along a wall, doorway lamp, walk beneath a raised deck, and reset",
+	)
 }
 
 func runSmoke() error {

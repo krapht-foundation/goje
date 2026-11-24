@@ -10,10 +10,22 @@ import { PNG } from "pngjs";
 
 import { servePlayground } from "./playground-server.mjs";
 
-/** Install a software tap on real sources without replacing their output. */
-function tapAudio() {
+/**
+ * Install a software tap on real sources without replacing their output.
+ * @param {number | null} rate - Sample rate to force on the page's audio context, or null for the device's.
+ */
+function tapAudio(rate) {
   const tap = { context: null, analyser: null, starts: 0, stops: 0, requested: 0, rate: 0, samples: [] };
   Object.defineProperty(window, "beaconAudioProbe", { value: tap });
+  if (rate !== null) {
+    // Forcing a rate different from the 48 kHz cue exercises the browser's resampler on every machine.
+    window.AudioContext = class extends AudioContext {
+      /** @param {AudioContextOptions} [options] - Options the game asked for. */
+      constructor(options) {
+        super({ ...options, sampleRate: rate });
+      }
+    };
+  }
   const create = BaseAudioContext.prototype.createBufferSource;
   const connect = AudioNode.prototype.connect;
   const start = AudioBufferSourceNode.prototype.start;
@@ -25,8 +37,10 @@ function tapAudio() {
       tap.rate = this.sampleRate;
       tap.analyser = this.createAnalyser();
       // Copy what the graph renders, from the first audible sample, while the
-      // host's own connection to the destination stays in place.
-      const recorder = this.createScriptProcessor(256, 1, 1);
+      // host's own connection to the destination stays in place. A script processor
+      // runs on the main thread, and a small buffer drops blocks while the page is
+      // busy, which corrupts the capture; 4096 frames tolerates a slow runner.
+      const recorder = this.createScriptProcessor(4096, 1, 1);
       recorder.onaudioprocess = event => {
         const input = event.inputBuffer.getChannelData(0);
         if (!tap.samples.length && !input.some(sample => sample !== 0)) return;
@@ -103,18 +117,30 @@ function compareOutput(rendered, rate, expected) {
     assert.ok(out.slice(want.length).every(sample => sample === 0), "silence after the cue");
     return "bit-exact at 48 kHz";
   }
-  // The browser resampled the buffer, so allow a small interpolation error.
+  // The browser resampled the buffer with its own filter. That filter can start the signal a few
+  // samples early or late (a tiny pre-ringing sample before the cue shifts "first audible"), and it
+  // rings at sharp edges where linear interpolation does not, so a peak comparison would fail on a
+  // square wave. Find the best alignment within a short window and compare the RMS error with the
+  // cue's own RMS level.
   const count = Math.floor(want.length * rate / 48000) - 2;
-  assert.ok(out.length >= count, "the whole cue was rendered");
-  let worst = 0;
-  for (let i = 0; i < count; i++) {
+  const reach = Math.ceil(rate / 48000 * 32);
+  assert.ok(rendered.length >= first + count + reach, "the whole cue was rendered");
+  const reference = Float64Array.from({ length: count }, (_, i) => {
     const at = i * 48000 / rate;
     const lo = Math.floor(at);
-    const sample = want[lo] + (want[Math.min(lo + 1, want.length - 1)] - want[lo]) * (at - lo);
-    worst = Math.max(worst, Math.abs(out[i] - sample));
+    return want[lo] + (want[Math.min(lo + 1, want.length - 1)] - want[lo]) * (at - lo);
+  });
+  const level = Math.sqrt(reference.reduce((sum, sample) => sum + sample * sample, 0) / count);
+  let best = { error: Infinity, lag: 0 };
+  for (let lag = -reach; lag <= reach; lag++) {
+    let sum = 0;
+    for (let i = 0; i < count; i++) sum += ((rendered[first + lag + i] ?? 0) - reference[i]) ** 2;
+    const error = Math.sqrt(sum / count) / level;
+    if (error < best.error) best = { error, lag };
   }
-  assert.ok(worst < 0.05, `resampled output differs by ${worst}`);
-  return `within ${worst.toFixed(3)} after resampling ${rate} Hz`;
+  assert.ok(best.error < 0.1,
+    `resampled output differs by ${best.error} of the cue's RMS at best offset ${best.lag} (${rate} Hz)`);
+  return `within ${(100 * best.error).toFixed(1)}% RMS after resampling ${rate} Hz, offset ${best.lag} samples`;
 }
 
 /**
@@ -122,12 +148,13 @@ function compareOutput(rendered, rate, expected) {
  * @param {import("playwright").Browser} browser - Managed headless Chromium.
  * @param {string} url - Served Beacon build.
  * @param {Int16Array} expected - Samples of the cue the game embeds.
+ * @param {number | null} forcedRate - Sample rate to force on the audio context, or null for the device's.
  */
-async function playback(browser, url, expected) {
+async function playback(browser, url, expected, forcedRate) {
   const page = await browser.newPage();
   page.setDefaultTimeout(5_000);
   try {
-    await page.addInitScript(tapAudio);
+    await page.addInitScript(tapAudio, forcedRate);
     await page.goto(url);
     const canvas = page.locator("#goje");
     await beacon(canvas, false);
@@ -224,7 +251,9 @@ try {
   const browser = await chromium.launch({ timeout: 15_000 });
   try {
     const url = `http://127.0.0.1:${server.address().port}/`;
-    await playback(browser, url, expected);
+    await playback(browser, url, expected, null);
+    // A rate other than the cue's 48 kHz makes the browser resample, as some hosts' devices do.
+    await playback(browser, url, expected, 44100);
     await withoutOutput(browser, url, false);
     await withoutOutput(browser, url, true);
   } finally {

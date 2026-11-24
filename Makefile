@@ -27,7 +27,7 @@ BENCHMARK_REPEATS ?= 3
 
 include tools.mk
 
-.PHONY: help doctor setup-tools fmt fmt-check lint test test-race vuln docs-check check
+.PHONY: help doctor setup-tools fmt fmt-check lint test test-race test-wasm vuln docs-check check
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z-]*:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -48,6 +48,10 @@ lint: $(GOLANGCI) ## Run the Go lint policy in .golangci.yml
 
 test: ## Run headless Go tests
 	$(GO) test ./...
+
+test-wasm: ## Run the simulation tests as WebAssembly under Node
+	GOOS=js GOARCH=wasm $(GO) test -exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" \
+		./engine/fixed ./engine/collide ./internal/collidebench ./cmd/playground
 
 test-race: ## Run Go tests with the native race detector
 	$(GO) test -race ./...
@@ -274,7 +278,7 @@ benchmark-beacon-audio: ## Compare audio off, idle, and burst modes on desktop a
 check-example: ## Build the reference playground from a separate module on desktop and web
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go "$$tmp/"; \
-		cp cmd/playground/authored.go cmd/playground/goje.json "$$tmp/"; \
+		cp cmd/playground/authored.go cmd/playground/yard.go cmd/playground/goje.json "$$tmp/"; \
 		cp -R cmd/playground/levels cmd/playground/art "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \
@@ -309,3 +313,12 @@ benchmark-web: ## Compare the selected playground workload in Chromium
 	GOOS=js GOARCH=wasm $(GO) build -tags goje_bench -o "$(BENCHMARK_WEB_DIR)/playground.wasm" ./cmd/playground
 	install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(BENCHMARK_WEB_DIR)/"
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/benchmark-web.mjs "$(BENCHMARK_WEB_DIR)" "$(BENCHMARK_REPEATS)" "$(BENCHMARK_FIXTURE)"
+
+.PHONY: benchmark-collide
+benchmark-collide: ## Measure collision with 2,048 bodies natively and in Chromium
+	$(GO) build -o "$(BUILD_DIR)/collidebench" ./cmd/collidebench
+	i=0; while [ $$i -lt "$(BENCHMARK_REPEATS)" ]; do "$(BUILD_DIR)/collidebench"; i=$$((i + 1)); done
+	mkdir -p "$(BUILD_DIR)/collide-web"
+	GOOS=js GOARCH=wasm $(GO) build -o "$(BUILD_DIR)/collide-web/collidebench.wasm" ./cmd/collidebench
+	install -m 0644 "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(BUILD_DIR)/collide-web/"
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/benchmark-collide.mjs "$(BUILD_DIR)/collide-web" "$(BENCHMARK_REPEATS)"

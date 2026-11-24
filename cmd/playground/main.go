@@ -33,6 +33,13 @@ func runPlayground() error {
 		config = playgroundConfig(nil)
 		factory = newCourtyard
 		config.Title = "Goje Patrol · Click: select · Arrows: pan · W/S: zoom · Space: patrol · R: reset"
+	case "yard":
+		loaded, err := loadAuthored(authoredFiles)
+		if err != nil {
+			return err
+		}
+		config, factory = loaded.config(), loaded.yardFactory()
+		config.Title = "Goje Yard · Arrows / WASD: walk · R: reset"
 	default:
 		loaded, err := loadAuthored(authoredFiles)
 		if err != nil {

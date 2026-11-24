@@ -6,6 +6,8 @@ Goje is a Go game framework and toolchain for desktop and web. It supports 2D an
 
 The reference [playground](docs/playground.md) runs an isometric courtyard on desktop and web. Use the browser [Level Builder](docs/levels.md#edit-a-level-in-the-browser) to open a shortcut, the [Tile Maker](docs/playground.md#draw-a-ground-tile-in-the-browser) to draw new ground art, the [Pixel Art Maker](docs/playground.md#draw-pixel-art-in-the-browser) to paint sprite sheets, the [Sprite Clip Editor](docs/playground.md#author-sprite-clips-in-the-browser) to author and preview animations, or the [Sound Maker](docs/playground.md#make-a-sound-effect-in-the-browser) to make short sound effects. The full engine and remaining editors are still in development.
 
+To move characters against walls and trigger zones, see the [collision guide](docs/collision.md).
+
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Code of conduct](CODE_OF_CONDUCTS.md)

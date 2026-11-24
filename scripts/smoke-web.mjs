@@ -163,6 +163,139 @@ async function smokeCourtyard(browser, url) {
 }
 
 /**
+ * Walk the free-movement yard with real keyboard input while page time is paused,
+ * so each step advances about one 60 Hz tick regardless of screenshot speed.
+ * Logical coordinates are 320 × 200; the 640 × 400 CSS viewport at DPR 2 shows four
+ * device pixels per logical pixel. The camera is centered on the 9 × 7 board, so a ground
+ * point (x, y) in tiles appears at logical (16 (x − y) + 144, 8 (x + y) + 36).
+ * @param {import("playwright").Browser} browser - Running Chromium instance.
+ * @param {string} url - Loopback yard URL.
+ * @returns {Promise<void>} Resolves after sliding, the doorway, the deck, reset, and focus loss.
+ */
+async function smokeYard(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 2 });
+  try {
+    const errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.clock.install();
+    await page.goto(url, { timeout: 15_000 });
+    const canvas = page.locator("#goje");
+    const footprint = [255, 0, 255], deck = [186, 142, 92], wall = [148, 122, 105];
+    const lampDark = [74, 64, 86], lampLit = [255, 224, 102];
+    const scale = 4;
+    /** @returns {Promise<PNG>} The presented frame. */
+    const shoot = async () => PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
+    /**
+     * @param {PNG} frame - Decoded screenshot.
+     * @param {number} x - Logical column.
+     * @param {number} y - Logical row.
+     * @param {number[]} color - Expected RGB.
+     * @returns {boolean} Whether the logical pixel's center has the color.
+     */
+    const is = (frame, x, y, color) => pixelIs(frame, x * scale + scale / 2, y * scale + scale / 2, color);
+    /**
+     * Locate the footprint outline and its center marker as a ground position.
+     * @param {PNG} frame - Decoded screenshot.
+     * @returns {{ x: number, y: number } | null} Footprint center in tiles, or null if absent.
+     */
+    const scout = frame => {
+      const center = spriteCenter(frame, footprint);
+      if (center === null) return null;
+      const screenX = center.x / scale, screenY = center.y / scale;
+      const sum = (screenY - 36) / 8, difference = (screenX - 144) / 16;
+      return { x: (sum + difference) / 2, y: (sum - difference) / 2 };
+    };
+    /** @param {PNG} frame - Decoded screenshot. @returns {boolean} Whether the scene shows its spawn. */
+    const atSpawn = frame => {
+      const at = scout(frame);
+      return at !== null && Math.abs(at.x - 2.5) < 0.1 && Math.abs(at.y - 2.5) < 0.1 &&
+        is(frame, 208, 44, lampDark) && is(frame, 192, 75, wall) && is(frame, 128, 88, deck);
+    };
+    /**
+     * Advance one browser frame and read it.
+     * @returns {Promise<PNG>} The presented frame.
+     */
+    const step = async () => {
+      await page.clock.runFor(17);
+      return shoot();
+    };
+    /**
+     * Step until a frame satisfies a condition.
+     * @param {string} description - Expected state for the failure message.
+     * @param {(frame: PNG) => boolean} matches - Frame predicate.
+     * @param {number} [limit=300] - Maximum steps.
+     * @returns {Promise<PNG>} The matching frame.
+     */
+    const until = async (description, matches, limit = 300) => {
+      for (let i = 0; i < limit; i++) {
+        const frame = await step();
+        if (matches(frame)) return frame;
+      }
+      return assert.fail(`The yard never showed ${description}`);
+    };
+
+    // Unpaused frames settle the first draw; then freeze time so steps are explicit.
+    const deadline = Date.now() + 8_000;
+    while (!atSpawn(await shoot())) assert.ok(Date.now() < deadline, "The yard never showed its spawn");
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    await canvas.focus();
+    await until("the spawn after the paused clock started", atSpawn);
+
+    // Slide: Down presses the scout into the wall, which stops its footprint flush at x = 4.
+    // The 3/8-tile footprint then has its center at 4 − 3/16 = 3.8125 tiles. The scout slides south along it.
+    const flushX = 3.8125;
+    await page.keyboard.down("ArrowDown");
+    let flush = await until("the scout flush against the wall", frame => {
+      const at = scout(frame);
+      return at !== null && Math.abs(at.x - flushX) < 0.06;
+    });
+    const before = scout(flush);
+    // The wall ends 3/16 tile south of the flush point's center, so about seven ticks of sliding remain.
+    for (let i = 0; i < 4; i++) flush = await step();
+    const after = scout(flush);
+    assert.ok(Math.abs(after.x - flushX) < 0.06 && after.y - before.y > 0.12,
+      `The scout did not slide south along the wall: ${JSON.stringify({ before, after })}`);
+
+    // Beneath the deck: it keeps walking through the deck's ground footprint,
+    // which spans x 3–6 and y 5–6, while the deck stays drawn above it.
+    const under = await until("the scout walking under the deck", frame => {
+      const at = scout(frame);
+      return at !== null && at.x > 4.4 && at.y > 5.1 && at.y < 5.9;
+    });
+    assert.ok(is(under, 128, 88, deck), "The deck was not drawn above the scout");
+    await page.keyboard.up("ArrowDown");
+
+    await page.keyboard.press("r");
+    await until("the spawn after reset", atSpawn);
+
+    // The doorway lamp follows the trigger: lit while overlapping, dark after.
+    await page.keyboard.down("ArrowRight");
+    await until("the doorway lamp lit", frame => is(frame, 208, 44, lampLit));
+    await until("the doorway lamp dark again", frame => is(frame, 208, 44, lampDark));
+    await page.keyboard.up("ArrowRight");
+    await page.keyboard.press("r");
+    await until("the spawn after the second reset", atSpawn);
+
+    // Focus loss clears held movement: a key still down after refocus does not move the scout.
+    await page.keyboard.down("ArrowDown");
+    await until("movement before focus loss", frame => {
+      const at = scout(frame);
+      return at !== null && at.x > 2.8;
+    });
+    await canvas.blur();
+    const blurred = scout(await step());
+    await canvas.focus();
+    for (let i = 0; i < 5; i++) {
+      assert.deepEqual(scout(await step()), blurred, "The held key survived focus loss");
+    }
+    await page.keyboard.up("ArrowDown");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
+/**
  * Select the scout, command it across the authored courtyard, then reset.
  * @param {import("playwright").Browser} browser - Running Chromium instance.
  * @param {string} url - Loopback playground URL.
@@ -428,6 +561,11 @@ try {
       console.log(editedDirectory === undefined
         ? "Browser smoke passed: authored courtyard selection, wall detour, arrival, and reset"
         : "Browser smoke passed: custom ground art, exported lookout, shortcut crossing, arrival, and reset");
+      if (editedDirectory === undefined) {
+        await smokeYard(browser, `http://127.0.0.1:${server.address().port}/?fixture=yard`);
+        console.log("Browser smoke passed: yard slide along a wall, doorway lamp, walk beneath a raised deck, " +
+          "reset, and focus loss");
+      }
     }
   } finally {
     await browser.close();

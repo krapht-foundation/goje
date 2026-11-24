@@ -24,6 +24,8 @@ The original pickup encounter remains available through `GOJE_PLAYGROUND=pickup 
 
 The M2 patrol remains available through `GOJE_PLAYGROUND=courtyard make run-desktop` or `http://127.0.0.1:8080/?fixture=courtyard`. Click either visible unit to select it, **Space** to start or pause patrol, and **R** to restore the original overlap. Click the exposed wall to see it block selection of the unit behind it.
 
+The M12 yard is available through `GOJE_PLAYGROUND=yard make run-desktop` or `http://127.0.0.1:8080/?fixture=yard`. Walk the scout with the arrow keys or **WASD**, and press **R** to restart. The scout stops against walls and slides along them, lights a lamp in the north doorway, and walks beneath the raised deck in the south. See [Move and collide in your game](collision.md) to use the same packages.
+
 ## Use the playground in your game
 
 The [Beacon example](../examples/beacon/game.go) is a small, top-down 2D game built on the public `project`, `level`, `engine`, `platform`, and `sprite` packages. It owns its layout, rendering, and input rules, and it does not import the reference courtyard. Try the included project with `go run ./examples/beacon`.
@@ -88,7 +90,7 @@ Run `make setup-web` once, then `make smoke-sound-maker` to exercise the keyboar
 
 Download a WAV from the Sound Maker, then replace Beacon's `assets/toggle.wav` with it in your own module and rebuild. The file must stay mono, 48 kHz, signed 16-bit PCM and at most three seconds, and Beacon reports a clear startup error for any other file. Nothing else needs to change: the toggle plays whatever clip is in `platform.Config.Sounds`.
 
-From the Goje checkout, `make smoke-sound-roundtrip` automates this on scratch copies. It makes a short square-wave effect in the Sound Maker, checks that the download differs from the shipped cue, embeds it unchanged in a separate Beacon build, and plays it with real input on both targets. On desktop, the device callback must receive exactly the downloaded samples once, then silence, and reset must not play it. In Chromium, the samples that Web Audio renders must equal the download bit for bit when the context runs at 48 kHz. The smoke falls back to a small interpolation tolerance if a browser resamples. The checked-in assets are never modified. On headless Linux, use `xvfb-run -a make smoke-sound-roundtrip`.
+From the Goje checkout, `make smoke-sound-roundtrip` automates this on scratch copies. It makes a short square-wave effect in the Sound Maker, checks that the download differs from the shipped cue, embeds it unchanged in a separate Beacon build, and plays it with real input on both targets. On desktop, the device callback must receive exactly the downloaded samples once, then silence, and reset must not play it. In Chromium, the samples that Web Audio renders must equal the download bit for bit when the context runs at 48 kHz. The browser smoke also forces a 44.1 kHz context, where the browser resamples, and requires the rendered cue to stay within 10% RMS of an interpolated copy of the download after aligning for filter delay. The checked-in assets are never modified. On headless Linux, use `xvfb-run -a make smoke-sound-roundtrip`.
 
 ## Draw pixel art in the browser
 
