@@ -205,14 +205,15 @@ async function smokeAuthored(browser, url, shortcut, sprite = false) {
       matches(frame, 144, 71, tomato) && matches(frame, 139, 70, eye) && layoutMatches(frame) &&
       matches(frame, 141, 41, ground) && matches(frame, 130, 38, background) &&
       matches(frame, 152, 40, grid));
+    // Step the browser clock ourselves so screenshot latency cannot skip a short pose.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    /** @returns {Promise<PNG>} The frame presented after the next browser frame. */
+    const step = async () => {
+      await page.clock.runFor(16);
+      return PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
+    };
     if (sprite) {
-      // Step one 16 ms browser frame per capture, so at most one 60 Hz tick passes between them.
-      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
-      /** @returns {Promise<PNG>} The frame presented after the next browser frame. */
-      const step = async () => {
-        await page.clock.runFor(16);
-        return PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
-      };
+      // At most one 60 Hz simulation tick passes between these captures.
       /**
        * Step browser frames until one matches.
        * @param {string} stage - Checkpoint name for failures.
@@ -264,15 +265,26 @@ async function smokeAuthored(browser, url, shortcut, sprite = false) {
         !matches(frame, 96, 100, destination) && !matches(frame, 127, 83.5, ink));
       return;
     }
-    await waitCourtyard(canvas, "idle scout blinks", frame =>
-      matches(frame, 139, 70, ink) && matches(frame, 144, 71, tomato));
+    // Reset before timing idle so loading and the jump to paused time do not count.
+    // The scout is open for 114 ticks and blinks for 6. Start sampling just before that window.
+    await page.keyboard.press("r");
+    await page.clock.runFor(1_600);
+    assert.ok(matches(await step(), 139, 70, eye), "idle scout blinked before its first blink window");
+    let blinked = false;
+    for (let i = 0; i < 32 && !blinked; i++) {
+      const shot = await step();
+      blinked = matches(shot, 139, 70, ink) && matches(shot, 144, 71, tomato);
+    }
+    assert.ok(blinked, "No matching courtyard frame for idle scout blinks");
     // The topmost tile's asymmetric highlight follows the grid while its corners stay clear.
-    await page.keyboard.press("w", { delay: 100 });
+    await page.keyboard.press("w");
+    await page.clock.runFor(32);
     await waitCourtyard(canvas, "ground art and planted scout pivot under zoom", frame =>
       matches(frame, 136, 26, ground) && matches(frame, 122, 22, background) &&
       matches(frame, 150, 25, grid) && matches(frame, 140, 64, tomato) &&
       matches(frame, 140, 69, ink) && !matches(frame, 140, 70, ink));
-    await page.keyboard.press("r", { delay: 100 });
+    await page.keyboard.press("r");
+    await page.clock.runFor(32);
     await waitCourtyard(canvas, "authored camera reset", frame => matches(frame, 141, 41, ground));
     // Observe the real canvas event after its host listener, then separately
     // check that a contextmenu event outside the canvas is not canceled.
@@ -284,8 +296,6 @@ async function smokeAuthored(browser, url, shortcut, sprite = false) {
         if (event.target === document.querySelector("#goje")) window.recordContextMenu(event.defaultPrevented);
       });
     });
-    // Preserve short-lived poses while capturing the canvas on a slow runner.
-    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
     // A press while the other button is held must still reach the host.
     await page.mouse.move(408, 128);
     await page.mouse.down({ button: "left" });
