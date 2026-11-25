@@ -1,8 +1,8 @@
 # M13 skirmish: crowds and combat
 
-This is the accepted behavior for the [M13 RFC](../rfcs/0014-m13-crowds-authored-collision-and-combat.md), with the orders, group assignment, and snapshot of the [M14 RFC](../rfcs/0015-m14-text-rts-commands-and-replays.md) marked (M14) below. It covers the reference game simulation in [`examples/skirmish`](../examples/skirmish/sim.go) and the `skirmish` playground fixture. It builds on the [collision contract](collision-m12.md) and the [version 2 level format](level-v2.md), and keeps the [M3 controls](unit-commands-m3.md). The simulation is game code, not an engine contract: a second game may choose other rules, and code moves into the engine only when two games need the same rule.
+This is the accepted behavior for the [M13 RFC](../rfcs/0014-m13-crowds-authored-collision-and-combat.md), with the orders, group assignment, and snapshot of the [M14 RFC](../rfcs/0015-m14-text-rts-commands-and-replays.md) marked (M14) below, and the vision option and events of the [M15 RFC](../rfcs/0016-m15-audio-mixing-vision-and-platform-reach.md) marked (M15). It covers the reference game simulation in [`examples/skirmish`](../examples/skirmish/sim.go) and the `skirmish` playground fixture. It builds on the [collision contract](collision-m12.md) and the [version 2 level format](level-v2.md), and keeps the [M3 controls](unit-commands-m3.md). The simulation is game code, not an engine contract: a second game may choose other rules, and code moves into the engine only when two games need the same rule.
 
-The M14 additions change no M13 behavior. A history that uses only `Command` and `Step` runs exactly as before, and its trace is the same value.
+The M14 additions change no M13 behavior. A history that uses only `Command` and `Step` runs exactly as before, and its trace is the same value. The M15 additions change nothing while vision is off, which is the default: every M13 and M14 history keeps its trace and its snapshot bytes.
 
 ## Scope and ownership
 
@@ -48,17 +48,22 @@ A guard idles until a scout comes within 6 tiles, or until a scout enters an ala
 
 ## Tick order
 
-`Step` runs these in order: guard decisions, attack orders in ascending ID order (M14), movement in ascending ID order, trigger events for the scouts, weapon firing in ascending ID order, bolt movement in the order the bolts were fired, removal of dead units, and the trace. Commands, orders, and stances are applied between ticks by calling `Command`, `Order`, `OrderGroup`, and `SetHold`. An attack-move's check for enemies in range happens at its turn in movement. A bolt fired in a tick also moves in that tick.
+`Step` runs these in order: guard decisions, attack orders in ascending ID order (M14), movement in ascending ID order, trigger events for the scouts, weapon firing in ascending ID order, bolt movement in the order the bolts were fired, removal of dead units, the sight update when vision is on (M15), and the trace. Commands, orders, and stances are applied between ticks by calling `Command`, `Order`, `OrderGroup`, and `SetHold`. An attack-move's check for enemies in range happens at its turn in movement. A bolt fired in a tick also moves in that tick.
+
+## Vision and events (M15)
+
+- `Sim.EnableVision(VisionConfig{Radius})` turns on line of sight with a radius of 1 to 181 cells; it must be called before the first `Step`, at most once. With it on, the rules of the [vision specification](vision-m15.md#skirmish-rules) apply: only walls block sight, a unit fires at and an attack-move stops for an enemy only in its team's sight, an `Attack` needs its target in sight and ends at the cell where it lost the target, and a guard that is not alarmed wakes when its team sees a scout within 12 tiles instead of by the six-tile test. With it off, `Sim.Visible` and `Sim.Explored` report every cell on the board.
+- `Sim.Events` returns what happened during the last `Step`: bolts fired, bolts that hurt a unit, units that fell, and the alarm. The events are output only. The [vision specification](vision-m15.md#events) defines them.
 
 ## Trace and limits
 
-`Sim.Trace` is a 64-bit hash of every unit's position, health, goal, cooldown, and flags, and of every bolt, folded in after each tick. A unit's order kind, target, and stance are folded in only while one of them differs from an idle `Move` without hold (M14), so M13 traces are unchanged. It depends on the whole history. Native, Node WebAssembly, and Chromium runs of the same history must produce the same value.
+`Sim.Trace` is a 64-bit hash of every unit's position, health, goal, cooldown, and flags, and of every bolt, folded in after each tick. A unit's order kind, target, and stance are folded in only while one of them differs from an idle `Move` without hold (M14), so M13 traces are unchanged. With vision on, the explored cells and the last seen cells of attacking units are folded in after the bolts (M15). It depends on the whole history. Native, Node WebAssembly, and Chromium runs of the same history must produce the same value.
 
 At most 256 units and 512 bolts. Route storage is sized when the scene is created, so `Step` allocates nothing once collision buckets and the trigger tracker have grown to fit their busiest tick. The simulation has no diagonal movement, no swapping, no formations, no queued orders, and no line-of-fire checks.
 
 ## Snapshot (M14)
 
-`Sim.Snapshot` writes the whole dynamic state between ticks, and `Sim.Restore` reads it into a Sim built by `New` from the same level. Walls, zones, unit IDs, teams, and maximum health come from the level. Restoring and running on reaches the same states and trace as the uninterrupted run. The [save envelope](save-v1.md) adds the magic number, the game, the content check, and the checksum; the snapshot is the payload. All values are little-endian, and positions are raw 1/256-tile counts of `fixed.Num`. Version 1 is laid out as follows.
+`Sim.Snapshot` writes the whole dynamic state between ticks, and `Sim.Restore` reads it into a Sim built by `New` from the same level. Walls, zones, unit IDs, teams, and maximum health come from the level. Restoring and running on reaches the same states and trace as the uninterrupted run. The [save envelope](save-v1.md) adds the magic number, the game, the content check, and the checksum; the snapshot is the payload. All values are little-endian, and positions are raw 1/256-tile counts of `fixed.Num`. Version 1 is laid out as follows. A Sim with vision on writes and reads [version 2](vision-m15.md#snapshot-version-2) instead (M15), and each refuses the other's version.
 
 | Part | Fields |
 | --- | --- |
@@ -85,4 +90,4 @@ In the recorded history, scout 1 is selected and sent to cell `(6, 2)`. It cross
 
 ## References
 
-[RFC 0014](../rfcs/0014-m13-crowds-authored-collision-and-combat.md), [RFC 0015](../rfcs/0015-m14-text-rts-commands-and-replays.md), [`examples/skirmish`](../examples/skirmish/sim.go), the [skirmish scene](../cmd/playground/skirmish.go), and the [benchmark](../internal/skirmishbench/skirmishbench.go).
+[RFC 0014](../rfcs/0014-m13-crowds-authored-collision-and-combat.md), [RFC 0015](../rfcs/0015-m14-text-rts-commands-and-replays.md), [RFC 0016](../rfcs/0016-m15-audio-mixing-vision-and-platform-reach.md), the [vision specification](vision-m15.md), [`examples/skirmish`](../examples/skirmish/sim.go), the [skirmish scene](../cmd/playground/skirmish.go), and the [benchmark](../internal/skirmishbench/skirmishbench.go).

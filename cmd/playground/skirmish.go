@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"io/fs"
+	"math"
 
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/engine/grid"
@@ -35,6 +36,10 @@ var (
 	skirmishAlarmQuiet  = color.NRGBA{R: 96, G: 74, B: 120, A: 255}
 	skirmishAlarmLoud   = color.NRGBA{R: 255, G: 96, B: 200, A: 255}
 	skirmishDeckColor   = yardDeckColor
+	// fogBackground is the color of the cleared frame, which unexplored cells keep.
+	fogBackground = color.NRGBA{R: 20, G: 28, B: 41, A: 255}
+	// fogTint darkens the ground of cells that were seen but are out of sight.
+	fogTint = color.NRGBA{R: 96, G: 100, B: 130, A: 255}
 )
 
 // loadSkirmish reads and decodes the skirmish level.
@@ -61,17 +66,26 @@ type skirmishScene struct {
 	walls        []engine.WorldItem // Static, in sorted order.
 	items        []engine.WorldItem // Walls, living units, and deck tiles, sorted every tick.
 	ground       []point
+	groundCells  []grid.Cell // The cell of each ground tile, for the fog.
 	deck, alarm  []grid.Cell
 	selected     uint64 // The selected scout's ID, or zero.
 	// marked reports further units that draw the selection marker, for scenes that
 	// select several. It is nil in the skirmish.
 	marked func(id uint64) bool
+	// sight is the sight radius in cells that turns on line of sight and fog of war,
+	// or zero for a board that is seen whole, as in the skirmish.
+	sight int
 }
 
 func (s *skirmishScene) Enter() error {
 	sim, err := skirmish.New(s.board)
 	if err != nil {
 		return err
+	}
+	if s.sight > 0 {
+		if err := sim.EnableVision(skirmish.VisionConfig{Radius: s.sight}); err != nil {
+			return err
+		}
 	}
 	s.sim = sim
 	w, h := s.board.Size()
@@ -90,6 +104,7 @@ func (s *skirmishScene) Enter() error {
 			if s.board.Walkable(x, y) {
 				px, py := courtyardProjection.Project(float64(x)+0.5, float64(y)+0.5, 0)
 				s.ground = append(s.ground, point{px, py})
+				s.groundCells = append(s.groundCells, grid.Cell{X: x, Y: y})
 				continue
 			}
 			s.walls = append(s.walls, engine.WorldItem{
@@ -151,13 +166,21 @@ func (s *skirmishScene) Update(tick engine.Tick) (engine.Transition, error) {
 // refresh rebuilds the presentation list from the simulation. A unit that died
 // leaves the list, and the selection with it.
 func (s *skirmishScene) refresh() {
-	s.items = append(s.items[:0], s.walls...)
+	s.items = s.items[:0]
+	for _, wall := range s.walls {
+		if s.explored(wall.GroundX, wall.GroundY) {
+			s.items = append(s.items, wall)
+		}
+	}
 	for i := range s.sim.Units() {
 		u := &s.sim.Units()[i]
 		if !u.Alive {
 			if u.ID == s.selected {
 				s.selected = 0
 			}
+			continue
+		}
+		if u.Team == skirmish.Guards && !s.seen(u.Center().X.Float64(), u.Center().Y.Float64()) {
 			continue
 		}
 		c := u.Center()
@@ -172,6 +195,9 @@ func (s *skirmishScene) refresh() {
 	}
 	// Deck tiles sort by their far corner, so the deck draws over a unit beneath it.
 	for i, cell := range s.deck {
+		if !s.sim.Explored(cell) {
+			continue
+		}
 		s.items = append(s.items, engine.WorldItem{
 			ID: skirmishDeckLow + uint64(i), GroundX: float64(cell.X + 1), GroundY: float64(cell.Y + 1),
 		})
@@ -181,20 +207,50 @@ func (s *skirmishScene) refresh() {
 
 func (s *skirmishScene) Draw(canvas engine.Canvas) { s.drawWorld(canvas) }
 
+// explored reports whether the scouts have seen the cell at a ground position.
+// A board without fog is always explored.
+func (s *skirmishScene) explored(x, y float64) bool {
+	return s.sight == 0 || s.sim.Explored(grid.Cell{X: int(math.Floor(x)), Y: int(math.Floor(y))})
+}
+
+// seenUnit reports whether the scouts see the cell that holds the unit's center.
+func (s *skirmishScene) seenUnit(u *skirmish.Unit) bool {
+	c := u.Center()
+	return s.seen(c.X.Float64(), c.Y.Float64())
+}
+
+// seen reports whether the scouts see the cell at a ground position now. A board
+// without fog is always seen.
+func (s *skirmishScene) seen(x, y float64) bool {
+	return s.sight == 0 ||
+		s.sim.Visible(skirmish.Scouts, grid.Cell{X: int(math.Floor(x)), Y: int(math.Floor(y))})
+}
+
 // drawWorld paints the board, the units, and the bolts, without any interface.
 func (s *skirmishScene) drawWorld(canvas engine.Canvas) {
 	zoom := float32(s.camera.Zoom)
-	canvas.Clear(color.NRGBA{R: 20, G: 28, B: 41, A: 255})
-	for _, tile := range s.ground {
+	canvas.Clear(fogBackground)
+	for i, tile := range s.ground {
 		x, y := s.camera.ToLogical(tile.x, tile.y)
-		canvas.Image(groundRegion, float32(x)-16*zoom, float32(y)-8*zoom, 32*zoom, 16*zoom)
+		left, top, w, h := float32(x)-16*zoom, float32(y)-8*zoom, 32*zoom, 16*zoom
+		switch cell := s.groundCells[i]; {
+		case s.sight == 0 || s.sim.Visible(skirmish.Scouts, cell):
+			canvas.Image(groundRegion, left, top, w, h)
+		case s.sim.Explored(cell):
+			canvas.ImageTinted(groundRegion, left, top, w, h, fogTint)
+		}
 	}
-	s.drawGrid(canvas)
+	if s.sight == 0 {
+		s.drawGrid(canvas)
+	}
 	alarm := skirmishAlarmQuiet
 	if s.sim.Alarm() {
 		alarm = skirmishAlarmLoud
 	}
 	for _, cell := range s.alarm {
+		if !s.sim.Explored(cell) {
+			continue
+		}
 		x, y := s.camera.ToLogical(
 			courtyardProjection.Project(float64(cell.X)+0.5, float64(cell.Y)+0.5, 0),
 		)
@@ -259,6 +315,9 @@ func (s *skirmishScene) drawBolts(canvas engine.Canvas, zoom float32) {
 		fp := b.Body.Footprint
 		cx := fp.Min.X.Add(fp.Max.X.Sub(fp.Min.X) / 2).Float64()
 		cy := fp.Min.Y.Add(fp.Max.Y.Sub(fp.Min.Y) / 2).Float64()
+		if !s.seen(cx, cy) {
+			continue
+		}
 		// Bolts fly at chest height, so lift them to match.
 		x, y := s.camera.ToLogical(courtyardProjection.Project(cx, cy, float64(b.Body.Vertical.Bottom)))
 		canvas.Rect(float32(x)-2*zoom, float32(y)-2*zoom, 4*zoom, 4*zoom, skirmishBoltColor)

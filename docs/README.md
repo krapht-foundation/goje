@@ -12,6 +12,8 @@ The [collision guide](collision.md) explains how to move bodies against walls, t
 
 The [text and HUD guide](text-and-ui.md) shows how to draw text and build menus, and the [replay guide](replays.md) how to record, replay, save, and load a game. The [playground guide](playground.md#the-outpost) describes the outpost, a reference game that uses both together with commands for groups of units.
 
+The [audio guide](audio.md) explains how to play overlapping and positional sounds, and the [vision guide](vision.md) how to give units line of sight and draw fog of war. The [building guide](building.md) shows how to turn a game into a web bundle and a package for macOS or Linux with `goje build` and `goje package`.
+
 ## What Goje aims to provide
 
 - A game framework and reusable tools for building a playground inside your own game. The first [playground prototype](playground.md#use-the-playground-in-your-game) supports replaying a configured encounter.

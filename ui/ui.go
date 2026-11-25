@@ -124,26 +124,31 @@ func (l *Label) Draw(canvas engine.Canvas, face font.Face) {
 	drawText(canvas, face, l.Bounds, l.Text, false, &l.Style)
 }
 
-// Button is a box with centered text that is clicked by a primary press.
+// Button is a box with centered text that is clicked by a primary press, or
+// by the south face button of a gamepad while the pointer is over it.
 type Button struct {
 	Bounds image.Rectangle
 	Text   string
 	Style  Style
 	// Hot is true while the pointer is inside. Down is true while the primary
-	// button stays held after a press inside, wherever the pointer moves.
-	// Update sets both; they select the fill that Draw uses.
+	// button, or the south face button after a gamepad click, stays held after a
+	// press inside, wherever the pointer moves. Update sets both; they select
+	// the fill that Draw uses.
 	Hot, Down bool
+	pad       padEdges
 }
 
 // Contains reports whether a logical point is inside the button.
 func (b *Button) Contains(x, y float64) bool { return contains(b.Bounds, x, y) }
 
 // Update reads one tick of input and reports whether a primary press landed
-// inside the button this tick.
+// inside the button this tick, or the south face button of a gamepad was
+// pressed while the pointer was inside.
 func (b *Button) Update(in engine.Input) (clicked bool) {
-	clicked = pressInside(b.Bounds, in.PrimaryPress)
+	pressed, held := b.pad.next(&in)
 	b.Hot = pointerInside(b.Bounds, in.Pointer)
-	b.Down = (b.Down || clicked) && in.PrimaryHeld
+	clicked = pressInside(b.Bounds, in.PrimaryPress) || (b.Hot && pressed&padSouth != 0)
+	b.Down = (b.Down || clicked) && (in.PrimaryHeld || held&padSouth != 0)
 	return clicked
 }
 
@@ -170,27 +175,32 @@ type Menu struct {
 	Selected int
 	Style    Style
 	pointer  engine.Pointer
+	pad      padEdges
 }
 
 // Contains reports whether a logical point is inside the menu.
 func (m *Menu) Contains(x, y float64) bool { return contains(m.Bounds, x, y) }
 
 // Update reads one tick of input. Arrow Up and Arrow Down presses move the
-// selection and wrap around, the pointer selects the item under it when it
-// moves, and Enter or a primary press on an item activates it. It returns the
-// activated item, or -1, and whether Escape was pressed. A press wins over
-// Enter in the same tick. A menu without items activates nothing.
+// selection and wrap around, as do the up and down directions of a gamepad's
+// D-pad or left stick, the pointer selects the item under it when it moves,
+// and Enter, a gamepad's south face button, or a primary press on an item
+// activates it. It returns the activated item, or -1, and whether Escape or a
+// gamepad's east face button was pressed. A press wins over Enter in the same
+// tick. A menu without items activates nothing.
 func (m *Menu) Update(in engine.Input) (activated int, cancelled bool) {
-	activated, cancelled = -1, in.Pressed.Has(engine.KeyEscape)
+	pad, _ := m.pad.next(&in)
+	activated = -1
+	cancelled = in.Pressed.Has(engine.KeyEscape) || pad&padEast != 0
 	count := len(m.Items)
 	if count == 0 {
 		return activated, cancelled
 	}
 	m.Selected = min(max(m.Selected, 0), count-1)
-	if in.Pressed.Has(engine.KeyArrowUp) {
+	if in.Pressed.Has(engine.KeyArrowUp) || pad&padUp != 0 {
 		m.Selected = (m.Selected + count - 1) % count
 	}
-	if in.Pressed.Has(engine.KeyArrowDown) {
+	if in.Pressed.Has(engine.KeyArrowDown) || pad&padDown != 0 {
 		m.Selected = (m.Selected + 1) % count
 	}
 	// Hover only on movement, so a resting pointer does not undo arrow keys.
@@ -200,7 +210,7 @@ func (m *Menu) Update(in engine.Input) (activated int, cancelled bool) {
 			m.Selected = item
 		}
 	}
-	if in.Pressed.Has(engine.KeyEnter) {
+	if in.Pressed.Has(engine.KeyEnter) || pad&padSouth != 0 {
 		activated = m.Selected
 	}
 	if in.PrimaryPress.Valid {
@@ -209,6 +219,50 @@ func (m *Menu) Update(in engine.Input) (activated int, cancelled bool) {
 		}
 	}
 	return activated, cancelled
+}
+
+// Gamepad inputs that widgets act on, as bits of a padEdges state.
+const (
+	padUp uint8 = 1 << iota
+	padDown
+	padSouth
+	padEast
+)
+
+// stickStep is how far, of 127, the left stick must lean to count as a
+// direction. Each lean past it is one step, however long it is held.
+const stickStep = 64
+
+// padEdges turns the gamepad state of each tick into press edges, which Input
+// does not carry for pads. It ORs every connected pad. The first update only
+// records the state, so a button still held from before the widget was made,
+// such as the press that opened a menu, does not act on it.
+type padEdges struct {
+	held   uint8
+	primed bool
+}
+
+// next returns the inputs that went down this tick and those that are down.
+func (p *padEdges) next(in *engine.Input) (pressed, held uint8) {
+	for _, pad := range in.Gamepads {
+		if pad.Buttons.Has(engine.GamepadUp) || pad.LeftY <= -stickStep {
+			held |= padUp
+		}
+		if pad.Buttons.Has(engine.GamepadDown) || pad.LeftY >= stickStep {
+			held |= padDown
+		}
+		if pad.Buttons.Has(engine.GamepadSouth) {
+			held |= padSouth
+		}
+		if pad.Buttons.Has(engine.GamepadEast) {
+			held |= padEast
+		}
+	}
+	if p.primed {
+		pressed = held &^ p.held
+	}
+	p.held, p.primed = held, true
+	return pressed, held
 }
 
 // item returns the item at a logical point, or -1.

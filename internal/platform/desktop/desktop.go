@@ -1,8 +1,9 @@
 //go:build cgo && (darwin || linux)
 
 // Package desktop connects the shared game loop to a GLFW window and an OpenGL
-// context. GLFW owns window events; tick scheduling and frame packing stay in
-// the shared platform driver.
+// context. GLFW owns window events and gamepad polling; tick scheduling and
+// frame packing stay in the shared platform driver. GLFW has no touch input,
+// so the desktop host never reports engine.Input.Touches.
 package desktop
 
 import (
@@ -219,6 +220,7 @@ func runWindow(
 	}()
 
 	start := time.Now()
+	pads := new(gamepads)
 	var nextFrame time.Time
 	glfw.PollEvents()
 	for ctx.Err() == nil && !window.ShouldClose() {
@@ -236,6 +238,7 @@ func runWindow(
 		nextFrame = now.Add(minFrameInterval)
 
 		measured := driver.BenchFrameStart()
+		pads.poll(&session.Loop)
 		frame, err := session.Advance(now.Sub(start))
 		if err != nil {
 			return err

@@ -49,6 +49,9 @@
       } else if (query.get("fixture") === "outpost") {
         go.env.GOJE_PLAYGROUND = "outpost";
         controls.textContent = "Drag to select · Right click to order · Esc for the menu";
+      } else if (query.get("fixture") === "input") {
+        go.env.GOJE_PLAYGROUND = "input";
+        controls.textContent = "Touch, the mouse, and gamepads are drawn as markers";
       }
       if (diagnosticRun) go.env.GOJE_DIAGNOSTICS = "1";
       if (benchmark === "off" || benchmark === "on") {

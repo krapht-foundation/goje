@@ -9,9 +9,14 @@ import (
 	"github.com/krapht-foundation/goje/engine/fixed"
 )
 
-// snapshotVersion is the layout Snapshot writes and Restore reads. See the
-// snapshot section of specs/skirmish-m13.md.
-const snapshotVersion = 1
+// snapshotVersion is the layout Snapshot writes and Restore reads without
+// vision, and visionSnapshotVersion the layout with vision, which appends the
+// vision section. See the snapshot sections of specs/skirmish-m13.md and
+// specs/vision-m15.md.
+const (
+	snapshotVersion       = 1
+	visionSnapshotVersion = 2
+)
 
 // Unit flag bits in a snapshot.
 const (
@@ -33,14 +38,16 @@ type decoder struct {
 
 // Snapshot returns the simulation's whole dynamic state between ticks: every
 // unit with its route and order, the bolts, the alarm, the counters, the trace,
-// and the trigger tracker's overlaps. The level is not included; Restore needs
-// a Sim built from the same level. The layout is little-endian and versioned,
-// as specs/skirmish-m13.md describes. The error is always nil; it is there so
-// that a scene can return Snapshot as its own.
+// and the trigger tracker's overlaps, and with vision on the sight radius, the
+// explored cells, and where each attack target was last seen. The level is not
+// included; Restore needs a Sim built from the same level. The layout is
+// little-endian and versioned, as specs/skirmish-m13.md describes. The error
+// is always nil; it is there so that a scene can return Snapshot as its own.
 func (s *Sim) Snapshot() ([]byte, error) {
 	le := binary.LittleEndian
-	b := make([]byte, 0, 64+len(s.units)*64+len(s.bolts)*25)
-	b = le.AppendUint16(b, snapshotVersion)
+	cells := s.width * s.height
+	b := make([]byte, 0, 64+len(s.units)*68+len(s.bolts)*25+cells/8)
+	b = le.AppendUint16(b, s.snapshotVersion())
 	b = le.AppendUint16(
 		b,
 		uint16(s.width),
@@ -113,7 +120,27 @@ func (s *Sim) Snapshot() ([]byte, error) {
 		b = le.AppendUint64(b, o.Trigger)
 		b = le.AppendUint64(b, o.Body)
 	}
+	if s.radius == 0 {
+		return b, nil
+	}
+	b = append(b, byte(s.radius)) // #nosec G115 -- at most vision.MaxRadius.
+	for k := range (cells + 7) / 8 {
+		b = append(b, byte(s.explored[k/8]>>(8*(k%8)))) // #nosec G115 -- one byte of the word is kept.
+	}
+	for i := range s.units {
+		b = le.AppendUint32(
+			b,
+			uint32(int32(s.units[i].lastSeen)),
+		) // #nosec G115 -- -1 or a cell index; the bits are kept.
+	}
 	return b, nil
+}
+
+func (s *Sim) snapshotVersion() uint16 {
+	if s.radius != 0 {
+		return visionSnapshotVersion
+	}
+	return snapshotVersion
 }
 
 // Restore replaces the simulation's dynamic state with a snapshot taken from a
@@ -127,8 +154,8 @@ func (s *Sim) Snapshot() ([]byte, error) {
 func (s *Sim) Restore(data []byte) error {
 	d := decoder{b: data, ok: true}
 	cells := s.width * s.height
-	if v := d.u16(); d.ok && v != snapshotVersion {
-		return fmt.Errorf("%w: version %d, want %d", errSnapshot, v, snapshotVersion)
+	if v := d.u16(); d.ok && v != s.snapshotVersion() {
+		return fmt.Errorf("%w: version %d, want %d", errSnapshot, v, s.snapshotVersion())
 	}
 	w, h, n := int(d.u16()), int(d.u16()), int(d.u16())
 	if d.ok && (w != s.width || h != s.height || n != len(s.units)) {
@@ -215,6 +242,10 @@ func (s *Sim) Restore(data []byte) error {
 		}
 		overlaps = append(overlaps, o)
 	}
+	explored, verr := s.decodeVision(&d, units)
+	if verr != nil {
+		return verr
+	}
 	if !d.ok {
 		return fmt.Errorf("%w: truncated", errSnapshot)
 	}
@@ -234,7 +265,48 @@ func (s *Sim) Restore(data []byte) error {
 	s.bodies = bodies
 	s.bolts = append(s.bolts[:0], bolts...)
 	s.tick, s.trace, s.boltSeq, s.alarm = tick, trace, boltSeq, alarm == 1
+	if s.radius != 0 {
+		// Sight is not stored: it follows from where the units stand.
+		copy(s.explored, explored)
+		for _, f := range s.sight {
+			f.Reset()
+		}
+		s.see()
+	}
 	return nil
+}
+
+// decodeVision reads the vision section, which a snapshot has only when
+// vision is on, into the last-seen cells of units, and returns the explored
+// cells.
+func (s *Sim) decodeVision(d *decoder, units []Unit) ([]uint64, error) {
+	if s.radius == 0 {
+		return nil, nil
+	}
+	cells := s.width * s.height
+	if r := int(d.u8()); d.ok && r != s.radius {
+		return nil, fmt.Errorf("%w: sight radius %d, want %d", errSnapshot, r, s.radius)
+	}
+	explored := make([]uint64, len(s.explored))
+	for k, v := range d.take((cells + 7) / 8) {
+		explored[k/8] |= uint64(v) << (8 * (k % 8))
+	}
+	if tail := cells % 64; d.ok && tail != 0 && explored[len(explored)-1]>>tail != 0 {
+		return nil, fmt.Errorf("%w: explored cells off the board", errSnapshot)
+	}
+	for i := range units {
+		if c := int(d.i32()); d.ok {
+			if c < -1 || c >= cells {
+				return nil, fmt.Errorf(
+					"%w: unit %d last saw a cell off the board",
+					errSnapshot,
+					units[i].ID,
+				)
+			}
+			units[i].lastSeen = c
+		}
+	}
+	return explored, nil
 }
 
 // unit reads one unit's dynamic state into u, whose static fields are set.

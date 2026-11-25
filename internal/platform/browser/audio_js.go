@@ -15,9 +15,10 @@ import (
 	"github.com/krapht-foundation/goje/internal/sound"
 )
 
-// webAudio plays one prepared cue at a time through Web Audio. Buffers exist
-// from boot; the AudioContext starts only inside a trusted user gesture, so
-// the queue stays disabled and drops requests until the browser allows output.
+// webAudio plays up to audio.MaxVoices prepared cues at once through Web
+// Audio. Buffers exist from boot; the AudioContext starts only inside a trusted
+// user gesture, so the queue stays disabled and drops requests until the
+// browser allows output. See specs/audio-mixer-m15.md.
 type webAudio struct {
 	queue   *sound.Queue
 	logger  *slog.Logger
@@ -28,10 +29,21 @@ type webAudio struct {
 	observe js.Value
 	context js.Value
 	state   js.Func
-	voice   js.Value
+	// voices is a ring in start order: voices[next] is the oldest voice and
+	// the one the next request replaces. Ended sources stay until replaced or
+	// cleared, because stopping them is harmless and tracking their end would
+	// need a Go callback per voice.
+	voices  [audio.MaxVoices]webVoice
+	next    int
 	gen     uint64
 	running bool
 	failed  bool
+}
+
+// webVoice is a source and the last node of its graph, which connects to the
+// context's destination.
+type webVoice struct {
+	source, output js.Value
 }
 
 // newWebAudio prepares every clip outside the tick. It returns nil when sound
@@ -45,7 +57,8 @@ func newWebAudio(
 	if queue == nil {
 		return nil
 	}
-	if !window.Get("AudioContext").Truthy() || !window.Get("AudioBuffer").Truthy() {
+	if !window.Get("AudioContext").Truthy() || !window.Get("AudioBuffer").Truthy() ||
+		!window.Get("StereoPannerNode").Truthy() {
 		logAudio(ctx, logger, "audio unavailable", "reason", "Web Audio API missing")
 		return nil
 	}
@@ -139,11 +152,11 @@ func (a *webAudio) sync() {
 		logAudio(a.ctx, a.logger, "audio unlocked")
 	} else {
 		a.queue.Disable()
-		a.stop()
+		a.stopAll()
 	}
 }
 
-// poll applies a cleared queue and starts the newest cue. It runs once per
+// poll applies a cleared queue and starts the pending cues. It runs once per
 // frame on the host loop and after focus changes, when frames may stop.
 func (a *webAudio) poll() {
 	if a == nil {
@@ -151,22 +164,41 @@ func (a *webAudio) poll() {
 	}
 	if g := a.queue.Generation(); g != a.gen {
 		a.gen = g
-		a.stop()
+		a.stopAll()
 	}
-	cue, ok := a.queue.Next()
-	if !ok || !a.running || cue < 0 || cue >= len(a.buffers) || a.buffers[cue].IsUndefined() {
-		return
+	for range sound.Capacity {
+		r, ok := a.queue.Next()
+		if !ok || !a.running {
+			return
+		}
+		if a.buffers[r.Cue].IsUndefined() {
+			continue
+		}
+		if err := catchJS(func() { a.start(r) }); err != nil {
+			a.disable(err)
+			return
+		}
 	}
-	a.stop()
-	if err := catchJS(func() {
-		source := a.context.Call("createBufferSource")
-		source.Set("buffer", a.buffers[cue])
-		source.Call("connect", a.context.Get("destination"))
-		source.Call("start")
-		a.voice = source
-	}); err != nil {
-		a.disable(err)
-	}
+}
+
+// start replaces the oldest voice with source → gain → stereo panner →
+// destination. The StereoPannerNode applies the same equal-power law to a
+// mono buffer as audio.Mixer, so both hosts mix alike. scripts/smoke-mixer.mjs
+// mirrors this graph; keep the two in step.
+func (a *webAudio) start(r sound.Request) {
+	source := a.context.Call("createBufferSource")
+	source.Set("buffer", a.buffers[r.Cue])
+	gain := a.context.Call("createGain")
+	gain.Get("gain").Set("value", r.Gain)
+	panner := a.context.Call("createStereoPanner")
+	panner.Get("pan").Set("value", r.Pan)
+	source.Call("connect", gain)
+	gain.Call("connect", panner)
+	panner.Call("connect", a.context.Get("destination"))
+	a.voices[a.next].stop()
+	source.Call("start")
+	a.voices[a.next] = webVoice{source: source, output: panner}
+	a.next = (a.next + 1) % len(a.voices)
 }
 
 func (a *webAudio) disable(err error) {
@@ -176,20 +208,26 @@ func (a *webAudio) disable(err error) {
 	logAudio(a.ctx, a.logger, "audio unavailable", "error", err)
 }
 
-func (a *webAudio) stop() {
-	if a.voice.IsUndefined() {
+func (a *webAudio) stopAll() {
+	for i := range a.voices {
+		a.voices[i].stop()
+	}
+}
+
+func (v *webVoice) stop() {
+	if v.source.IsUndefined() {
 		return
 	}
-	a.voice.Call("stop") // Harmless on a source that already ended.
-	a.voice.Call("disconnect")
-	a.voice = js.Undefined()
+	v.source.Call("stop") // Harmless on a source that already ended.
+	v.output.Call("disconnect")
+	*v = webVoice{}
 }
 
 func (a *webAudio) close() {
 	if a == nil {
 		return
 	}
-	a.stop()
+	a.stopAll()
 	if !a.context.IsUndefined() {
 		a.context.Call("removeEventListener", "statechange", a.state)
 		a.context.Call("close").Call("catch", a.observe)

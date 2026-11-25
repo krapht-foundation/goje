@@ -92,3 +92,9 @@ jobs:
         run: xvfb-run -a make smoke-beacon-audio
       - name: Play the Sound Maker export on desktop and web
         run: xvfb-run -a make smoke-sound-roundtrip
+      - name: Drive touch and gamepad input in Chromium
+        run: make smoke-input
+      - name: Compare the Go mixer with the Web Audio graph
+        run: make smoke-mixer
+      - name: Build and package Beacon with goje
+        run: xvfb-run -a make smoke-goje-build

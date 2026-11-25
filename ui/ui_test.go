@@ -321,3 +321,92 @@ func BenchmarkDrawHUD(b *testing.B) {
 		menu.Draw(discard{}, face)
 	}
 }
+
+// padInput is the input of one tick with a single connected pad in slot 2.
+func padInput(buttons engine.GamepadButtons, leftY int8) engine.Input {
+	var in engine.Input
+	in.Gamepads[2] = engine.Gamepad{Connected: true, Buttons: buttons, LeftY: leftY}
+	return in
+}
+
+func TestMenuWithAGamepad(t *testing.T) {
+	t.Parallel()
+	m := ui.Menu{Bounds: image.Rect(0, 0, 50, 32), Items: []string{"Start", "Load", "Quit"}}
+	steps := []struct {
+		name      string
+		in        engine.Input
+		activated int
+		cancelled bool
+		selected  int
+	}{
+		// The press that opened the menu is still held on its first update.
+		{"held from before", padInput(engine.GamepadSouth|engine.GamepadEast, 0), -1, false, 0},
+		{"released", padInput(0, 0), -1, false, 0},
+		{"d-pad up wraps", padInput(engine.GamepadUp, 0), -1, false, 2},
+		{"d-pad held", padInput(engine.GamepadUp, 0), -1, false, 2},
+		{"d-pad down", padInput(engine.GamepadDown, 0), -1, false, 0},
+		{"stick below the step", padInput(0, 63), -1, false, 0},
+		{"stick down", padInput(0, 64), -1, false, 1},
+		{"stick held down", padInput(0, 127), -1, false, 1},
+		{"stick up from down", padInput(0, -64), -1, false, 0},
+		{"stick back to rest", padInput(0, 0), -1, false, 0},
+		{"stick down again", padInput(0, 100), -1, false, 1},
+		{"south activates", padInput(engine.GamepadSouth, 0), 1, false, 1},
+		{"south held", padInput(engine.GamepadSouth, 0), -1, false, 1},
+		{"east cancels", padInput(engine.GamepadEast, 0), -1, true, 1},
+		{"disconnected", engine.Input{}, -1, false, 1},
+		{"south after reconnect", padInput(engine.GamepadSouth, 0), 1, false, 1},
+	}
+	for _, step := range steps {
+		activated, cancelled := m.Update(step.in)
+		if activated != step.activated || cancelled != step.cancelled || m.Selected != step.selected {
+			t.Fatalf("%s: got (%d, %v) selected %d; want (%d, %v) selected %d", step.name,
+				activated, cancelled, m.Selected, step.activated, step.cancelled, step.selected)
+		}
+	}
+	// Two pads count as one: a second pad's press while the first holds is no edge.
+	var both engine.Input
+	both.Gamepads[0] = engine.Gamepad{Connected: true, Buttons: engine.GamepadSouth}
+	both.Gamepads[3] = engine.Gamepad{Connected: true, Buttons: engine.GamepadSouth}
+	if activated, _ := m.Update(both); activated != -1 {
+		t.Fatalf("held south on another pad activated %d", activated)
+	}
+	// A menu without items still reports cancel.
+	empty := ui.Menu{}
+	empty.Update(padInput(0, 0))
+	if activated, cancelled := empty.Update(padInput(engine.GamepadEast, 0)); activated != -1 ||
+		!cancelled {
+		t.Fatalf("empty menu = (%d, %v)", activated, cancelled)
+	}
+}
+
+func TestButtonWithAGamepad(t *testing.T) {
+	t.Parallel()
+	b := ui.Button{Bounds: image.Rect(0, 0, 40, 20)}
+	over := func(buttons engine.GamepadButtons) engine.Input {
+		in := padInput(buttons, 0)
+		in.Pointer = pointer(5, 5)
+		return in
+	}
+	steps := []struct {
+		name             string
+		in               engine.Input
+		clicked, hot, dn bool
+	}{
+		{"held from before", over(engine.GamepadSouth), false, true, false},
+		{"released", over(0), false, true, false},
+		{"south outside", padInput(engine.GamepadSouth, 0), false, false, false},
+		{"released outside", padInput(0, 0), false, false, false},
+		{"south over", over(engine.GamepadSouth), true, true, true},
+		{"held and moved away", padInput(engine.GamepadSouth, 0), false, false, true},
+		{"released", padInput(0, 0), false, false, false},
+		{"east over", over(engine.GamepadEast), false, true, false},
+	}
+	for _, step := range steps {
+		if clicked := b.Update(step.in); clicked != step.clicked || b.Hot != step.hot ||
+			b.Down != step.dn {
+			t.Fatalf("%s: clicked %v hot %v down %v; want %v %v %v", step.name, clicked, b.Hot,
+				b.Down, step.clicked, step.hot, step.dn)
+		}
+	}
+}

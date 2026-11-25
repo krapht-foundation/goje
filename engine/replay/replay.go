@@ -135,6 +135,9 @@ func (r *Recording) validate() (int, error) {
 		if run.Input.Held&^knownKeys != 0 || run.Input.Pressed&^knownKeys != 0 {
 			return 0, fmt.Errorf("run %d: unknown key bits", i)
 		}
+		if err := encodableLists(&run.Input); err != nil {
+			return 0, fmt.Errorf("run %d: %w", i, err)
+		}
 		if i > 0 && sameInput(r.Runs[i-1].Input, run.Input) {
 			return 0, fmt.Errorf("run %d: same input as the run before it", i)
 		}
@@ -165,7 +168,44 @@ func sameInput(a, b engine.Input) bool {
 			a.PrimaryRelease,
 			b.PrimaryRelease,
 		) && samePress(a.SecondaryRelease, b.SecondaryRelease) &&
-		a.PrimaryHeld == b.PrimaryHeld && a.SecondaryHeld == b.SecondaryHeld
+		a.PrimaryHeld == b.PrimaryHeld && a.SecondaryHeld == b.SecondaryHeld &&
+		sameTouches(&a.Touches, &b.Touches) && a.Gamepads == b.Gamepads
+}
+
+func sameTouches(a, b *[engine.MaxTouches]engine.Touch) bool {
+	for i := range a {
+		if a[i].ID != b[i].ID || a[i].Active != b[i].Active ||
+			!samePoint(a[i].X, a[i].Y, b[i].X, b[i].Y) {
+			return false
+		}
+	}
+	return true
+}
+
+// encodableLists checks the rules that let the format store touches and pads
+// as lists: active touches come first and have a nonzero ID, and inactive
+// touches and disconnected pads are all zero.
+func encodableLists(in *engine.Input) error {
+	ended := false
+	for i, t := range in.Touches {
+		switch {
+		case !t.Active:
+			if t.ID != 0 || present(t.X, t.Y) {
+				return fmt.Errorf("inactive touch %d is not zero", i)
+			}
+			ended = true
+		case ended:
+			return fmt.Errorf("active touch %d follows an inactive one", i)
+		case t.ID == 0:
+			return fmt.Errorf("active touch %d has ID 0", i)
+		}
+	}
+	for i, p := range in.Gamepads {
+		if !p.Connected && p != (engine.Gamepad{}) {
+			return fmt.Errorf("disconnected gamepad %d is not zero", i)
+		}
+	}
+	return nil
 }
 
 func samePress(a, b engine.MousePress) bool {

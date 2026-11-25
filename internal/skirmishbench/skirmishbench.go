@@ -2,7 +2,8 @@
 // battle: 128 scouts against 128 guards on a 64 × 64 board with pillars and an
 // alarm line. It is shared by the native and WebAssembly benchmark programs so
 // both targets run the same battle, and its trace hash shows whether they
-// produced the same state. See RFC 0014 for the acceptance criteria.
+// produced the same state. See RFC 0014 for the acceptance criteria, and RFC
+// 0016 for the vision mode.
 package skirmishbench
 
 import (
@@ -35,6 +36,9 @@ const (
 const (
 	Squads        = 6
 	OrderInterval = 120
+	// SightRadius is the sight radius in cells of the vision mode, the
+	// outpost's radius.
+	SightRadius = 7
 )
 
 // Scene is a battle. Create it with New or NewOrders and advance it with Step.
@@ -204,9 +208,9 @@ func (s *Scene) Step() (time.Duration, error) {
 // Stats holds sorted-sample percentiles in microseconds.
 type Stats struct{ Median, P95, P99, Max float64 }
 
-// Report is the result of Run or RunOrders.
+// Report is the result of Run, RunOrders, or RunVision.
 type Report struct {
-	// Mode is "battle" for Run and "orders" for RunOrders.
+	// Mode is "battle" for Run, "orders" for RunOrders, and "vision" for RunVision.
 	Mode         string
 	Units, Ticks int
 	// Tick is the per-tick cost of Step.
@@ -236,6 +240,29 @@ func RunOrders(warmup, ticks int) (Report, error) {
 		return Report{}, err
 	}
 	return measure("orders", scene, warmup, ticks)
+}
+
+// NewVision is NewOrders with vision on at SightRadius, so the squads' group
+// orders, the scouts' fire, and the guards' waking all depend on line of
+// sight, and every unit that changes cell recasts its view.
+func NewVision() (*Scene, error) {
+	scene, err := NewOrders()
+	if err != nil {
+		return nil, err
+	}
+	if err := scene.EnableVision(skirmish.VisionConfig{Radius: SightRadius}); err != nil {
+		return nil, err
+	}
+	return scene, nil
+}
+
+// RunVision is Run for the vision mode of NewVision.
+func RunVision(warmup, ticks int) (Report, error) {
+	scene, err := NewVision()
+	if err != nil {
+		return Report{}, err
+	}
+	return measure("vision", scene, warmup, ticks)
 }
 
 func measure(mode string, scene *Scene, warmup, ticks int) (Report, error) {

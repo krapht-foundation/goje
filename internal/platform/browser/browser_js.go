@@ -88,9 +88,31 @@ func runLoop(
 		sounds.poll()
 	}
 	lost := make(chan struct{}, 1)
+	focusCanvas := func() {
+		// Focus before buffering so a valid press can reactivate the game.
+		if !document.Get("activeElement").Equal(canvas) {
+			canvas.Call("focus", map[string]any{"preventScroll": true})
+			updateActive()
+		}
+	}
 	event := js.FuncOf(func(_ js.Value, args []js.Value) any {
 		e := args[0]
 		kind := e.Get("type").String()
+		switch kind {
+		case "pointerdown", "pointermove", "pointerup", "pointercancel":
+			if e.Get("pointerType").String() != "touch" {
+				break
+			}
+			e.Call("preventDefault")
+			if kind == "pointerdown" {
+				focusCanvas()
+			} else if kind == "pointerup" && e.Get("isTrusted").Bool() {
+				// Touch activation is granted on release, not on press.
+				sounds.unlock(window)
+			}
+			graphics.touchEvent(kind, window, canvas, e, &session.Loop)
+			return nil
+		}
 		switch kind {
 		case "blur":
 			session.SetActive(false)
@@ -143,11 +165,7 @@ func runLoop(
 			if !ok {
 				break
 			}
-			// Focus before buffering so a valid press can reactivate the game.
-			if !document.Get("activeElement").Equal(canvas) {
-				canvas.Call("focus", map[string]any{"preventScroll": true})
-				updateActive()
-			}
+			focusCanvas()
 			if kind == "pointerdown" {
 				// Capture so the release and the drag's motion arrive even when the
 				// pointer leaves the canvas.
@@ -176,7 +194,7 @@ func runLoop(
 				session.Loop.ReleaseSecondary()
 			}
 		case "pointerup":
-			// Touch and pen activation is granted on release, not on press.
+			// Pen activation is granted on release, not on press.
 			if e.Get("pointerType").String() != "mouse" && e.Get("isTrusted").Bool() {
 				sounds.unlock(window)
 			}
@@ -198,6 +216,7 @@ func runLoop(
 		{canvas, "keyup"},
 		{canvas, "pointerdown"},
 		{canvas, "pointerup"},
+		{canvas, "pointercancel"},
 		{canvas, "mousedown"},
 		{canvas, "mouseup"},
 		{canvas, "pointermove"},
@@ -231,6 +250,8 @@ func runLoop(
 	})
 	var pending js.Value
 	addedTabIndex := false
+	style := canvas.Get("style")
+	touchAction := style.Get("touchAction")
 	defer func() {
 		close(stopped)
 		if stopErr := session.Stop(); stopErr != nil {
@@ -239,7 +260,7 @@ func runLoop(
 		if !pending.IsUndefined() {
 			window.Call("cancelAnimationFrame", pending)
 		}
-		for _, listener := range listeners {
+		for _, listener := range &listeners {
 			listener.target.Call("removeEventListener", listener.name, event)
 		}
 		frame.Release()
@@ -247,8 +268,9 @@ func runLoop(
 		if addedTabIndex {
 			canvas.Call("removeAttribute", "tabindex")
 		}
+		style.Set("touchAction", touchAction)
 	}()
-	for _, listener := range listeners {
+	for _, listener := range &listeners {
 		listener.target.Call("addEventListener", listener.name, event)
 	}
 	if graphics.gl.Call("isContextLost").Bool() {
@@ -258,6 +280,9 @@ func runLoop(
 		canvas.Set("tabIndex", 0)
 		addedTabIndex = true
 	}
+	// Without this, a drag scrolls or zooms the page instead of reaching the game.
+	style.Set("touchAction", "none")
+	pads := newGamepadReader(window)
 	// Don't take focus from a control the page or the user already selected.
 	if active := document.Get(
 		"activeElement",
@@ -279,6 +304,7 @@ func runLoop(
 		case stamp := <-frames:
 			pending = js.Undefined()
 			measured := driver.BenchFrameStart()
+			pads.poll(&session.Loop)
 			batch, err := session.Advance(stamp)
 			if err != nil {
 				return fmt.Errorf("browser: %w", err)

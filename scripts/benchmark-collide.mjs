@@ -1,5 +1,5 @@
 /**
- * @file Run a Goje benchmark program in Chromium and print its JSON reports, one or two per run.
+ * @file Run a Goje benchmark program in Chromium and print its JSON reports, one or three per run.
  *
  * Usage: node scripts/benchmark-collide.mjs WEB_DIR [repetitions] [collidebench | skirmishbench]
  * The program's WebAssembly build must be in WEB_DIR as PROGRAM.wasm next to wasm_exec.js.
@@ -51,8 +51,9 @@ try {
       const tab = await browser.newPage();
       try {
         await tab.bringToFront();
-        // The skirmish program prints two reports, the battle and then the same battle with group orders.
-        const expected = program === "skirmishbench" ? 2 : 1;
+        // The skirmish program prints three reports: the battle, the same battle with group orders,
+        // and the group-order battle with vision on.
+        const expected = program === "skirmishbench" ? 3 : 1;
         const lines = [];
         const reports = new Promise((resolve, reject) => {
           tab.on("console", message => {

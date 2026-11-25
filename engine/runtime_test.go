@@ -45,6 +45,47 @@ func (s *testScene) Exit() {
 	}
 }
 
+type soundLog []string
+
+func (s *soundLog) Play(cue int, gain, pan float32) {
+	*s = append(*s, fmt.Sprintf("play %d %v %v", cue, gain, pan))
+}
+
+func (s *soundLog) Clear() { *s = append(*s, "clear") }
+
+func TestTickSoundReachesNestedRuntime(t *testing.T) {
+	var log soundLog
+	inner, err := engine.Start(func() engine.Scene {
+		return &testScene{update: func(tick engine.Tick) (engine.Transition, error) {
+			tick.PlaySound(1)
+			return engine.Transition{}, nil
+		}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := engine.Start(func() engine.Scene {
+		return &testScene{update: func(tick engine.Tick) (engine.Transition, error) {
+			inner.SetSoundOutput(tick.Sound())
+			if stepErr := inner.Step(engine.Input{}); stepErr != nil {
+				return engine.Transition{}, stepErr
+			}
+			tick.PlaySoundAt(2, 0.5, -1)
+			return engine.Transition{}, inner.Stop()
+		}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer.SetSoundOutput(&log)
+	if err := outer.Step(engine.Input{}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"play 1 1 0", "play 2 0.5 -1", "clear"}; !slices.Equal(log, want) {
+		t.Fatalf("sound requests %q, want %q", log, want)
+	}
+}
+
 func TestRuntimeTransitions(t *testing.T) {
 	var calls []string
 	makeScene := func(name string, transition func(engine.Tick) engine.Transition) engine.Scene {

@@ -53,6 +53,10 @@ const (
 	outpostStageQuit
 	outpostStageWatch
 	outpostStageReplay
+	outpostStageLeave
+	outpostStageTouch
+	outpostStagePad
+	outpostStagePadStart
 	outpostStageDone
 )
 
@@ -91,6 +95,14 @@ func (s *outpostSmokeScene) Update(tick engine.Tick) (engine.Transition, error) 
 	s.smoke.waiting = true
 	tick.Input = s.smoke.input()
 	return s.Scene.Update(tick)
+}
+
+// padInput is the input of a connected pad holding the buttons with its left stick
+// pushed to the right by leftX.
+func padInput(buttons engine.GamepadButtons, leftX int8) engine.Input {
+	var in engine.Input
+	in.Gamepads[0] = engine.Gamepad{Connected: true, Buttons: buttons, LeftX: leftX}
+	return in
 }
 
 func press(x, y float64) engine.MousePress { return engine.MousePress{X: x, Y: y, Valid: true} }
@@ -165,6 +177,18 @@ func (k *outpostSmoke) queue() []engine.Input {
 		return keys(engine.KeyEscape, engine.KeyArrowUp, engine.KeyEnter)
 	case outpostStageWatch:
 		return keys(engine.KeyArrowDown, engine.KeyArrowDown, engine.KeyEnter)
+	case outpostStageLeave:
+		return keys(engine.KeyEscape, engine.KeyEnter)
+	case outpostStageTouch:
+		// A finger taps the empty ground at the top left, which shows the touch buttons.
+		at := engine.Pointer{X: 20, Y: 20, Inside: true}
+		tap := engine.Input{PrimaryPress: press(20, 20), PrimaryHeld: true, Pointer: at}
+		tap.Touches[0] = engine.Touch{ID: 1, X: 20, Y: 20, Active: true}
+		return []engine.Input{tap, {PrimaryRelease: press(20, 20), Pointer: at}}
+	case outpostStagePad:
+		return []engine.Input{padInput(0, 127), padInput(0, 0)}
+	case outpostStagePadStart:
+		return []engine.Input{padInput(engine.GamepadStart, 0), padInput(0, 0)}
 	}
 	return nil
 }
@@ -211,7 +235,8 @@ func (k *outpostSmoke) checkMarkers(viewport image.Rectangle, want int) error {
 	return nil
 }
 
-// checkSpawn checks that the frame shows all twelve units with full health bars.
+// checkSpawn checks that the frame shows the six scouts with full health bars and
+// hides the six guards, whose ground is unexplored and so left as the background.
 func (k *outpostSmoke) checkSpawn(viewport image.Rectangle) error {
 	s := k.app.session
 	if s.sim.Ticks() != 0 || s.outcome != outcomePlaying {
@@ -220,14 +245,20 @@ func (k *outpostSmoke) checkSpawn(viewport image.Rectangle) error {
 	for _, u := range s.sim.Units() {
 		c := u.Center()
 		x, y := k.screen(c.X.Float64(), c.Y.Float64(), 0)
-		want := skirmishGuardColor
-		if u.Team == skirmish.Scouts {
-			want = skirmishScoutColor
+		if u.Team == skirmish.Guards {
+			if !pixelIs(viewport, x, y, fogBackground) {
+				return fmt.Errorf("frame did not leave the ground under guard %d in the dark", u.ID)
+			}
+			continue
 		}
+		want := skirmishScoutColor
 		barTop := y - skirmishUnitHeight - 3
 		if !pixelIs(viewport, x, y-7, want) || !pixelIs(viewport, x-5, barTop, skirmishHealthColor) {
 			return fmt.Errorf("frame did not show unit %d with a full health bar", u.ID)
 		}
+	}
+	if countPixels(viewport, skirmishGuardColor) != 0 {
+		return errors.New("frame showed a guard that no scout can see")
 	}
 	if countPixels(viewport, selectionColor) != 0 || countPixels(viewport, skirmishAlarmLoud) != 0 {
 		return errors.New("frame showed a selection or a loud alarm at the start")
@@ -244,10 +275,20 @@ func (k *outpostSmoke) checkFight(viewport image.Rectangle) (bool, error) {
 	if countPixels(viewport, skirmishAlarmLoud) != 0 {
 		k.alarmLit = true
 	}
-	if bolts := s.sim.Bolts(); len(bolts) > 0 && !k.boltSeen {
-		fp := bolts[0].Body.Footprint
-		x, y := k.screen(fp.Min.X.Add((fp.Max.X-fp.Min.X)/2).Float64(),
-			fp.Min.Y.Add((fp.Max.Y-fp.Min.Y)/2).Float64(), float64(bolts[0].Body.Vertical.Bottom))
+	// A bolt is drawn only where the scouts see, so the check takes the first that is.
+	for _, b := range s.sim.Bolts() {
+		if k.boltSeen {
+			break
+		}
+		fp := b.Body.Footprint
+		bx, by := fp.Min.X.Add((fp.Max.X-fp.Min.X)/2).
+			Float64(),
+			fp.Min.Y.Add((fp.Max.Y-fp.Min.Y)/2).
+				Float64()
+		if !s.seen(bx, by) {
+			continue
+		}
+		x, y := k.screen(bx, by, float64(b.Body.Vertical.Bottom))
 		if !pixelIs(viewport, x, y, skirmishBoltColor) {
 			return false, fmt.Errorf("frame did not show the bolt at %d, %d", x, y)
 		}
@@ -393,6 +434,28 @@ func (k *outpostSmoke) check(viewport image.Rectangle) (bool, error) {
 		if app.state != stateWatching || app.player.Played() != app.player.Ticks() ||
 			countPixels(viewport, app.recLabel.Style.Text) == 0 {
 			return false, fmt.Errorf("the replay ended badly: state %d, notice %q", app.state, app.notice)
+		}
+		return true, nil
+	case outpostStageLeave:
+		return app.state == statePlaying && s != nil && s.sim.Ticks() == 0, nil
+	case outpostStageTouch:
+		// The first button's border is opaque, so one pixel of it shows that the bar is drawn.
+		b := &s.controls.buttons[touchMove]
+		if !s.controls.touchUI ||
+			!pixelIs(viewport, b.Bounds.Min.X, b.Bounds.Min.Y+10, b.Style.Border) {
+			return false, errors.New("frame did not show the touch buttons after a tap")
+		}
+		return true, nil
+	case outpostStagePad:
+		// The cursor moved three pixels right of the center and is drawn as a cross there.
+		if x, y := int(s.controls.cursorX), int(s.controls.cursorY); !s.controls.padActive ||
+			x != width/2+3 || !pixelIs(viewport, x, y, selectionColor) {
+			return false, fmt.Errorf("frame did not show the pad cursor at %d, %d", x, y)
+		}
+		return true, nil
+	case outpostStagePadStart:
+		if app.state != statePaused {
+			return false, errors.New("the pad's Start button did not pause the match")
 		}
 		return true, nil
 	}

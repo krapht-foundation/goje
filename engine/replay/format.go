@@ -16,13 +16,20 @@ const (
 	version = 1
 	// headerSize counts every fixed-size field: magic, version, game length,
 	// content, interval, start length, tick count, run count, and checkpoint count.
-	headerSize     = len(magic) + 2 + 1 + 8 + 2 + 4 + 4 + 4 + 4
-	minRunSize     = 2 + 4
-	maxRunSize     = minRunSize + 4 + 4 + 5*16
+	headerSize = len(magic) + 2 + 1 + 8 + 2 + 4 + 4 + 4 + 4
+	minRunSize = 2 + 4
+	// touchSize is an ID and two coordinates; padSize is a slot, the button
+	// bits, four stick bytes, and two trigger bytes.
+	touchSize  = 4 + 16
+	padSize    = 1 + 2 + 6
+	maxRunSize = minRunSize + 4 + 4 + 5*16 +
+		1 + engine.MaxTouches*touchSize + 1 + engine.MaxGamepads*padSize
 	checkpointSize = 4 + 8
 )
 
-// Run flag bits. A coordinate pair is present when either value has nonzero bits.
+// Run flag bits. A coordinate pair is present when either value has nonzero
+// bits. The touch and gamepad bits were added in M15; a run without an active
+// touch or a connected pad sets neither, so it keeps its earlier bytes.
 const (
 	flagHeld uint16 = 1 << iota
 	flagPressed
@@ -38,7 +45,8 @@ const (
 	flagSecondaryReleaseValid
 	flagPrimaryHeld
 	flagSecondaryHeld
-	knownFlags = flagSecondaryHeld<<1 - 1
+	flagTouches
+	flagGamepads
 )
 
 // Encode returns the version 1 encoding of rec. It rejects a recording that
@@ -183,7 +191,35 @@ func runSize(in engine.Input) int {
 			size += 16
 		}
 	}
+	if n := touchCount(&in); n > 0 {
+		size += 1 + n*touchSize
+	}
+	if n := padCount(&in); n > 0 {
+		size += 1 + n*padSize
+	}
 	return size
+}
+
+// touchCount returns the number of active touches, which validate has checked
+// come first.
+func touchCount(in *engine.Input) int {
+	n := 0
+	for _, t := range in.Touches {
+		if t.Active {
+			n++
+		}
+	}
+	return n
+}
+
+func padCount(in *engine.Input) int {
+	n := 0
+	for _, p := range in.Gamepads {
+		if p.Connected {
+			n++
+		}
+	}
+	return n
 }
 
 func present(x, y float64) bool { return math.Float64bits(x)|math.Float64bits(y) != 0 }
@@ -210,6 +246,9 @@ func appendRun(data []byte, run Run) []byte {
 	set(flagSecondaryReleaseValid, in.SecondaryRelease.Valid)
 	set(flagPrimaryHeld, in.PrimaryHeld)
 	set(flagSecondaryHeld, in.SecondaryHeld)
+	touches, pads := touchCount(&in), padCount(&in)
+	set(flagTouches, touches > 0)
+	set(flagGamepads, pads > 0)
 	data = binary.LittleEndian.AppendUint16(data, flags)
 	data = binary.LittleEndian.AppendUint32(data, u32(run.Ticks))
 	if flags&flagHeld != 0 {
@@ -231,6 +270,28 @@ func appendRun(data []byte, run Run) []byte {
 		if flags&p.bit != 0 {
 			data = binary.LittleEndian.AppendUint64(data, math.Float64bits(p.x))
 			data = binary.LittleEndian.AppendUint64(data, math.Float64bits(p.y))
+		}
+	}
+	if touches > 0 {
+		data = append(data, byte(touches)) // #nosec G115 -- at most engine.MaxTouches.
+		for _, t := range in.Touches[:touches] {
+			data = binary.LittleEndian.AppendUint32(data, t.ID)
+			data = binary.LittleEndian.AppendUint64(data, math.Float64bits(t.X))
+			data = binary.LittleEndian.AppendUint64(data, math.Float64bits(t.Y))
+		}
+	}
+	if pads > 0 {
+		data = append(data, byte(pads)) // #nosec G115 -- at most engine.MaxGamepads.
+		for slot, p := range in.Gamepads {
+			if !p.Connected {
+				continue
+			}
+			data = append(data, byte(slot)) // #nosec G115 -- below engine.MaxGamepads.
+			data = binary.LittleEndian.AppendUint16(data, uint16(p.Buttons))
+			for _, axis := range [...]int8{p.LeftX, p.LeftY, p.RightX, p.RightY} {
+				data = append(data, byte(axis)) // #nosec G115 -- stored as the two's complement byte.
+			}
+			data = append(data, p.LeftTrigger, p.RightTrigger)
 		}
 	}
 	return data
@@ -283,16 +344,14 @@ func (r *reader) u64() uint64 {
 	return 0
 }
 
-// run reads one run and rejects unknown flags and present fields whose value
-// is zero, so that every recording has exactly one encoding.
+// run reads one run and rejects present fields whose value is zero and lists
+// that the format does not allow, so that every recording has exactly one
+// encoding. All 16 flag bits are defined.
 func (r *reader) run(run *Run) error {
 	flags := r.u16()
 	ticks := r.u32()
 	if !r.ok() {
 		return errTruncated
-	}
-	if flags&^knownFlags != 0 {
-		return fmt.Errorf("unknown flags %#04x", flags&^knownFlags)
 	}
 	run.Ticks = int(ticks)
 	in := &run.Input
@@ -324,6 +383,16 @@ func (r *reader) run(run *Run) error {
 			return errors.New("coordinates flagged but zero")
 		}
 	}
+	if flags&flagTouches != 0 {
+		if err := r.touches(in); err != nil {
+			return err
+		}
+	}
+	if flags&flagGamepads != 0 {
+		if err := r.gamepads(in); err != nil {
+			return err
+		}
+	}
 	in.Pointer.Inside = flags&flagInside != 0
 	in.PrimaryPress.Valid = flags&flagPrimaryPressValid != 0
 	in.SecondaryPress.Valid = flags&flagSecondaryPressValid != 0
@@ -333,6 +402,59 @@ func (r *reader) run(run *Run) error {
 	in.SecondaryHeld = flags&flagSecondaryHeld != 0
 	if !r.ok() {
 		return errTruncated
+	}
+	return nil
+}
+
+// touches reads a touch list. The count is checked before any entry is read,
+// and an entry with ID 0, which is how an inactive touch would read, is refused.
+func (r *reader) touches(in *engine.Input) error {
+	n := int(r.u8())
+	if !r.ok() {
+		return errTruncated
+	}
+	if n < 1 || n > engine.MaxTouches {
+		return fmt.Errorf("touch count %d is outside 1-%d", n, engine.MaxTouches)
+	}
+	for i := range n {
+		t := &in.Touches[i]
+		t.ID, t.Active = r.u32(), true
+		t.X, t.Y = math.Float64frombits(r.u64()), math.Float64frombits(r.u64())
+		if r.ok() && t.ID == 0 {
+			return fmt.Errorf("touch %d is inactive", i)
+		}
+	}
+	return nil
+}
+
+// gamepads reads a pad list, whose slots must be in increasing order, so that a
+// slot cannot be listed twice.
+func (r *reader) gamepads(in *engine.Input) error {
+	n := int(r.u8())
+	if !r.ok() {
+		return errTruncated
+	}
+	if n < 1 || n > engine.MaxGamepads {
+		return fmt.Errorf("gamepad count %d is outside 1-%d", n, engine.MaxGamepads)
+	}
+	previous := -1
+	for range n {
+		slot := int(r.u8())
+		buttons := engine.GamepadButtons(r.u16())
+		axes := r.bytes(6)
+		if !r.ok() {
+			return errTruncated
+		}
+		if slot >= engine.MaxGamepads || slot <= previous {
+			return fmt.Errorf("gamepad slot %d is out of range, repeated, or out of order", slot)
+		}
+		previous = slot
+		in.Gamepads[slot] = engine.Gamepad{
+			Connected: true, Buttons: buttons,
+			LeftX: int8(axes[0]), LeftY: int8(axes[1]), // #nosec G115 -- two's complement bytes.
+			RightX: int8(axes[2]), RightY: int8(axes[3]), // #nosec G115 -- two's complement bytes.
+			LeftTrigger: axes[4], RightTrigger: axes[5],
+		}
 	}
 	return nil
 }

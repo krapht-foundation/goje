@@ -478,7 +478,13 @@ async function smokeSkirmish(browser, url) {
  * @returns {Promise<void>} Resolves once the replay has ended and no page error was raised.
  */
 async function smokeOutpost(browser, url) {
-  const page = await browser.newPage({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 2 });
+  const context = await browser.newContext({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 2, hasTouch: true });
+  // A pad the test controls, read by the game through the real Gamepad API path.
+  await context.addInitScript(() => {
+    window.gojePad = null;
+    Object.defineProperty(Navigator.prototype, "getGamepads", { configurable: true, value: () => [window.gojePad, null, null, null] });
+  });
+  const page = await context.newPage();
   try {
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
@@ -489,7 +495,7 @@ async function smokeOutpost(browser, url) {
     const canvas = page.locator("#goje");
     const scout = [80, 160, 255], guard = [232, 84, 84], bolt = [255, 255, 190];
     const healthy = [96, 220, 96], loud = [255, 96, 200];
-    const selection = [255, 235, 87], destination = [116, 246, 144];
+    const selection = [255, 235, 87], destination = [116, 246, 144], border = [196, 206, 228];
     const text = [255, 255, 255], recording = [255, 96, 96];
     const scale = 4;
     /** @returns {Promise<PNG>} The presented frame. */
@@ -523,11 +529,16 @@ async function smokeOutpost(browser, url) {
     };
     const scouts = [[0.5, 1.5], [0.5, 3.5], [0.5, 5.5], [0.5, 7.5], [1.5, 2.5], [1.5, 6.5]];
     const guards = [[9.5, 1.5], [9.5, 3.5], [9.5, 5.5], [9.5, 7.5], [10.5, 2.5], [10.5, 6.5]];
-    /** @param {PNG} frame - Decoded screenshot. @returns {boolean} Whether all twelve units are drawn at full health. */
-    const atSpawn = frame => [[scouts, scout], [guards, guard]].every(([list, color]) => list.every(([x, y]) => {
+    /**
+     * Fog of war hides the guards, whose ground is unexplored at the start.
+     * @param {PNG} frame - Decoded screenshot.
+     * @returns {boolean} Whether the six scouts are drawn at full health and no guard is drawn.
+     */
+    const atSpawn = frame => scouts.every(([x, y]) => {
       const [sx, sy] = screen(x, y);
-      return is(frame, [sx, sy - 7], color) && is(frame, [sx - 5, sy - 17], healthy);
-    })) && count(frame, loud) === 0;
+      return is(frame, [sx, sy - 7], scout) && is(frame, [sx - 5, sy - 17], healthy);
+    }) && guards.every(([x, y]) => is(frame, screen(x, y), [20, 28, 41])) && count(frame, guard) === 0 &&
+      count(frame, loud) === 0;
     /** @param {PNG} frame - Decoded screenshot. @param {number[][]} list - Ground positions. @returns {number} Markers over them. */
     const marked = (frame, list) => list.filter(([x, y]) => {
       const [sx, sy] = screen(x, y);
@@ -661,7 +672,10 @@ async function smokeOutpost(browser, url) {
     await until("destination markers", frame => count(frame, destination) > 0);
     const seen = { alarm: false, bolt: false };
     for (let i = 0; i < 900 && !(seen.alarm && seen.bolt); i++) {
-      if (i % 60 === 59) await page.keyboard.press("f");
+      // With fog the guards wake only when seen, and the attack-move stops for them, so first send
+      // the scouts onto the alarm line in the middle of the board, and focus fire once it has rung.
+      if (i === 0) await click(...screen(5.5, 4.5), { button: "right" });
+      if (seen.alarm && i % 60 === 59) await page.keyboard.press("f");
       const frame = await step();
       seen.alarm ||= count(frame, loud) > 0;
       seen.bolt ||= count(frame, bolt) >= 16;
@@ -684,7 +698,7 @@ async function smokeOutpost(browser, url) {
     await press("Escape");
     await park();
     await until("the pause menu", frame => count(frame, text) > 0);
-    await click(160, 131); // Quit to title.
+    await click(160, 145); // Quit to title.
     await until("the title again", frame => count(frame, text) >= 100 && count(frame, guard) === 0);
     assert.deepEqual(await stored(), ["goje/outpost/last", "goje/outpost/save"], "Quitting must keep the recording");
     await click(160, 132); // Watch last replay.
@@ -699,9 +713,38 @@ async function smokeOutpost(browser, url) {
     for (const color of [scout, guard, selection, bolt]) {
       assert.equal(count(final, color), count(lastFrame, color), `The replay ended with a different count of ${color}`);
     }
+    // Leave the replay and start a new match, then drive it by touch and by a pad. A tap on the
+    // bare ground shows the touch buttons, and the pad's Start button opens and closes the pause menu.
+    await press("Escape");
+    await until("the title after the replay", frame => count(frame, text) >= 100);
+    await click(160, 100);
+    await until("a new match", atSpawn);
+    const cdp = await context.newCDPSession(page);
+    const [touchX, touchY] = await at(20, 20);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: touchX, y: touchY, id: 0 }] });
+    await settle();
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await settle();
+    await until("the touch buttons", frame => is(frame, [1, 166], border));
+    /** @param {number[]} pressed - Standard button indexes that are down. @returns {Promise<void>} Resolves once the fake pad is set. */
+    const pad = pressed => page.evaluate(down => {
+      window.gojePad = {
+        connected: true, id: "fake", index: 0, mapping: "standard", timestamp: 0, axes: [0, 0, 0, 0],
+        buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: down.includes(i), touched: false, value: down.includes(i) ? 1 : 0 })),
+      };
+    }, pressed);
+    const beforePad = count(await shoot(), text);
+    await pad([9]);
+    await settle();
+    await pad([]);
+    await until("the pause menu opened by the pad", frame => count(frame, text) > beforePad + 100);
+    await pad([9]);
+    await settle();
+    await pad([]);
+    await until("the match resumed by the pad", frame => count(frame, text) <= beforePad + 100);
     assert.deepEqual(errors, []);
   } finally {
-    await page.close();
+    await context.close();
   }
 }
 

@@ -52,8 +52,9 @@ type Bolt struct {
 func (s *Sim) Bolts() []Bolt { return s.bolts }
 
 // nearest finds the living enemy of u whose center is within radius, preferring
-// the closest and then the lowest ID. It returns the squared distance in raw units.
-func (s *Sim) nearest(u *Unit, radius fixed.Num) (*Unit, int64, bool) {
+// the closest and then the lowest ID. It returns the squared distance in raw
+// units. With sighted, and vision on, it ignores enemies u's team does not see.
+func (s *Sim) nearest(u *Unit, radius fixed.Num, sighted bool) (*Unit, int64, bool) {
 	c := u.Center()
 	query := fixed.Rect{
 		Min: fixed.Vec2{X: c.X.Sub(radius), Y: c.Y.Sub(radius)},
@@ -65,7 +66,7 @@ func (s *Sim) nearest(u *Unit, radius fixed.Num) (*Unit, int64, bool) {
 	limit := int64(radius) * int64(radius)
 	for _, id := range s.ids {
 		t := &s.units[s.index[id]]
-		if t.Team == u.Team || t.HP <= 0 {
+		if t.Team == u.Team || t.HP <= 0 || (sighted && !s.sees(u, t)) {
 			continue
 		}
 		tc := t.Center()
@@ -82,6 +83,11 @@ func (s *Sim) nearest(u *Unit, radius fixed.Num) (*Unit, int64, bool) {
 // scout is in weapon range, and goes back to its post when none is within the
 // leash. A guard carrying an attack or attack-move order follows the order
 // instead and returns to the AI when the order ends.
+//
+// With vision on, a guard that is not alarmed considers only scouts within the
+// leash in cells its team sees, so it wakes when its team sees a scout, and
+// any guard stops walking for a scout in range only while it is in sight. An
+// alarmed guard still hunts the nearest scout at any distance without sight.
 func (s *Sim) decide() {
 	whole := fixed.FromInt(max(s.width, s.height))
 	for i := range s.units {
@@ -93,10 +99,10 @@ func (s *Sim) decide() {
 		switch {
 		case u.alarmed:
 			radius = whole
-		case u.chasing:
+		case u.chasing || s.radius != 0:
 			radius = leash
 		}
-		target, d2, ok := s.nearest(u, radius)
+		target, d2, ok := s.nearest(u, radius, !u.alarmed)
 		if !ok {
 			if u.chasing {
 				s.finish(u)
@@ -105,7 +111,7 @@ func (s *Sim) decide() {
 			continue
 		}
 		u.chasing = true
-		if d2 <= int64(weaponRange)*int64(weaponRange) {
+		if d2 <= int64(weaponRange)*int64(weaponRange) && s.sees(u, target) {
 			s.finish(u)
 			continue
 		}
@@ -134,6 +140,7 @@ func (s *Sim) reportTriggers() {
 			continue
 		}
 		s.alarm = true
+		s.report(EventAlarm, &s.units[s.index[e.Body]])
 		for i := range s.units {
 			if u := &s.units[i]; u.Alive && u.Team == Guards {
 				u.alarmed = true
@@ -165,14 +172,15 @@ func (s *Sim) fire() {
 	}
 }
 
-// weaponTarget picks whom u shoots at this tick.
+// weaponTarget picks whom u shoots at this tick. With vision on, a target must
+// stand in a cell u's team sees.
 func (s *Sim) weaponTarget(u *Unit) (*Unit, bool) {
 	if u.order != Attack {
-		t, _, ok := s.nearest(u, weaponRange)
+		t, _, ok := s.nearest(u, weaponRange, true)
 		return t, ok
 	}
 	t := &s.units[s.index[u.target]]
-	return t, t.Alive && t.HP > 0 && inRange(u, t)
+	return t, t.Alive && t.HP > 0 && inRange(u, t) && s.sees(u, t)
 }
 
 // spawn fires a bolt from u toward target. A bolt that starts on a wall or unit
@@ -186,6 +194,7 @@ func (s *Sim) spawn(u, target *Unit) {
 	at := u.Center().Add(aim.WithLength(muzzle))
 	half := boltSize / 2
 	s.boltSeq++
+	s.report(EventBoltFired, u)
 	b := Bolt{
 		Velocity: velocity,
 		Life:     boltLife,
@@ -256,6 +265,7 @@ func (s *Sim) flyBolts() error {
 func (s *Sim) hurt(id uint64) {
 	if i, ok := s.index[id]; ok {
 		s.units[i].HP -= weaponDamage
+		s.report(EventBoltHit, &s.units[i])
 	}
 }
 
@@ -268,6 +278,7 @@ func (s *Sim) reap() {
 			continue
 		}
 		u.Alive = false
+		s.report(EventUnitFell, u)
 		s.bodies.Remove(u.ID)
 		u.route, u.next = u.route[:0], 0
 		u.order, u.target = Move, 0
@@ -314,6 +325,18 @@ func (s *Sim) fold() {
 		h = mixInt(h, int64(b.Body.Footprint.Min.X))
 		h = mixInt(h, int64(b.Body.Footprint.Min.Y))
 		h = mixInt(h, int64(b.Life))
+	}
+	// Vision state joins the trace only when vision is on, so histories
+	// without it keep their M13 and M14 traces.
+	if s.radius != 0 {
+		for _, w := range s.explored {
+			h = mix(h, w)
+		}
+		for i := range s.units {
+			if u := &s.units[i]; u.order == Attack {
+				h = mixInt(h, int64(u.lastSeen))
+			}
+		}
 	}
 	s.trace = h
 }

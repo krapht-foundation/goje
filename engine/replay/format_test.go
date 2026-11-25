@@ -94,14 +94,18 @@ func TestFormatRoundTrip(t *testing.T) {
 }
 
 func exactInput(a, b engine.Input) bool {
-	bits := func(in engine.Input) [10]uint64 {
-		return [10]uint64{
+	bits := func(in engine.Input) [20]uint64 {
+		b := [20]uint64{
 			math.Float64bits(in.Pointer.X), math.Float64bits(in.Pointer.Y),
 			math.Float64bits(in.PrimaryPress.X), math.Float64bits(in.PrimaryPress.Y),
 			math.Float64bits(in.SecondaryPress.X), math.Float64bits(in.SecondaryPress.Y),
 			math.Float64bits(in.PrimaryRelease.X), math.Float64bits(in.PrimaryRelease.Y),
 			math.Float64bits(in.SecondaryRelease.X), math.Float64bits(in.SecondaryRelease.Y),
 		}
+		for i, touch := range in.Touches {
+			b[10+2*i], b[11+2*i] = math.Float64bits(touch.X), math.Float64bits(touch.Y)
+		}
+		return b
 	}
 	a2, b2 := a, b
 	for _, in := range []*engine.Input{&a2, &b2} {
@@ -110,22 +114,106 @@ func exactInput(a, b engine.Input) bool {
 		in.SecondaryPress.X, in.SecondaryPress.Y = 0, 0
 		in.PrimaryRelease.X, in.PrimaryRelease.Y = 0, 0
 		in.SecondaryRelease.X, in.SecondaryRelease.Y = 0, 0
+		for i := range in.Touches {
+			in.Touches[i].X, in.Touches[i].Y = 0, 0
+		}
 	}
 	return a2 == b2 && bits(a) == bits(b)
 }
 
+// listRecording uses touches and gamepads, with the touch coordinates that
+// ordinary equality would merge or lose.
+func listRecording() *replay.Recording {
+	negZero := math.Copysign(0, -1)
+	nan := math.Float64frombits(0x7ff8000000000001)
+	touches := engine.Input{PrimaryHeld: true}
+	touches.Touches[0] = engine.Touch{ID: 7, X: negZero, Y: nan, Active: true}
+	touches.Touches[1] = engine.Touch{ID: 1 << 31, Active: true}
+	pads := engine.Input{Held: engine.KeyA}
+	pads.Gamepads[1] = engine.Gamepad{Connected: true}
+	pads.Gamepads[3] = engine.Gamepad{
+		Connected: true, Buttons: engine.GamepadSouth | engine.GamepadRight,
+		LeftX: -127, LeftY: 127, RightX: -1, RightY: 1, LeftTrigger: 255, RightTrigger: 1,
+	}
+	both := pads
+	var id uint32
+	for i := range engine.MaxTouches {
+		id++
+		both.Touches[i] = engine.Touch{ID: id, X: float64(i), Y: 2, Active: true}
+	}
+	both.Gamepads[0] = engine.Gamepad{Connected: true, LeftY: -64}
+	return &replay.Recording{
+		Meta:     meta,
+		Interval: replay.CheckpointInterval,
+		Runs: []replay.Run{
+			{Input: touches, Ticks: 2}, {Input: pads, Ticks: 1}, {Input: both, Ticks: 3}, {Ticks: 1},
+		},
+		Checkpoints: []replay.Checkpoint{{Tick: 7, Hash: 3}},
+	}
+}
+
+func TestTouchAndGamepadRoundTrip(t *testing.T) {
+	want := listRecording()
+	data, err := replay.Encode(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := replay.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Runs) != len(want.Runs) {
+		t.Fatalf("decoded %d runs", len(got.Runs))
+	}
+	for i := range want.Runs {
+		g, w := got.Runs[i], want.Runs[i]
+		if g.Ticks != w.Ticks || !exactInput(g.Input, w.Input) {
+			t.Errorf("run %d = %+v, want %+v", i, g, w)
+		}
+	}
+	again, err := replay.Encode(got)
+	if err != nil || !bytes.Equal(again, data) {
+		t.Fatalf("re-encoding differs: %v", err)
+	}
+	for n := range len(data) {
+		if _, err := replay.Decode(data[:n]); err == nil {
+			t.Errorf("accepted a %d byte prefix", n)
+		}
+	}
+	// A touch differing only in the sign of zero starts a new run.
+	changed := listRecording()
+	changed.Runs[0].Input.Touches[0].X = 0
+	changed.Runs = append(changed.Runs[:1], replay.Run{Input: want.Runs[0].Input, Ticks: 1})
+	changed.Checkpoints = nil
+	if _, err := replay.Encode(changed); err != nil {
+		t.Errorf("touches that differ in the sign of zero were merged: %v", err)
+	}
+}
+
 func TestEncodeRejects(t *testing.T) {
 	for name, edit := range map[string]func(*replay.Recording){
-		"bad game":             func(r *replay.Recording) { r.Game = "Bad" },
-		"zero interval":        func(r *replay.Recording) { r.Interval = 0 },
-		"large interval":       func(r *replay.Recording) { r.Interval = 1 << 16 },
-		"large start":          func(r *replay.Recording) { r.Start = make([]byte, replay.MaxStartSize+1) },
-		"empty run":            func(r *replay.Recording) { r.Runs[0].Ticks = 0 },
-		"too many ticks":       func(r *replay.Recording) { r.Runs[0].Ticks = replay.MaxTicks },
-		"unknown held key":     func(r *replay.Recording) { r.Runs[0].Input.Held = engine.Key9 << 1 },
-		"unknown pressed key":  func(r *replay.Recording) { r.Runs[0].Input.Pressed = 1 << 31 },
-		"same adjacent runs":   func(r *replay.Recording) { r.Runs[1].Input = r.Runs[0].Input },
-		"checkpoint order":     func(r *replay.Recording) { r.Checkpoints[1].Tick = 2 },
+		"bad game":            func(r *replay.Recording) { r.Game = "Bad" },
+		"zero interval":       func(r *replay.Recording) { r.Interval = 0 },
+		"large interval":      func(r *replay.Recording) { r.Interval = 1 << 16 },
+		"large start":         func(r *replay.Recording) { r.Start = make([]byte, replay.MaxStartSize+1) },
+		"empty run":           func(r *replay.Recording) { r.Runs[0].Ticks = 0 },
+		"too many ticks":      func(r *replay.Recording) { r.Runs[0].Ticks = replay.MaxTicks },
+		"unknown held key":    func(r *replay.Recording) { r.Runs[0].Input.Held = engine.Key9 << 1 },
+		"unknown pressed key": func(r *replay.Recording) { r.Runs[0].Input.Pressed = 1 << 31 },
+		"same adjacent runs":  func(r *replay.Recording) { r.Runs[1].Input = r.Runs[0].Input },
+		"checkpoint order":    func(r *replay.Recording) { r.Checkpoints[1].Tick = 2 },
+		"inactive touch with data": func(r *replay.Recording) {
+			r.Runs[0].Input.Touches[2].X = math.Copysign(0, -1)
+		},
+		"active touch after inactive": func(r *replay.Recording) {
+			r.Runs[0].Input.Touches[1] = engine.Touch{ID: 1, Active: true}
+		},
+		"active touch without ID": func(r *replay.Recording) {
+			r.Runs[0].Input.Touches[0] = engine.Touch{X: 1, Active: true}
+		},
+		"disconnected pad with data": func(r *replay.Recording) {
+			r.Runs[0].Input.Gamepads[3].Buttons = engine.GamepadStart
+		},
 		"checkpoint zero":      func(r *replay.Recording) { r.Checkpoints[0].Tick = 0 },
 		"checkpoint past end":  func(r *replay.Recording) { r.Checkpoints[2].Tick = 8 },
 		"checkpoint off cycle": func(r *replay.Recording) { r.Checkpoints[1].Tick = 5 },
@@ -187,7 +275,6 @@ func TestDecodeRejects(t *testing.T) {
 			return b
 		}, "exceed the limits or the data"},
 		"tick sum":          {put32(offTicks, 6), "header says 6"},
-		"unknown flag":      {func(b []byte) []byte { b[offFirstRun+1] = 0x80; return b }, "unknown flags"},
 		"empty run":         {put32(offFirstRun+2, 0), "tick count 0"},
 		"checkpoints count": {put32(checkpointsAt, 5), "checkpoints exceed"},
 		"checkpoint order":  {put32(checkpointsAt+4+12, 2), "out of order"},
@@ -225,17 +312,41 @@ func TestDecodeRejectsNonCanonicalRuns(t *testing.T) {
 		data = append(data, payload...)
 		return binary.LittleEndian.AppendUint32(data, 0)
 	}
-	if _, err := replay.Decode(run(1 << 12)); err != nil {
-		t.Fatalf("valid run rejected: %v", err)
+	const touches, pads = 1 << 14, 1 << 15
+	// pad is a resting pad entry in a slot; touch is a touch entry at (0, 0).
+	pad := func(slot byte) []byte { return []byte{slot, 0, 0, 0, 0, 0, 0, 0, 0} }
+	touch := func(id byte) []byte { return append([]byte{id, 0, 0, 0}, make([]byte, 16)...) }
+	list := func(count byte, entries ...[]byte) []byte {
+		return append([]byte{count}, bytes.Join(entries, nil)...)
+	}
+	for _, data := range [][]byte{
+		run(1 << 12),
+		run(touches, list(1, touch(1))...),
+		run(pads, list(2, pad(0), pad(3))...),
+		run(touches|pads, append(list(1, touch(9)), list(1, pad(2))...)...),
+	} {
+		if _, err := replay.Decode(data); err != nil {
+			t.Fatalf("valid run rejected: %v", err)
+		}
 	}
 	for name, tc := range map[string]struct {
 		data []byte
 		want string
 	}{
-		"held zero":    {run(1, 0, 0, 0, 0), "held keys flagged but empty"},
-		"pressed zero": {run(2, 0, 0, 0, 0), "pressed keys flagged but empty"},
-		"pointer zero": {run(4, make([]byte, 16)...), "coordinates flagged but zero"},
-		"unknown key":  {run(1, 0, 0, 0, 2), "unknown key bits"},
+		"held zero":        {run(1, 0, 0, 0, 0), "held keys flagged but empty"},
+		"pressed zero":     {run(2, 0, 0, 0, 0), "pressed keys flagged but empty"},
+		"pointer zero":     {run(4, make([]byte, 16)...), "coordinates flagged but zero"},
+		"unknown key":      {run(1, 0, 0, 0, 2), "unknown key bits"},
+		"no touches":       {run(touches, 0), "touch count 0"},
+		"too many touches": {run(touches, 6), "touch count 6"},
+		"inactive touch":   {run(touches, list(2, touch(1), touch(0))...), "touch 1 is inactive"},
+		"no pads":          {run(pads, 0), "gamepad count 0"},
+		"too many pads":    {run(pads, 5), "gamepad count 5"},
+		"pad out of range": {run(pads, list(1, pad(4))...), "gamepad slot 4"},
+		"pad listed twice": {run(pads, list(2, pad(1), pad(1))...), "gamepad slot 1"},
+		"pads out of order": {
+			run(pads, list(2, pad(2), pad(1))...), "gamepad slot 1",
+		},
 	} {
 		if _, err := replay.Decode(tc.data); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want %q", name, err, tc.want)
@@ -250,6 +361,11 @@ func FuzzDecode(f *testing.F) {
 	}
 	f.Add(valid)
 	f.Add(b0())
+	lists, err := replay.Encode(listRecording())
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(lists)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		rec, err := replay.Decode(data)
 		if err != nil {

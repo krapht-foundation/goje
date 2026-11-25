@@ -51,7 +51,7 @@ test: ## Run headless Go tests
 
 test-wasm: ## Run the simulation tests as WebAssembly under Node
 	GOOS=js GOARCH=wasm $(GO) test -exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" \
-		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./font ./ui ./engine/replay ./engine/save ./cmd/playground
+		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./font ./ui ./engine/replay ./engine/save ./engine ./engine/vision ./audio ./internal/sound ./cmd/playground
 
 test-race: ## Run Go tests with the native race detector
 	$(GO) test -race ./...
@@ -171,7 +171,7 @@ smoke-sprite-roundtrip: build-pixel-art build-sprite-editor ## Paint, animate, a
 		png="$$tmp/tomato.png"; \
 		$(GO) run ./cmd/spritecheck "$$png" "$$tmp/tomato.json"; \
 		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/courtyard/"; \
-		cp -R cmd/playground/levels cmd/playground/art "$$tmp/courtyard/"; \
+		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/courtyard/"; \
 		cp examples/beacon/*.go "$$tmp/beacon/"; \
 		cp -R examples/beacon/assets "$$tmp/beacon/"; \
 		for assets in "$$tmp/courtyard/art" "$$tmp/beacon/assets"; do \
@@ -194,7 +194,7 @@ smoke-level-roundtrip: build-level-editor build-tile-maker ## Play both browser 
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
 		mkdir -p "$$tmp/playground" "$$tmp/web"; \
 		cp cmd/playground/*.go "$$tmp/playground/"; \
-		cp -R cmd/playground/levels cmd/playground/art "$$tmp/playground/"; \
+		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/playground/"; \
 		printf '%s\n' '{"version":1,"level":"levels/edited.json","ground":"art/edited.png"}' > "$$tmp/playground/goje.json"; \
 		tile="$$tmp/playground/art/edited.png"; \
 		$(NODE) scripts/smoke-tile-maker.mjs "$$tile"; \
@@ -215,7 +215,7 @@ smoke-zone-roundtrip: build-level-editor ## Author the yard's zones in the Level
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
 		mkdir -p "$$tmp/playground" "$$tmp/web"; \
 		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/playground/"; \
-		cp -R cmd/playground/levels cmd/playground/art "$$tmp/playground/"; \
+		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/playground/"; \
 		level="$$tmp/playground/levels/yard.json"; \
 		rm "$$level"; \
 		$(NODE) scripts/smoke-zone-editor.mjs "$$level"; \
@@ -232,7 +232,7 @@ smoke-outpost-roundtrip: build-level-editor ## Author the outpost's placements a
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
 		mkdir -p "$$tmp/playground" "$$tmp/web"; \
 		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/playground/"; \
-		cp -R cmd/playground/levels cmd/playground/art "$$tmp/playground/"; \
+		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/playground/"; \
 		level="$$tmp/playground/levels/outpost.json"; \
 		rm "$$level"; \
 		$(NODE) scripts/smoke-outpost-editor.mjs "$$level"; \
@@ -283,6 +283,24 @@ smoke-beacon-audio: ## Verify Beacon PCM output on desktop and in Chromium
 		$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1], "--audio"], check=True, timeout=10)' "$$tmp/beacon"; \
 		PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-beacon-audio.mjs "$$tmp"
 
+.PHONY: smoke-input
+smoke-input: build-web ## Drive the input probe with touch and a fake gamepad in Chromium
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-input.mjs
+
+.PHONY: smoke-mixer
+smoke-mixer: ## Compare the Go mixer with the Web Audio graph on the same overlapping cues
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-mixer.mjs
+
+.PHONY: smoke-goje-build
+smoke-goje-build: build-level-editor build-tile-maker ## Build and package Beacon with cmd/goje and play both outputs
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" NODE="$(NODE)" PYTHON="$(PYTHON)" scripts/smoke-goje-build.sh
+
+.PHONY: benchmark-mixer
+benchmark-mixer: ## Measure mixing 16 voices into one 512-frame buffer natively and as WebAssembly under Node
+	$(GO) test -run '^$$' -bench 'MixerRender|Queue' -benchmem ./audio ./internal/sound
+	GOOS=js GOARCH=wasm $(GO) test -run '^$$' -bench 'MixerRender|Queue' -benchmem \
+		-exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" ./audio ./internal/sound
+
 .PHONY: smoke-sound-roundtrip
 smoke-sound-roundtrip: build-sound-maker ## Make a sound in the Sound Maker, then play that download in Beacon on desktop and web
 	@set -eu; mkdir -p "$(BUILD_DIR)"; \
@@ -319,7 +337,8 @@ check-example: ## Build the reference playground from a separate module on deskt
 		cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go "$$tmp/"; \
 		cp cmd/playground/authored.go cmd/playground/yard.go cmd/playground/skirmish.go cmd/playground/goje.json "$$tmp/"; \
 		cp cmd/playground/outpost.go cmd/playground/outpost_app.go cmd/playground/outpost_session.go "$$tmp/"; \
-		cp -R cmd/playground/levels cmd/playground/art "$$tmp/"; \
+		cp cmd/playground/outpost_controls.go cmd/playground/outpost_sounds.go cmd/playground/inputprobe.go "$$tmp/"; \
+		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \
 		$(GO) mod init example.com/playground; \

@@ -4,7 +4,9 @@ package desktop
 
 import (
 	"context"
+	"encoding/binary"
 	"log/slog"
+	"math"
 
 	"github.com/gen2brain/malgo"
 
@@ -20,12 +22,13 @@ type speaker struct {
 	logger  *slog.Logger
 }
 
-// voice is touched only by the miniaudio callback thread after device start.
-type voice struct {
+// mix is touched only by the miniaudio callback thread after device start.
+type mix struct {
 	queue      *sound.Queue
 	clips      []audio.Clip
 	generation uint64
-	active     []byte
+	mixer      audio.Mixer
+	frames     []float32 // grows to the largest callback, then is reused
 }
 
 // openSpeaker starts default output for queue. Without a usable device it logs
@@ -40,13 +43,12 @@ func openSpeaker(ctx context.Context, logger *slog.Logger, queue *sound.Queue) *
 	s := &speaker{context: audioContext, ctx: ctx, logger: logger}
 	config := malgo.DefaultDeviceConfig(malgo.Playback)
 	config.SampleRate = audio.SampleRate
-	config.Playback.Format = malgo.FormatS16
-	config.Playback.Channels = 1
-	v := &voice{queue: queue, clips: queue.Clips(), generation: queue.Generation()}
+	config.Playback.Format = malgo.FormatF32
+	config.Playback.Channels = 2
+	m := &mix{queue: queue, clips: queue.Clips(), generation: queue.Generation()}
 	s.device, err = malgo.InitDevice(audioContext.Context, config, malgo.DeviceCallbacks{
 		Data: func(out, _ []byte, _ uint32) {
-			v.fill(out)
-			probeAudio(out)
+			probeAudio(m.fill(out))
 		},
 	})
 	if err != nil {
@@ -80,19 +82,32 @@ func (s *speaker) close() {
 	s.context.Free()
 }
 
-// fill copies the active cue into out and zero-fills the rest. A generation
-// change (suspension, restart) stops the active cue before taking a new one.
-func (v *voice) fill(out []byte) {
-	if generation := v.queue.Generation(); generation != v.generation {
-		v.generation = generation
-		v.active = nil
+// fill starts the pending requests, mixes the next frames, and writes them to
+// out as little-endian float32 stereo. A generation change (suspension,
+// restart) stops every voice before taking new requests. It returns the mixed
+// frames, which stay valid until the next call.
+func (m *mix) fill(out []byte) []float32 {
+	if generation := m.queue.Generation(); generation != m.generation {
+		m.generation = generation
+		m.mixer.Reset()
 	}
-	if cue, ok := v.queue.Next(); ok {
-		v.active = v.clips[cue].PCM()
+	for range sound.Capacity {
+		r, ok := m.queue.Next()
+		if !ok {
+			break
+		}
+		m.mixer.Start(m.clips[r.Cue], r.Gain, r.Pan)
 	}
-	n := copy(out, v.active)
-	v.active = v.active[n:]
-	clear(out[n:])
+	n := len(out) / 4
+	if cap(m.frames) < n {
+		m.frames = make([]float32, n)
+	}
+	frames := m.frames[:n]
+	m.mixer.Render(frames)
+	for i, sample := range frames {
+		binary.LittleEndian.PutUint32(out[4*i:], math.Float32bits(sample))
+	}
+	return frames
 }
 
 func logAudio(ctx context.Context, logger *slog.Logger, message string, err error) {

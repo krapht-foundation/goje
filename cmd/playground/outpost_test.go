@@ -40,14 +40,19 @@ func newOutpostWorld(tb testing.TB) *outpostWorld {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	return &outpostWorld{board: board, meta: meta, face: font.Builtin(), store: memoryStore{}}
+	return &outpostWorld{
+		board:  board,
+		meta:   meta,
+		face:   font.Builtin(),
+		store:  memoryStore{},
+		volume: 1,
+	}
 }
 
 func newOutpostSession(tb testing.TB) *outpostSession {
 	tb.Helper()
 	world := newOutpostWorld(tb)
-	s := &outpostSession{world: world}
-	s.board = world.board
+	s := world.newSession(nil)
 	if err := s.Enter(); err != nil {
 		tb.Fatal(err)
 	}
@@ -289,13 +294,12 @@ func runOutpost(tb testing.TB, factory engine.SceneFactory, inputs []engine.Inpu
 }
 
 func TestOutpostRecordedMatchWinsAndReplays(t *testing.T) {
-	const wantTrace uint64 = 2740933099236710724
+	const wantTrace uint64 = 3609343579101645234
 	world := newOutpostWorld(t)
 	inputs := outpostScript(t)
 	var last *outpostSession
 	factory := func() engine.Scene {
-		last = &outpostSession{world: world}
-		last.board = world.board
+		last = world.newSession(nil)
 		return last
 	}
 	recorder, err := replay.NewRecorder(world.meta, nil, len(inputs))
@@ -611,9 +615,7 @@ func BenchmarkOutpostReplayVerify(b *testing.B) {
 	world := newOutpostWorld(b)
 	inputs := outpostScript(b)
 	factory := func() engine.Scene {
-		s := &outpostSession{world: world}
-		s.board = world.board
-		return s
+		return world.newSession(nil)
 	}
 	recorder, err := replay.NewRecorder(world.meta, nil, len(inputs))
 	if err != nil {

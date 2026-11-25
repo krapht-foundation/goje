@@ -1,8 +1,10 @@
 // Package sound connects fixed-tick cue requests to host-owned playback.
+// See specs/audio-mixer-m15.md for the queue and host rules.
 package sound
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"sync/atomic"
 
@@ -11,19 +13,23 @@ import (
 
 const (
 	maxClips = 16
-	capacity = 8
+	// Capacity bounds pending requests. A consumer takes at most this many per
+	// pass, so a producer that refills the queue cannot extend a device callback.
+	Capacity = 64
 )
 
-type request struct {
+// Request is one accepted cue with a gain in [0, 1] and a pan in [-1, 1].
+type Request struct {
+	Cue        int
+	Gain, Pan  float32
 	generation uint64
-	cue        int
 }
 
 // Queue has one game-loop producer and one playback consumer. The consumer may
 // be a device callback on another thread. A nil queue represents disabled audio.
 type Queue struct {
 	clips      []audio.Clip
-	pending    chan request
+	pending    chan Request
 	generation atomic.Uint64
 	ready      atomic.Bool
 }
@@ -41,7 +47,7 @@ func New(clips []audio.Clip) (*Queue, error) {
 			return nil, fmt.Errorf("audio cue %d is empty", i)
 		}
 	}
-	return &Queue{clips: slices.Clone(clips), pending: make(chan request, capacity)}, nil
+	return &Queue{clips: slices.Clone(clips), pending: make(chan Request, Capacity)}, nil
 }
 
 // Clips lends the prepared bank. Do not modify its entries or PCM.
@@ -60,33 +66,37 @@ func (q *Queue) Disable() {
 func (q *Queue) Generation() uint64 { return q.generation.Load() }
 
 // Play enqueues a cue without waiting. Invalid cues and overflow are dropped.
-func (q *Queue) Play(cue int) {
+// The gain is clamped to [0, 1] and the pan to [-1, 1], and NaN becomes 0, so
+// both hosts receive the same valid values.
+func (q *Queue) Play(cue int, gain, pan float32) {
 	if cue < 0 || cue >= len(q.clips) || !q.ready.Load() {
 		return
 	}
 	select {
-	case q.pending <- request{generation: q.Generation(), cue: cue}:
+	case q.pending <- Request{
+		Cue: cue, Gain: clamp(gain, 0), Pan: clamp(pan, -1), generation: q.Generation(),
+	}:
 	default:
 	}
 }
 
-// Next takes the latest pending cue. Only the playback consumer calls Next.
-// Older requests in the same batch would be replaced before playing a sample.
-func (q *Queue) Next() (int, bool) {
-	var latest request
-	var found bool
-	// Do not let a concurrently refilling producer extend a device callback.
-	for range len(q.pending) {
+// Next takes the oldest pending request of the current generation and skips
+// requests from before a clear. Only the playback consumer calls Next, at most
+// Capacity times per pass.
+func (q *Queue) Next() (Request, bool) {
+	for {
 		select {
-		case latest = <-q.pending:
-			found = true
+		case r := <-q.pending:
+			if r.generation == q.Generation() {
+				return r, true
+			}
 		default:
+			return Request{}, false
 		}
 	}
-	return latest.cue, found && latest.generation == q.Generation()
 }
 
-// Clear drops pending cues and invalidates the currently playing one. Only the
+// Clear drops pending cues and invalidates the playing voices. Only the
 // game-loop producer calls Clear, so it cannot drain a new generation's cues.
 func (q *Queue) Clear() {
 	q.generation.Add(1)
@@ -96,4 +106,12 @@ func (q *Queue) Clear() {
 		default:
 		}
 	}
+}
+
+// clamp limits v to [low, 1] and maps NaN to 0.
+func clamp(v, low float32) float32 {
+	if math.IsNaN(float64(v)) {
+		return 0
+	}
+	return max(low, min(1, v))
 }

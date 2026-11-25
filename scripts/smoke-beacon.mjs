@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 import { PNG } from "pngjs";
 
 import { serveLevelEditor } from "./level-editor-server.mjs";
-import { servePlayground } from "./playground-server.mjs";
+import { serveAssets, servePlayground } from "./playground-server.mjs";
 import { serveTileMaker } from "./tile-maker-server.mjs";
 
 const sourceLevel = fileURLToPath(new URL("../examples/beacon/assets/arena.json", import.meta.url));
@@ -77,13 +77,27 @@ async function author(output) {
   });
 }
 
+/** @type {Map<string, [string, string]>} Files of a `goje build` web directory. */
+const buildRoutes = new Map([
+  ["/", ["index.html", "text/html; charset=utf-8"]],
+  ["/wasm_exec.js", ["wasm_exec.js", "text/javascript; charset=utf-8"]],
+  ["/game.wasm", ["game.wasm", "application/wasm"]],
+  ["/manifest.webmanifest", ["manifest.webmanifest", "application/manifest+json"]],
+  ["/icon-512.png", ["icon-512.png", "image/png"]],
+]);
+
 /**
  * Exercise rendered content and real input in the browser.
  * @param {string} directory - Static bundle directory.
  * @param {boolean} [sprite=false] - Check only the edited move clip's timing and reset.
+ * @param {boolean} [build=false] - Serve a `goje build` web directory instead of the Beacon page.
  */
-async function play(directory, sprite = false) {
-  await withPage(port => servePlayground(port, directory), async page => {
+async function play(directory, sprite = false, build = false) {
+  // The goje shell's canvas fills the page, so a 5:4 page keeps the 160 × 128 game unletterboxed.
+  const serve = build
+    ? port => serveAssets(port, directory, buildRoutes)
+    : port => servePlayground(port, directory);
+  await withPage(serve, async page => {
     const canvas = page.locator("#goje");
     const inactive = [91, 141, 209, 255], active = [248, 190, 66, 255];
     const background = [20, 28, 41, 255], eye = [244, 241, 235, 255];
@@ -254,7 +268,7 @@ async function play(directory, sprite = false) {
     await frame("the tomato blinking in place", shot => shot.eyes() === null &&
       shot.is(start - 7, ground - 10, lid) && shot.is(start, ground - 1, outline));
     await frame("the tomato reopening its eyes", shot => standing(shot, start));
-  }, { height: 720, clock: true });
+  }, { height: build ? 640 : 720, clock: true });
   console.log(sprite
     ? "Browser Beacon sprite smoke passed: edited hop airborne with cyan paint at motion ticks 13 and 16, " +
       "unpainted planted windup at tick 17, and reset"
@@ -263,8 +277,8 @@ async function play(directory, sprite = false) {
 }
 
 const [mode, directory] = process.argv.slice(2);
-if (!directory || process.argv.length !== 4 || !["author", "play", "sprite"].includes(mode)) {
-  throw new Error("Usage: node scripts/smoke-beacon.mjs author|play|sprite DIRECTORY");
+if (!directory || process.argv.length !== 4 || !["author", "play", "sprite", "build"].includes(mode)) {
+  throw new Error("Usage: node scripts/smoke-beacon.mjs author|play|sprite|build DIRECTORY");
 }
 if (mode === "author") await author(directory);
-else await play(directory, mode === "sprite");
+else await play(directory, mode === "sprite", mode === "build");

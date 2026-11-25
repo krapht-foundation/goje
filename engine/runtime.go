@@ -35,19 +35,30 @@ type Tick struct {
 	sound  SoundOutput
 }
 
-// PlaySound requests a prepared, zero-based cue for this update. Missing
-// devices and dropped cues never affect gameplay. Do not retain the Tick to
-// request sound outside Update.
-func (t Tick) PlaySound(cue int) {
+// PlaySound requests a prepared, zero-based cue at full gain and centered
+// pan for this update. It is PlaySoundAt(cue, 1, 0).
+func (t Tick) PlaySound(cue int) { t.PlaySoundAt(cue, 1, 0) }
+
+// PlaySoundAt requests a prepared, zero-based cue with a gain from 0 to 1 and
+// a pan from -1 (left) to 1 (right); the output clamps other values and treats
+// NaN as 0. Missing devices and dropped cues never affect gameplay. Do not
+// retain the Tick to request sound outside Update. See specs/audio-mixer-m15.md.
+func (t Tick) PlaySoundAt(cue int, gain, pan float32) {
 	if t.sound != nil {
-		t.sound.Play(cue)
+		t.sound.Play(cue, gain, pan)
 	}
 }
 
+// Sound returns this update's sound output, or nil when the runtime has none.
+// A scene that runs a nested Runtime passes it to SetSoundOutput so that the
+// nested scenes are heard.
+func (t Tick) Sound() SoundOutput { return t.sound }
+
 // SoundOutput is the host's nonblocking bridge from simulation to playback.
-// Clear discards pending requests and invalidates the current cue on scene exit.
+// Play enqueues one voice; overlapping voices mix. Clear discards pending
+// requests and stops every playing voice on scene exit.
 type SoundOutput interface {
-	Play(cue int)
+	Play(cue int, gain, pan float32)
 	Clear()
 }
 
@@ -105,8 +116,9 @@ func StartWithLogger(
 	return r, nil
 }
 
-// SetSoundOutput installs the host's sound bridge before the first Step.
-// Headless callers can leave the bridge unset.
+// SetSoundOutput installs the sound bridge for later steps. Hosts call it
+// before the first Step; a scene that runs this runtime nested may pass its
+// Tick.Sound before each Step. Headless callers can leave the bridge unset.
 func (r *Runtime) SetSoundOutput(output SoundOutput) { r.sound = output }
 
 // Step executes one update. A transition happens only after a successful

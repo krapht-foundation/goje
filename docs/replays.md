@@ -87,6 +87,7 @@ func (v *viewer) Update(tick engine.Tick) (engine.Transition, error) {
 	if v.player.Done() {
 		return engine.Transition{}, nil // Show "replay finished" in Draw.
 	}
+	v.playback.SetSoundOutput(tick.Sound()) // Hear the recording, as in play.
 	return engine.Transition{}, v.playback.Step(engine.Input{})
 }
 
@@ -95,7 +96,7 @@ func (v *viewer) Draw(canvas engine.Canvas) { _ = v.playback.Draw(canvas) }
 func (v *viewer) Exit() { _ = v.playback.Stop() }
 ```
 
-A playback error from `Step` then ends the viewer scene, and the outer runtime reports it. A player plays once, so create a new one with `replay.Play` for each viewing. Sounds requested during playback are not played, because the inner runtime has no sound output.
+A playback error from `Step` then ends the viewer scene, and the outer runtime reports it. A player plays once, so create a new one with `replay.Play` for each viewing. Sound is output, so a replay does not record it; playback requests the same sounds as play because it runs the same scene. The inner runtime plays them only through the output that the viewer passes from `Tick.Sound`, and stopping it clears that shared output, as described in the [audio guide](audio.md#nested-runtimes-and-replays).
 
 ## Verify a recording in a test
 

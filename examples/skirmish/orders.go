@@ -47,7 +47,9 @@ type member struct {
 // Command rules. Attack is refused for a dead or unknown target, a target on
 // the unit's own team, and a target out of weapon range that no route reaches.
 // That route, like every later one, treats idle units other than the target
-// as walls. Any order replaces the current one; the hold stance is kept.
+// as walls. With vision on, Attack is also refused for a target that is not in
+// the unit's team's sight. Any order replaces the current one; the hold stance
+// is kept.
 func (s *Sim) Order(id uint64, o Order) bool {
 	u, ok := s.Unit(id)
 	if !ok || !u.Alive {
@@ -62,10 +64,14 @@ func (s *Sim) Order(id uint64, o Order) bool {
 		return true
 	case Attack:
 		t, ok := s.Unit(o.Target)
-		if !ok || !t.Alive || t.Team == u.Team || (!inRange(u, t) && !s.chase(u, t)) {
+		if !ok || !t.Alive || t.Team == u.Team || !s.sees(u, t) ||
+			(!inRange(u, t) && !s.chase(u, t)) {
 			return false
 		}
 		u.order, u.target = Attack, o.Target
+		if s.radius != 0 {
+			u.lastSeen = s.cellOf(t.Center())
+		}
 		return true
 	}
 	return false
@@ -87,7 +93,9 @@ func (s *Sim) SetHold(id uint64, hold bool) bool {
 // attack whose target is gone ends, a unit within weapon range of its target
 // stops, and one out of range routes toward the target's cell when it has no
 // route or every chasePeriod ticks, offset by its ID. A unit that has no route
-// and finds none gives up and stands idle.
+// and finds none gives up and stands idle. With vision on, a unit whose target
+// is out of its team's sight goes to the cell where it last saw the target
+// instead, as lose describes.
 func (s *Sim) pursue() {
 	for i := range s.units {
 		u := &s.units[i]
@@ -95,9 +103,15 @@ func (s *Sim) pursue() {
 			continue
 		}
 		t := &s.units[s.index[u.target]]
+		visible := t.Alive && s.sees(u, t)
+		if visible && s.radius != 0 {
+			u.lastSeen = s.cellOf(t.Center())
+		}
 		switch {
 		case !t.Alive:
 			s.stand(u)
+		case !visible:
+			s.lose(u)
 		case inRange(u, t):
 			if u.Moving() {
 				s.finish(u)

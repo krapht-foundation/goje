@@ -16,6 +16,7 @@ import (
 	"github.com/krapht-foundation/goje/engine/collide"
 	"github.com/krapht-foundation/goje/engine/fixed"
 	"github.com/krapht-foundation/goje/engine/grid"
+	"github.com/krapht-foundation/goje/engine/vision"
 	"github.com/krapht-foundation/goje/level"
 )
 
@@ -78,6 +79,9 @@ type Unit struct {
 	order  OrderKind
 	target uint64
 	hold   bool
+
+	// With vision on, the cell an Attack target was last seen in, or -1.
+	lastSeen int
 }
 
 // Center returns the middle of the unit's footprint in ground tiles.
@@ -123,6 +127,13 @@ type Sim struct {
 	group    []member
 	grouped  []bool // Units already in group, by index.
 	assigned []Assignment
+
+	// Vision, which EnableVision turns on. radius is 0 while it is off.
+	wall     []bool           // Wall cells, the only cells that block sight.
+	radius   int              // Sight radius in cells.
+	sight    [2]*vision.Field // What each team sees, indexed by Team-1.
+	explored []uint64         // Cells a scout has seen, one bit each.
+	happened []Event          // The last Step's events.
 }
 
 // Goal returns the cell the unit's current order ends at.
@@ -164,7 +175,12 @@ func New(board level.Board) (*Sim, error) {
 		group:      make([]member, 0, MaxUnits),
 		grouped:    make([]bool, MaxUnits),
 		assigned:   make([]Assignment, 0, MaxUnits),
+		wall:       make([]bool, w*h),
+		happened:   make([]Event, 0, maxEvents),
 		trace:      fnvOffset,
+	}
+	for c := range s.wall {
+		s.wall[c] = !board.Walkable(c%w, c/w)
 	}
 	s.walk = func(x, y int) bool { c := y*s.width + x; return !s.solid[c] && !s.occ[c] }
 	for _, shape := range solids {
@@ -221,7 +237,7 @@ func (s *Sim) addUnits(board level.Board) error {
 				Vertical:  collide.Interval{Bottom: 0, Top: BodyTop},
 			},
 			route: make([]uint16, 0, s.width*s.height),
-			cell:  cell, heading: cell, goal: -1,
+			cell:  cell, heading: cell, goal: -1, lastSeen: -1,
 		})
 	}
 	// Placements are in file order, so sort by ID to make every loop independent of it.
@@ -348,10 +364,12 @@ func (s *Sim) unmark() {
 
 // Step advances the simulation one tick: guards decide, attack orders pursue
 // their targets, units move in ascending ID order, triggers report, weapons
-// fire, bolts fly, and the dead are removed. An error means a rule was broken,
-// such as two bodies overlapping, and the simulation must be discarded.
+// fire, bolts fly, the dead are removed, and, with vision on, sight is brought
+// up to date. An error means a rule was broken, such as two bodies
+// overlapping, and the simulation must be discarded.
 func (s *Sim) Step() error {
 	s.tick++
+	s.happened = s.happened[:0]
 	s.decide()
 	s.pursue()
 	for i := range s.units {
@@ -367,6 +385,9 @@ func (s *Sim) Step() error {
 		return err
 	}
 	s.reap()
+	if s.radius != 0 {
+		s.see()
+	}
 	s.fold()
 	return nil
 }
@@ -386,8 +407,8 @@ func (s *Sim) walkUnit(u *Unit) error {
 		return nil
 	}
 	if u.order == AttackMove && !u.hold {
-		// An attack-move stops to fight while an enemy is in range.
-		if _, _, ok := s.nearest(u, weaponRange); ok {
+		// An attack-move stops to fight while an enemy is in range and in sight.
+		if _, _, ok := s.nearest(u, weaponRange, true); ok {
 			u.blocked = 0
 			return nil
 		}

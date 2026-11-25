@@ -39,6 +39,7 @@ const (
 	pauseLoad
 	pauseWatch
 	pauseRestart
+	pauseSound
 	pauseQuit
 )
 
@@ -70,14 +71,21 @@ type outpostApp struct {
 	recSeconds int
 	panel      ui.Panel
 	err        error
+
+	sound engine.SoundOutput // This tick's output, or nil. Valid only inside Update.
+	// start is true on the tick a gamepad's Start button goes down, and menuButton
+	// is the touch button that opens the pause menu or leaves a replay.
+	start, prevStart bool
+	menuButton       ui.Button
 }
 
 func newOutpostApp(world *outpostWorld) *outpostApp {
 	style := ui.DefaultStyle()
 	return &outpostApp{
-		world:    world,
-		recLabel: ui.Label{Bounds: image.Rect(240, 0, width, 12), Text: "REC 00:00", Style: style},
-		panel:    ui.Panel{Bounds: image.Rect(0, 0, width, height), Style: style},
+		world:      world,
+		recLabel:   ui.Label{Bounds: image.Rect(240, 0, width, 12), Text: "REC 00:00", Style: style},
+		panel:      ui.Panel{Bounds: image.Rect(0, 0, width, height), Style: style},
+		menuButton: ui.Button{Bounds: image.Rect(276, 14, 318, 26), Style: style},
 	}
 }
 
@@ -104,9 +112,44 @@ func (a *outpostApp) toTitle() {
 func (a *outpostApp) toPause() {
 	a.state = statePaused
 	a.menu = ui.Menu{
-		Bounds: image.Rect(100, 54, 220, 138),
-		Items:  []string{"Resume", "Save", "Load", "Watch replay", "Restart", "Quit to title"},
-		Style:  ui.DefaultStyle(),
+		Bounds: image.Rect(100, 54, 220, 152),
+		Items: []string{
+			"Resume", "Save", "Load", "Watch replay", "Restart", a.soundLabel(), "Quit to title",
+		},
+		Style: ui.DefaultStyle(),
+	}
+}
+
+// soundLabel is the pause menu entry that shows the volume.
+func (a *outpostApp) soundLabel() string {
+	switch a.world.volume {
+	case 0:
+		return "Sound: off"
+	case 1:
+		return "Sound: full"
+	default:
+		return "Sound: half"
+	}
+}
+
+// cycleVolume steps the volume from full to half to off and back. It is a
+// setting of the player, so it is neither recorded nor part of a match.
+func (a *outpostApp) cycleVolume() {
+	switch a.world.volume {
+	case 1:
+		a.world.volume = 0.5
+	case 0.5:
+		a.world.volume = 0
+	default:
+		a.world.volume = 1
+	}
+	a.menu.Items[pauseSound] = a.soundLabel()
+}
+
+// click plays a menu sound.
+func (a *outpostApp) click(cue int) {
+	if a.sound != nil && a.world.volume > 0 {
+		a.sound.Play(cue, a.world.volume, 0)
 	}
 }
 
@@ -116,8 +159,7 @@ func (a *outpostApp) say(text string) { a.notice, a.noticeLeft = text, outpostNo
 func (a *outpostApp) sessionFactory(start []byte) engine.SceneFactory {
 	first := start
 	return func() engine.Scene {
-		s := &outpostSession{world: a.world, restore: first}
-		s.board = a.world.board
+		s := a.world.newSession(first)
 		first = nil // A restart within the recording begins from the level again.
 		a.session = s
 		return s
@@ -262,6 +304,13 @@ func (a *outpostApp) Update(tick engine.Tick) (engine.Transition, error) {
 		a.noticeLeft--
 	}
 	in := tick.Input
+	pad, _ := firstPad(in)
+	padStart := pad.Buttons.Has(engine.GamepadStart)
+	a.start, a.prevStart = padStart && !a.prevStart, padStart
+	a.sound = tick.Sound()
+	if a.match != nil {
+		a.match.SetSoundOutput(a.sound)
+	}
 	var err error
 	switch a.state {
 	case stateTitle:
@@ -278,6 +327,9 @@ func (a *outpostApp) Update(tick engine.Tick) (engine.Transition, error) {
 
 func (a *outpostApp) updateTitle(in engine.Input) error {
 	choice, _ := a.menu.Update(in)
+	if choice >= 0 {
+		a.click(cueClick)
+	}
 	switch choice {
 	case titleStart:
 		return a.begin(nil)
@@ -290,7 +342,9 @@ func (a *outpostApp) updateTitle(in engine.Input) error {
 }
 
 func (a *outpostApp) updatePlaying(in engine.Input) error {
-	if in.Pressed.Has(engine.KeyEscape) && !a.session.cancelable() {
+	touchMenu := a.session.controls.touchUI && a.menuButton.Update(in)
+	if a.start || touchMenu || (in.Pressed.Has(engine.KeyEscape) && !a.session.cancelable()) {
+		a.click(cueClick)
 		a.toPause()
 		return nil
 	}
@@ -313,8 +367,11 @@ func twoDigits(n int) string {
 
 func (a *outpostApp) updatePaused(in engine.Input) error {
 	choice, cancelled := a.menu.Update(in)
-	if cancelled {
+	if cancelled || a.start {
 		choice = pauseResume
+	}
+	if choice >= 0 {
+		a.click(cueClick)
 	}
 	switch choice {
 	case pauseResume:
@@ -335,6 +392,8 @@ func (a *outpostApp) updatePaused(in engine.Input) error {
 			return err
 		}
 		a.state = statePlaying
+	case pauseSound:
+		a.cycleVolume()
 	case pauseQuit:
 		a.toTitle()
 	}
@@ -342,7 +401,7 @@ func (a *outpostApp) updatePaused(in engine.Input) error {
 }
 
 func (a *outpostApp) updateWatching(in engine.Input) error {
-	if in.Pressed.Has(engine.KeyEscape) {
+	if in.Pressed.Has(engine.KeyEscape) || a.start || a.menuButton.Update(in) {
 		a.toTitle()
 		return nil
 	}
@@ -375,9 +434,13 @@ func (a *outpostApp) Draw(canvas engine.Canvas) {
 		face.Draw(canvas, "OUTPOST", 97, 36, 3, white)
 		face.Draw(canvas, "Commands, replays, and saves", 76, 66, 1, skirmishAlarmQuiet)
 		a.menu.Draw(canvas, face)
-		face.Draw(canvas, "Arrows and Enter, or the mouse", 74, 150, 1, skirmishAlarmQuiet)
+		face.Draw(canvas, "Arrows and Enter, a gamepad, or touch", 49, 150, 1, skirmishAlarmQuiet)
 	case statePlaying:
 		a.recLabel.Draw(canvas, face)
+		if a.session.controls.touchUI {
+			a.menuButton.Text = "Menu"
+			a.menuButton.Draw(canvas, face)
+		}
 	case statePaused:
 		a.panel.Draw(canvas)
 		face.Draw(canvas, "PAUSED", 128, 38, 2, white)
@@ -391,6 +454,8 @@ func (a *outpostApp) Draw(canvas engine.Canvas) {
 			label.Text = "REPLAY ENDED"
 		}
 		label.Draw(canvas, face)
+		a.menuButton.Text = "Leave"
+		a.menuButton.Draw(canvas, face)
 		face.Draw(canvas, "Esc leaves the replay", 100, 169, 1, skirmishAlarmQuiet)
 	}
 	if a.noticeLeft > 0 {

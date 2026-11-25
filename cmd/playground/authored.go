@@ -17,7 +17,7 @@ import (
 	"github.com/krapht-foundation/goje/sprite"
 )
 
-//go:embed goje.json levels/*.json art/*.png art/tomato.json
+//go:embed goje.json levels/*.json art/*.png art/tomato.json sounds/*.wav
 var authoredFiles embed.FS
 
 const scoutEdgeTicks = 16

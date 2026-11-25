@@ -30,9 +30,15 @@ type Loop struct {
 	input     engine.Input
 	// at is the last position the pointer had inside the viewport. Release
 	// edges report it, because a drag can end outside the viewport.
-	at        engine.MousePress
-	started   bool
-	suspended bool
+	at engine.MousePress
+	// hosts holds the host's identifier of each finger in input.Touches.
+	hosts [engine.MaxTouches]int
+	// pointerTouch is the ID of the finger that drives the pointer, or 0.
+	// lastTouch is the ID given to the latest finger; it restarts when every
+	// finger has lifted.
+	pointerTouch, lastTouch uint32
+	started                 bool
+	suspended               bool
 }
 
 // Frame computes the update budget from a nonnegative monotonic timestamp
@@ -151,6 +157,103 @@ func (l *Loop) ReleaseSecondary() {
 	l.input.SecondaryHeld = false
 	if !l.input.SecondaryRelease.Valid {
 		l.input.SecondaryRelease = l.at
+	}
+}
+
+// TouchDown records a finger that landed inside the viewport. host is the
+// host's identifier for the finger, such as a pointer ID, and x and y are
+// logical viewport pixels. A finger that lands while no other finger is down
+// drives the pointer and presses the primary button like PressPrimary. A finger
+// beyond engine.MaxTouches, or one the loop already tracks, is ignored.
+func (l *Loop) TouchDown(host int, x, y float64) {
+	n := l.touchCount()
+	if l.suspended || n == engine.MaxTouches || l.touch(host) >= 0 {
+		return
+	}
+	if n == 0 {
+		l.lastTouch = 0
+	}
+	l.lastTouch++
+	l.input.Touches[n] = engine.Touch{ID: l.lastTouch, X: x, Y: y, Active: true}
+	l.hosts[n] = host
+	if n == 0 {
+		l.pointerTouch = l.lastTouch
+		l.PressPrimary(x, y)
+	}
+}
+
+// TouchMove records the motion of a tracked finger. Inside is false when the
+// finger is outside the viewport; the touch then keeps its last position
+// inside, and the pointer, if the finger drives it, leaves the viewport as
+// MovePointer describes.
+func (l *Loop) TouchMove(host int, x, y float64, inside bool) {
+	i := l.touch(host)
+	if i < 0 {
+		return
+	}
+	t := &l.input.Touches[i]
+	if inside {
+		t.X, t.Y = x, y
+	}
+	if t.ID == l.pointerTouch {
+		l.MovePointer(x, y, inside)
+	}
+}
+
+// TouchUp removes a lifted finger. If it drives the pointer, it releases the
+// primary button like ReleasePrimary, and the fingers still down drive nothing
+// until every finger has lifted.
+func (l *Loop) TouchUp(host int) { l.lift(host, true) }
+
+// TouchCancel removes a finger whose gesture the platform took over. It is
+// TouchUp without a release edge, so a drag it drives is cancelled.
+func (l *Loop) TouchCancel(host int) { l.lift(host, false) }
+
+func (l *Loop) lift(host int, release bool) {
+	i := l.touch(host)
+	if i < 0 {
+		return
+	}
+	if l.input.Touches[i].ID == l.pointerTouch {
+		l.pointerTouch = 0
+		if release {
+			l.ReleasePrimary()
+		} else {
+			l.input.PrimaryHeld = false
+		}
+	}
+	// Close the gap so active touches stay first and in landing order.
+	copy(l.input.Touches[i:], l.input.Touches[i+1:])
+	copy(l.hosts[i:], l.hosts[i+1:])
+	l.input.Touches[engine.MaxTouches-1] = engine.Touch{}
+}
+
+func (l *Loop) touchCount() int {
+	for i, t := range l.input.Touches {
+		if !t.Active {
+			return i
+		}
+	}
+	return engine.MaxTouches
+}
+
+// touch returns the index of the tracked finger with the host identifier, or -1.
+func (l *Loop) touch(host int) int {
+	for i := range l.touchCount() {
+		if l.hosts[i] == host {
+			return i
+		}
+	}
+	return -1
+}
+
+// SetGamepad records the state of the pad in a slot from 0 to
+// engine.MaxGamepads-1, as NormalizeGamepad returns it, or the zero value for
+// a slot without a standard pad. Hosts call it for every slot once per
+// presentation, before the updates of that frame run.
+func (l *Loop) SetGamepad(slot int, pad engine.Gamepad) {
+	if !l.suspended {
+		l.input.Gamepads[slot] = pad
 	}
 }
 

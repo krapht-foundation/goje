@@ -34,8 +34,11 @@ func (c *counter) Enter() error {
 
 func (c *counter) Update(tick engine.Tick) (engine.Transition, error) {
 	in := tick.Input
+	// The touch and pad terms are zero without those fields, so recordings
+	// made before them keep their checkpoint hashes.
 	c.state = c.state*1099511628211 ^ uint64(in.Held)<<32 ^ uint64(in.Pressed) ^
-		math.Float64bits(in.Pointer.X) ^ math.Float64bits(in.PrimaryRelease.Y)>>1
+		math.Float64bits(in.Pointer.X) ^ math.Float64bits(in.PrimaryRelease.Y)>>1 ^
+		math.Float64bits(in.Touches[0].Y)>>2 ^ uint64(in.Gamepads[1].LeftTrigger)<<40
 	switch {
 	case in.Pressed.Has(engine.Key1):
 		return engine.Transition{}, errors.New("scripted failure")
@@ -185,6 +188,50 @@ func TestRecordPlayAndDetectChangedInput(t *testing.T) {
 	err = replay.Verify(factory, withInputs(rec, inputs), meta)
 	if !errors.As(err, &divergence) || divergence.Tick != 120 {
 		t.Fatalf("changed input at tick 70: got %v, want divergence at tick 120", err)
+	}
+}
+
+// listScript is script with touches and a gamepad.
+func listScript(ticks int) []engine.Input {
+	inputs := script(ticks)
+	for i := range inputs {
+		in := &inputs[i]
+		if i%9 < 4 {
+			in.Touches[0] = engine.Touch{ID: 1, X: float64(i), Y: float64(i) / 2, Active: true}
+		}
+		if i%9 == 2 {
+			in.Touches[1] = engine.Touch{ID: 2, X: 0.25, Y: -1, Active: true}
+		}
+		if i%17 < 8 {
+			in.Gamepads[1] = engine.Gamepad{Connected: true, LeftY: -100, RightTrigger: 200}
+			if i%5 == 0 {
+				in.Gamepads[1].Buttons = engine.GamepadSouth | engine.GamepadUp
+			}
+		}
+	}
+	return inputs
+}
+
+func TestRecordTouchesAndGamepadsIsPinned(t *testing.T) {
+	factory := func() engine.Scene { return &hashed{} }
+	inputs := listScript(150)
+	rec := record(t, factory, inputs, nil)
+	// Pinned so that native and WebAssembly runs record the same bytes.
+	data, err := replay.Encode(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := replay.ContentHash(data); got != 0xcdfcb7338151b3f6 {
+		t.Errorf("recording hash = %#x", got)
+	}
+	if err = replay.Verify(factory, rec, meta); err != nil {
+		t.Fatal(err)
+	}
+	inputs[69].Gamepads[1].LeftTrigger = 1
+	var divergence *replay.DivergenceError
+	err = replay.Verify(factory, withInputs(rec, inputs), meta)
+	if !errors.As(err, &divergence) || divergence.Tick != 120 {
+		t.Fatalf("changed pad at tick 70: got %v, want divergence at tick 120", err)
 	}
 }
 
@@ -422,6 +469,12 @@ func TestRecorderStopsAtSizeLimit(t *testing.T) {
 			PrimaryRelease:   p,
 			SecondaryRelease: p,
 		}
+		for j := range in.Touches {
+			in.Touches[j] = engine.Touch{ID: 9, X: float64(i), Y: 3, Active: true}
+		}
+		for j := range in.Gamepads {
+			in.Gamepads[j] = engine.Gamepad{Connected: true, Buttons: engine.GamepadSouth}
+		}
 		if err = runtime.Step(in); err != nil {
 			t.Fatal(err)
 		}
@@ -434,7 +487,8 @@ func TestRecorderStopsAtSizeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data) > replay.MaxEncodedSize || len(data) < replay.MaxEncodedSize-200 {
+	// The recorder reserves one largest run and two checkpoints, 256 bytes.
+	if len(data) > replay.MaxEncodedSize || len(data) < replay.MaxEncodedSize-256 {
 		t.Fatalf("encoded %d bytes, want just under %d", len(data), replay.MaxEncodedSize)
 	}
 }

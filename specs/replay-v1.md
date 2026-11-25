@@ -48,14 +48,18 @@ A run is a number of consecutive ticks with the same `engine.Input`. It starts w
 | 11 | `SecondaryRelease.Valid`. | None. |
 | 12 | `PrimaryHeld`. | None. |
 | 13 | `SecondaryHeld`. | None. |
+| 14 | At least one touch is active (M15). | 1 byte, the count `n` of active touches, 1–5, then `n` entries of 20 bytes each: the 4-byte `ID`, then the 8-byte `X` and `Y`. |
+| 15 | At least one gamepad is connected (M15). | 1 byte, the count `m` of connected pads, 1–4, then `m` entries of 9 bytes each: the 1-byte slot, the 2-byte `Buttons`, and one byte each for `LeftX`, `LeftY`, `RightX`, `RightY`, `LeftTrigger`, and `RightTrigger`. |
 
-Bits 14 and 15 are zero. A coordinate is the 8-byte IEEE 754 bit pattern of the `float64`, so playback reproduces the exact value on every target, including the sign of zero and the payload of a NaN. Coordinates are present exactly when at least one of the two values has a nonzero bit pattern, so a pair of `+0` values is never written and `-0` is. Key bits are the `engine.Keys` values; bits above `Key9`, bit 24, are not defined.
+A coordinate is the 8-byte IEEE 754 bit pattern of the `float64`, so playback reproduces the exact value on every target, including the sign of zero and the payload of a NaN. Coordinates are present exactly when at least one of the two values has a nonzero bit pattern, so a pair of `+0` values is never written and `-0` is. Key bits are the `engine.Keys` values; bits above `Key9`, bit 24, are not defined.
 
-A run holds at least 6 bytes and at most 94. When the pointer moves on every tick, a run takes 22 bytes per tick, so the size limit, not the tick limit, ends a long recording.
+Touches are written in their order in `Input.Touches`, which lists active touches first, and every entry is active, so its `ID` is nonzero; `Active` is not stored. A touch's coordinates are always written, including `+0`. Pads are written in increasing slot order, each slot 0–3 at most once, and every entry is connected; `Connected` is not stored. Stick bytes are the two's complement of the `int8` values. A run whose input has no active touch and no connected pad sets neither bit 14 nor bit 15, so it has exactly the bytes it had before M15 added them.
+
+A run holds at least 6 bytes and at most 232: 94 without touches and pads, plus 101 for five touches and 37 for four pads. When the pointer moves on every tick, a run takes 22 bytes per tick, so the size limit, not the tick limit, ends a long recording.
 
 ### Canonical form
 
-Every recording has exactly one encoding. Adjacent runs differ in at least one field, where coordinates are compared by bit pattern. A present field is never zero. Checkpoint ticks are strictly increasing, from 1 to `T`, and each is a multiple of the interval or equal to `T`. `Decode` followed by `Encode` returns the same bytes.
+Every recording has exactly one encoding. Adjacent runs differ in at least one field, where coordinates are compared by bit pattern. A present field is never zero. Inactive touches and disconnected pads are all zero, and no active touch follows an inactive one, because the format cannot store anything else. Checkpoint ticks are strictly increasing, from 1 to `T`, and each is a multiple of the interval or equal to `T`. `Decode` followed by `Encode` returns the same bytes.
 
 ## Rejected input
 
@@ -68,7 +72,9 @@ Every recording has exactly one encoding. Adjacent runs differ in at least one f
 - a start state longer than 1 MiB;
 - more than 1,048,576 ticks, more runs than ticks, or more runs than the remaining bytes could hold at 6 bytes each;
 - more checkpoints than ⌊`T` / interval⌋ + 1, or than the remaining bytes could hold at 12 bytes each;
-- a run with unknown flag bits, a tick count of 0, unknown key bits, or a present field that is zero;
+- a run with a tick count of 0, unknown key bits, or a present field that is zero;
+- a touch list with a count of 0 or more than 5, or with an entry whose `ID` is 0, which is how an inactive touch would read; the count is checked before any entry is read;
+- a pad list with a count of 0 or more than 4, or with a slot above 3, a repeated slot, or slots out of increasing order; the count is checked before any entry is read;
 - adjacent runs with the same input;
 - run tick counts whose sum is not `T`;
 - checkpoints out of order, outside 1 to `T`, or off the interval other than at `T`;
@@ -81,7 +87,7 @@ Every recording has exactly one encoding. Adjacent runs differ in at least one f
 - `replay.Record(factory, recorder)` returns a factory whose scenes record `tick.Input` before they call the wrapped scene's `Update`. Restart and Replace transitions are wrapped too, so one recorder covers a session that restarts or changes scenes. A tick is counted from 1 at the start of the recording. Runtime tick numbers are not recorded.
 - A checkpoint is the `engine.Hasher` state hash of the scene that ran the tick, taken right after its `Update` and before any transition. The recorder takes one on every tick that is a multiple of 60 and on the last recorded tick. A scene that does not implement `engine.Hasher` contributes no checkpoints.
 - The last tick's hash is taken when `Recorder.Finish` is called, or when that scene exits if it exits first. `Finish` ends the recording.
-- The recorder stops after the tick that leaves no room for one more run of 94 bytes and two checkpoints within 2 MiB, or after tick 1,048,576, whichever comes first. That tick is then the last tick, its checkpoint is taken at once, and `Recorder.Full` reports true. The game keeps running unrecorded. A finished or full recording therefore always encodes.
+- The recorder stops after the tick that leaves no room for one more run of 232 bytes and two checkpoints within 2 MiB, or after tick 1,048,576, whichever comes first. That tick is then the last tick, its checkpoint is taken at once, and `Recorder.Full` reports true. The game keeps running unrecorded. A finished or full recording therefore always encodes. Before M15 the reserve was one run of 94 bytes, so a recording now stops up to 138 bytes earlier than it did.
 - Recording allocates nothing per tick while the session stays within the capacity passed to `replay.NewRecorder`.
 - The start state is a snapshot passed to `replay.NewRecorder`, for example the payload of a loaded save. The game is responsible for having restored the same snapshot into the first recorded scene before its first update.
 
@@ -104,7 +110,11 @@ A scene replays only if every state it reads comes from `engine.Input` and its o
 
 ## Verification
 
-Unit tests cover round trips of every input field and of an empty recording, each rejection above and every truncation of a valid file, the recorder's tick and size limits, recording allocation, restarts and replacements, a final tick that changes scenes, start state restore, content mismatch, and a changed input detected at the next checkpoint. The tests run natively and under WebAssembly and pin the bytes of a recorded session. A fuzz test decodes arbitrary input without a panic and checks that whatever decodes re-encodes to the same bytes.
+Unit tests cover round trips of every input field, including touches and pads, and of an empty recording, each rejection above and every truncation of a valid file, the recorder's tick and size limits, recording allocation, restarts and replacements, a final tick that changes scenes, start state restore, content mismatch, and a changed input detected at the next checkpoint. The tests run natively and under WebAssembly and pin the bytes of two recorded sessions: one without touches and pads, whose pinned value is unchanged from M14, and one with them. A fuzz test decodes arbitrary input without a panic and checks that whatever decodes re-encodes to the same bytes.
+
+## Changes
+
+- **M15.** Bits 14 and 15, which version 1 required to be zero, now mark touch and gamepad lists, as [RFC 0016](../rfcs/0016-m15-audio-mixing-vision-and-platform-reach.md#replays-and-the-new-input) proposed. The version stays 1: every earlier recording, and every recording whose input has no active touch and no connected pad, has the same bytes. A decoder from before M15 rejects a recording that uses the new bits as having unknown flags.
 
 ## References
 

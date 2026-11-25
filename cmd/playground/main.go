@@ -29,6 +29,10 @@ func runPlayground() error {
 	case "pickup":
 		config = playgroundConfig(nil)
 		factory = newScene
+	case "input":
+		config = playgroundConfig(nil)
+		factory = newInputProbe
+		config.Title = "Goje Input Probe · Touch, mouse, and gamepads are drawn as markers"
 	case "courtyard":
 		config = playgroundConfig(nil)
 		factory = newCourtyard

@@ -1,6 +1,6 @@
-# Outpost: the M14 reference game
+# Outpost: the reference game of M14 and M15
 
-The outpost is the playground fixture that exercises the milestone 14 features together: [text and widgets](font-v1.md), pointer input and group selection, the [RTS orders](skirmish-m13.md#orders-and-stances-m14) of the skirmish simulation, [recordings](replay-v1.md), and [saved games](save-v1.md). It is selected with `GOJE_PLAYGROUND=outpost` on desktop and `?fixture=outpost` in the browser. The skirmish fixture is unchanged and keeps its own pinned traces.
+The outpost is the playground fixture that exercises the milestone 14 features together: [text and widgets](font-v1.md), pointer input and group selection, the [RTS orders](skirmish-m13.md#orders-and-stances-m14) of the skirmish simulation, [recordings](replay-v1.md), and [saved games](save-v1.md). Milestone 15 revised it, as the section [The M15 revision](#the-m15-revision) describes: line of sight and fog of war from [vision](vision-m15.md), positional sound from the [mixer](audio-mixer-m15.md), and touch and gamepad control. It is selected with `GOJE_PLAYGROUND=outpost` on desktop and `?fixture=outpost` in the browser. The skirmish fixture is unchanged and keeps its own pinned traces.
 
 ## The level
 
@@ -14,10 +14,10 @@ The game is one scene, `outpostApp`, with four states.
 
 | State | What it shows | Keys and pointer |
 | --- | --- | --- |
-| Title | The name and a menu: Start, Load, Watch last replay. | Arrow keys and **Enter**, or the pointer. |
-| Playing | The match, a top bar with the unit counts and the alarm, a bottom bar with the selection and a hint, and a red recording clock. | The match controls below. **Escape** opens the pause menu unless the match has something to cancel. |
-| Paused | The match, dimmed, with a menu: Resume, Save, Load, Watch replay, Restart, Quit to title. | Arrow keys and **Enter**, or the pointer. **Escape** resumes. |
-| Watching | The recording playing back, with a red label that reads REPLAY and then REPLAY ENDED. | **Escape** returns to the title. Live input is ignored. |
+| Title | The name and a menu: Start, Load, Watch last replay. | Arrow keys and **Enter**, the pointer, a gamepad's D-pad and south button, or a tap. |
+| Playing | The match, a top bar with the unit counts and the alarm, a bottom bar with the selection and a hint, and a red recording clock. | The match controls below. **Escape** opens the pause menu unless the match has something to cancel. A gamepad's Start button always opens it, and a Menu button appears at the top right once a finger has touched the screen. |
+| Paused | The match, dimmed, with a menu: Resume, Save, Load, Watch replay, Restart, Sound, Quit to title. The Sound entry steps the volume from full to half to off. | Arrow keys and **Enter**, the pointer, or a gamepad. **Escape** or a gamepad's Start button resumes. |
+| Watching | The recording playing back, with a red label that reads REPLAY and then REPLAY ENDED. | **Escape**, a gamepad's Start button, or the Leave button returns to the title. Other live input is ignored. |
 
 A match runs in its own `engine.Runtime`, which the app steps only while the state is Playing. A pause therefore is not a tick of the match, and a recording never contains one. The Restart entry steps the match once with **R** pressed, so the restart is an input that the recording holds.
 
@@ -34,21 +34,43 @@ A match runs in its own `engine.Runtime`, which the app steps only while the sta
 
 The HUD text is rebuilt only when a number it shows changes, so drawing a frame allocates nothing.
 
+## The M15 revision
+
+The content check string is now `outpost-2`, so every recording and save made before the revision is refused by the content check and none can be misread. The level file is unchanged.
+
+### Fog of war
+
+The match calls `Sim.EnableVision` with a radius of 7 cells, so the rules of [the vision specification](vision-m15.md) apply: a unit fires at an enemy only while its team sees it, the guards wake when their team sees a scout, and the alarm still wakes them all. The scene draws only what the scouts have learned. Ground is not drawn in cells they have never seen. Ground in cells they have seen but do not see now is drawn through a dark tint, and ground in sight is drawn as before. Walls, the deck, and the alarm line are drawn in explored cells. A guard is drawn, selectable, and a target of **F** only while the scouts see the cell that holds its center, and a bolt is drawn only while the scouts see its cell. The top bar counts the guards in sight, not the guards alive, and the end of the match is still decided by all of them. The grid lines are not drawn.
+
+### Sound
+
+The scene turns the simulation's events into cues: a bolt fired, a bolt that hit, a unit that fell, and the alarm. It also plays an acknowledgment when an order reaches at least one unit, and a victory or defeat sound once. The event position is converted to the screen with the camera and given to `audio.Spatialize` with the center of the screen as the listener and 260 logical pixels as the hearing distance, so the pan follows what is on screen. A cue plays at most once every three ticks. Menu choices play a click.
+
+The eight sounds are `cmd/playground/sounds/*.wav`, made with the Sound Maker's synthesis from the settings in `outpost_sounds_test.go`, which also checks that the files match. Playback is output only. The volume is a setting of the player, not of the match: it is neither recorded, hashed, nor saved, and the Sound entry of the pause menu changes it. A replay is heard as it was played.
+
+### Touch and gamepad
+
+- **Touch.** The first finger is the pointer, so a tap selects and a drag draws the box. After the first touch, a row of four buttons appears at the bottom of the board: **Move** and **Attack** arm a move or an attack-move for the next tap on the ground, **Hold** holds fire, and **Focus** orders the selection to attack the nearest guard in sight. A press that lands on a button is consumed by it and never starts a drag. A mouse press hides the buttons again.
+- **Gamepad.** The left stick moves a cursor at up to three logical pixels per tick, and the south button is the primary button and the east button the secondary button. The west button arms an attack-move, the north button holds fire, the shoulder buttons recall the next or previous non-empty control group, the triggers zoom, the right stick pans the camera, and Start opens the pause menu. Moving the mouse hands control back to the mouse.
+
+Both are interpreted inside the scene from the recorded input, so a match played by touch or pad replays exactly. The scene's own state for this, the cursor, the previous buttons, the control group the shoulders are at, and whether the touch buttons are shown, is part of the hash and the snapshot.
+
 ## What a recording and a save hold
 
-A match is the `outpostSession` scene. It reads only the input it is given and its own state, so it is replayable under the rules in [Make a scene replayable](../docs/replays.md#make-a-scene-replayable). `StateHash` digests the simulation's trace, the selection and groups, the pending mode, a drag in progress, the zoom, and the camera center. The recorder samples it at its checkpoint interval, and playback fails with a divergence error at the first checkpoint that differs.
+A match is the `outpostSession` scene. It reads only the input it is given and its own state, so it is replayable under the rules in [Make a scene replayable](../docs/replays.md#make-a-scene-replayable). `StateHash` digests the simulation's trace, which includes the explored cells, the selection and groups, the pending mode, a drag in progress, the zoom, the camera center, and the state of the touch buttons and the gamepad cursor. The recorder samples it at its checkpoint interval, and playback fails with a divergence error at the first checkpoint that differs.
 
-The content check of both formats is `replay.ContentHash` of the level file's bytes and the string `outpost-1`. A level edited in the Level Builder, or a change to the rules that the level cannot express, retires old recordings and saves. Changing the string `outpost-1` retires them deliberately.
+The content check of both formats is `replay.ContentHash` of the level file's bytes and the string `outpost-2`. A level edited in the Level Builder, or a change to the rules that the level cannot express, retires old recordings and saves. Changing the string `outpost-2` retires them deliberately.
 
-A snapshot is one tag byte with the value 1, then the following in little-endian order:
+A snapshot is one tag byte with the value 2, then the following in little-endian order:
 
 1. A length of four bytes and the simulation snapshot of `Sim.Snapshot`.
 2. The zoom level and the pending mode, one byte each.
 3. The camera center, two IEEE 754 doubles.
 4. The drag in progress: an active byte, an additive byte, and four doubles for its start and current points.
 5. The selection and then the nine groups, each a two-byte count followed by that many eight-byte IDs.
+6. The controls: the cursor and the last pointer position as four doubles, the previous gamepad buttons as two bytes, and one byte each for whether the pointer was inside, the pad is driving the cursor, the touch buttons are shown, and the control group the shoulders are at.
 
-`Restore` reads and checks every field before it changes the scene, so a damaged snapshot leaves the match as it was. It refuses unknown tags, trailing bytes, a zoom level or mode out of range, a camera center that is not a number or lies far from the board, and more than `skirmish.MaxUnits` IDs in a list. The outcome and the HUD are recomputed from the restored simulation.
+`Restore` reads and checks every field before it changes the scene, so a damaged snapshot leaves the match as it was. It refuses unknown tags, trailing bytes, a zoom level, mode, or group index out of range, a cursor or pointer position that is not a number or lies outside the viewport, a camera center that is not a number or lies far from the board, and more than `skirmish.MaxUnits` IDs in a list. The outcome and the HUD are recomputed from the restored simulation.
 
 ## Saving and the last replay
 
@@ -59,6 +81,7 @@ A host without storage plays without saving: Save and Load report that saving is
 ## Verification
 
 - Headless tests in `cmd/playground` cover box, click, Shift, and group selection, every order and mode, a drag that never releases, snapshot restore at several ticks continuing identically, damaged snapshots, the recorded fight with a pinned trace and a divergence from a changed input, the app flow with an in-memory store, and a draw that allocates nothing.
-- `make smoke-desktop` runs `--outpost`, which scripts the title, the recorded fight to a victory, a restart, a drag selection with the box drawn, hold, pause, save, load, quitting, and playing back the recording, checking text, markers, and bolts in the native back buffer.
-- `make smoke-web` plays the same game in Chromium with real mouse and keyboard input and a real `localStorage`, including the Shift-click, control groups, attack-move, focus fire, and a replay whose final frame matches the match it recorded.
+- Further headless tests cover fog hiding the guards until a scout sees them and never listing a guard the scouts cannot see, the sounds of the recorded fight, their range, rate limit, determinism, and independence from the volume, a gamepad moving a cursor and clicking, touch buttons giving commands without starting a drag, a match played by pad alone replaying and restoring exactly, and Start opening and closing the pause menu.
+- `make smoke-desktop` runs `--outpost`, which scripts the title, the recorded fight to a victory, a restart, a drag selection with the box drawn, hold, pause, save, load, quitting, playing back the recording, a touch tap that shows the buttons, a gamepad cursor, and Start pausing, checking text, markers, bolts, and that the guards and their ground are not drawn at the start in the native back buffer.
+- `make smoke-web` plays the same game in Chromium with real mouse and keyboard input and a real `localStorage`, including the Shift-click, control groups, attack-move, focus fire, and a replay whose final frame matches the match it recorded, and then a real touch tap through the Chrome DevTools protocol and a fake pad behind `navigator.getGamepads`.
 - `make smoke-outpost-roundtrip` authors the level's placements and zones in the Level Builder from the bare terrain, then runs both smokes against the exported file.

@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,9 +10,11 @@ import (
 	"image/color"
 	"log/slog"
 	"os"
+	"slices"
 	"sync/atomic"
 	"time"
 
+	"github.com/krapht-foundation/goje/audio"
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/internal/platform/desktop"
 	"github.com/krapht-foundation/goje/platform"
@@ -114,29 +115,37 @@ func run(config platform.Config, factory func() *scene) error {
 }
 
 // runAudio watches real device callbacks without requiring speakers in CI.
+// Beacon's centered cue overlaps a quieter copy panned right, which the smoke
+// requests in the same tick, so the device must play the two voices mixed.
 func runAudio(config platform.Config, factory func() *scene) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	clip := config.Sounds[toggleCue].PCM()
-	offset := firstSignal(clip)
+	const overlapGain, overlapPan = 0.5, 1
+	var reference audio.Mixer
+	reference.Start(config.Sounds[toggleCue], 1, 0)
+	reference.Start(config.Sounds[toggleCue], overlapGain, overlapPan)
+	want := make([]float32, len(config.Sounds[toggleCue].PCM()))
+	reference.Render(want)
+	offset := firstSignal(want)
 	start := time.Now()
 	var requested, received atomic.Int64
 	var complete, wrong atomic.Bool
 	desktop.AudioNull = os.Getenv("GOJE_AUDIO_DEVICE") != "default"
-	desktop.AudioProbe = func(pcm []byte) {
+	desktop.AudioProbe = func(frames []float32) {
 		if received.Load() == 0 {
-			pcm = pcm[firstSignal(pcm):]
-			if len(pcm) == 0 {
+			frames = frames[firstSignal(frames):]
+			if len(frames) == 0 {
 				return
 			}
 			received.Store(int64(time.Since(start)))
 		}
-		n := min(len(pcm), len(clip)-offset)
-		if !bytes.Equal(pcm[:n], clip[offset:offset+n]) || firstSignal(pcm[n:]) < len(pcm)-n {
+		n := min(len(frames), len(want)-offset)
+		if !slices.Equal(frames[:n], want[offset:offset+n]) ||
+			firstSignal(frames[n:]) < len(frames)-n {
 			wrong.Store(true)
 		}
 		offset += n
-		if offset == len(clip) {
+		if offset == len(want) {
 			complete.Store(true)
 		}
 	}
@@ -172,35 +181,48 @@ func runAudio(config platform.Config, factory func() *scene) error {
 				cancel()
 			}
 			return engine.Input{}
+		}, after: func(tick engine.Tick) {
+			// A device callback could in principle drain the queue between
+			// Beacon's request and this one; the window is one channel send.
+			if tick.Input.Pressed&engine.KeySpace != 0 {
+				tick.PlaySoundAt(toggleCue, overlapGain, overlapPan)
+			}
 		}}
 	}); err != nil {
 		return fmt.Errorf("run native audio smoke: %w", err)
 	}
 	if !complete.Load() || wrong.Load() || resetAt == 0 || current.on {
-		return errors.New("native audio smoke: expected one exact cue and silence after reset")
+		return errors.New(
+			"native audio smoke: expected two exactly mixed voices and silence after reset")
 	}
 	slog.Info("Beacon audio smoke passed", "null_device", desktop.AudioNull,
 		"request_to_callback", time.Duration(received.Load()-requested.Load()))
 	return nil
 }
 
-func firstSignal(pcm []byte) int {
-	for i := 0; i < len(pcm); i += 2 {
-		if pcm[i] != 0 || pcm[i+1] != 0 {
+// firstSignal returns the index of the first stereo frame that is not silent.
+func firstSignal(frames []float32) int {
+	for i := 0; i+1 < len(frames); i += 2 {
+		if frames[i] != 0 || frames[i+1] != 0 {
 			return i
 		}
 	}
-	return len(pcm)
+	return len(frames)
 }
 
 type smokeScene struct {
 	engine.Scene
 	input func() engine.Input
+	after func(engine.Tick) // optional, runs after the scene's update
 }
 
 func (s *smokeScene) Update(tick engine.Tick) (engine.Transition, error) {
 	tick.Input = s.input()
-	return s.Scene.Update(tick)
+	transition, err := s.Scene.Update(tick)
+	if s.after != nil {
+		s.after(tick)
+	}
+	return transition, err
 }
 
 // The Sprite Clip Editor export orders the move clip hop (16 ticks), windup,

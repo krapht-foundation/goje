@@ -22,7 +22,7 @@ const (
 	// outpostDragMin is the smallest drag, in logical pixels, that selects a box
 	// instead of clicking.
 	outpostDragMin     = 4.0
-	outpostSnapshotTag = 1
+	outpostSnapshotTag = 2
 )
 
 type outpostMode uint8
@@ -31,6 +31,9 @@ const (
 	modeNone outpostMode = iota
 	// modeAttackMove waits for the click that gives the selection an attack-move order.
 	modeAttackMove
+	// modeMove waits for the tap that gives the selection a move order. It is
+	// the touch buttons' stand-in for the secondary mouse button.
+	modeMove
 )
 
 type outpostOutcome uint8
@@ -65,7 +68,14 @@ type outpostSession struct {
 	outcome   outpostOutcome
 	scratch   []uint64
 
-	hud outpostHUD
+	hud      outpostHUD
+	controls outpostControls
+
+	// The rest is output. It decides what is heard, never what happens, so it is
+	// not hashed or saved.
+	ordered   bool                    // An order was given since the last tick's sounds.
+	lastCue   [outpostCueCount]uint64 // The tick of the last voice of each cue, or zero.
+	announced outpostOutcome          // The outcome whose sound has been played.
 }
 
 // outpostHUD holds the text of the HUD. The strings are rebuilt in Update when a
@@ -93,6 +103,7 @@ func (s *outpostSession) Enter() error {
 	}
 	s.scratch = make([]uint64, 0, skirmish.MaxUnits)
 	s.layoutHUD()
+	s.controls.layout()
 	s.prune()
 	if s.restore != nil {
 		if err := s.Restore(s.restore); err != nil {
@@ -114,7 +125,7 @@ func (s *outpostSession) isSelected(id uint64) bool {
 func (s *outpostSession) cancelable() bool { return s.mode != modeNone || s.drag.active }
 
 func (s *outpostSession) Update(tick engine.Tick) (engine.Transition, error) {
-	in := tick.Input
+	in := s.effective(tick.Input)
 	if in.Pressed.Has(engine.KeyR) {
 		return engine.Restart(), nil
 	}
@@ -127,6 +138,7 @@ func (s *outpostSession) Update(tick engine.Tick) (engine.Transition, error) {
 	s.prune()
 	s.refresh()
 	s.updateHUD()
+	s.play(tick)
 	return engine.Transition{}, nil
 }
 
@@ -166,10 +178,14 @@ func (s *outpostSession) pointer(in engine.Input) {
 		s.order(in.SecondaryPress, skirmish.Move)
 	}
 	if press := in.PrimaryPress; press.Valid {
-		if s.mode == modeAttackMove {
+		switch s.mode {
+		case modeAttackMove:
 			s.mode, s.drag = modeNone, outpostDrag{}
 			s.order(press, skirmish.AttackMove)
-		} else {
+		case modeMove:
+			s.mode, s.drag = modeNone, outpostDrag{}
+			s.order(press, skirmish.Move)
+		default:
 			s.drag = outpostDrag{
 				active: true, additive: in.Held.Has(engine.KeyShift),
 				startX: press.X, startY: press.Y, currentX: press.X, currentY: press.Y,
@@ -256,12 +272,17 @@ func (s *outpostSession) order(at engine.MousePress, kind skirmish.OrderKind) {
 	}
 	if id, hit := s.pick(at.X, at.Y); hit {
 		if u, ok := s.sim.Unit(id); ok && u.Alive && u.Team == skirmish.Guards {
-			s.sim.OrderGroup(s.selection, skirmish.Order{Kind: skirmish.Attack, Target: id})
+			s.ordered = s.sim.OrderGroup(
+				s.selection,
+				skirmish.Order{Kind: skirmish.Attack, Target: id},
+			) > 0 ||
+				s.ordered
 			return
 		}
 	}
 	if cell, ok := s.cellUnder(at.X, at.Y); ok {
-		s.sim.OrderGroup(s.selection, skirmish.Order{Kind: kind, Goal: cell})
+		s.ordered = s.sim.OrderGroup(s.selection, skirmish.Order{Kind: kind, Goal: cell}) > 0 ||
+			s.ordered
 	}
 }
 
@@ -291,7 +312,11 @@ func (s *outpostSession) focus(pointer engine.Pointer) {
 	case pointer.Inside:
 		if id, hit := s.pick(pointer.X, pointer.Y); hit {
 			if target, found := s.sim.Unit(id); found && target.Alive && target.Team == skirmish.Guards {
-				s.sim.OrderGroup(s.selection, skirmish.Order{Kind: skirmish.Attack, Target: id})
+				s.ordered = s.sim.OrderGroup(
+					s.selection,
+					skirmish.Order{Kind: skirmish.Attack, Target: id},
+				) > 0 ||
+					s.ordered
 				return
 			}
 		}
@@ -306,7 +331,7 @@ func (s *outpostSession) focus(pointer engine.Pointer) {
 	best, bestDistance := uint64(0), math.Inf(1)
 	for i := range s.sim.Units() {
 		u := &s.sim.Units()[i]
-		if !u.Alive || u.Team != skirmish.Guards {
+		if !u.Alive || u.Team != skirmish.Guards || !s.seenUnit(u) {
 			continue
 		}
 		c := u.Center()
@@ -315,7 +340,11 @@ func (s *outpostSession) focus(pointer engine.Pointer) {
 		}
 	}
 	if best != 0 {
-		s.sim.OrderGroup(s.selection, skirmish.Order{Kind: skirmish.Attack, Target: best})
+		s.ordered = s.sim.OrderGroup(
+			s.selection,
+			skirmish.Order{Kind: skirmish.Attack, Target: best},
+		) > 0 ||
+			s.ordered
 	}
 }
 
@@ -325,17 +354,20 @@ func (s *outpostSession) prune() {
 	for g := range s.groups {
 		s.groups[g] = s.living(s.groups[g])
 	}
-	scouts, guards := 0, 0
+	scouts, guards, inSight := 0, 0, 0
 	for i := range s.sim.Units() {
 		if u := &s.sim.Units()[i]; u.Alive {
 			if u.Team == skirmish.Scouts {
 				scouts++
 			} else {
 				guards++
+				if s.seenUnit(u) {
+					inSight++
+				}
 			}
 		}
 	}
-	s.hud.scouts, s.hud.guards = scouts, guards
+	s.hud.scouts, s.hud.guards = scouts, inSight
 	switch {
 	case guards == 0:
 		s.outcome = outcomeVictory
@@ -378,6 +410,7 @@ func (s *outpostSession) StateHash() uint64 {
 		}
 	}
 	add(uint64(s.mode))
+	s.controls.hash(add)
 	add(uint64(s.zoomLevel)) // #nosec G115 -- the zoom level is a small index.
 	add(math.Float64bits(s.camera.CenterX))
 	add(math.Float64bits(s.camera.CenterY))
@@ -423,6 +456,7 @@ func (s *outpostSession) Snapshot() ([]byte, error) {
 			b = binary.LittleEndian.AppendUint64(b, id)
 		}
 	}
+	b = s.controls.appendSnapshot(b)
 	return b, nil
 }
 
@@ -462,14 +496,19 @@ func (s *outpostSession) Restore(data []byte) error {
 			lists[i] = append(lists[i], r.u64())
 		}
 	}
-	if r.err || len(r.data) != 0 || zoom >= len(courtyardZoom) || mode > modeAttackMove ||
-		!finiteWithin(camX, s.homeX, 128) || !finiteWithin(camY, s.homeY, 64) {
+	controls := readControls(&r)
+	if r.err || len(r.data) != 0 || zoom >= len(courtyardZoom) || mode > modeMove ||
+		!controls.valid() ||
+		!finiteWithin(camX, s.homeX, 128) ||
+		!finiteWithin(camY, s.homeY, 64) {
 		return errOutpostSnapshot
 	}
 	if err := s.sim.Restore(simState); err != nil {
 		return err
 	}
 	s.zoomLevel, s.mode, s.drag = zoom, mode, drag
+	controls.buttons = s.controls.buttons
+	s.controls = controls
 	s.camera.Zoom, s.camera.CenterX, s.camera.CenterY = courtyardZoom[zoom], camX, camY
 	s.selection = append(s.selection[:0], lists[0]...)
 	for g := range s.groups {
@@ -574,8 +613,10 @@ func (s *outpostSession) updateHUD() {
 		return
 	}
 	h.key = key
-	h.counts.Text = "Scouts " + strconv.Itoa(h.scouts) + "  Guards " + strconv.Itoa(h.guards)
+	h.counts.Text = "Scouts " + strconv.Itoa(h.scouts) + "  Guards seen " + strconv.Itoa(h.guards)
 	switch {
+	case s.mode == modeMove:
+		h.selection.Text = "Move: tap the destination."
 	case s.mode == modeAttackMove:
 		h.selection.Text = "Attack-move: click a target. Esc cancels."
 	case h.selected == 0:
@@ -626,6 +667,7 @@ func (s *outpostSession) Draw(canvas engine.Canvas) {
 		canvas.Rect(left+w-1, top, 1, h, selectionColor)
 	}
 	s.drawHUD(canvas, s.world.face)
+	s.controls.draw(canvas, s.world.face)
 }
 
 func (s *outpostSession) drawHUD(canvas engine.Canvas, face font.Face) {
