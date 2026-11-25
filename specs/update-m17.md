@@ -45,4 +45,4 @@ One key can sign several games, so the caller checks the returned name against i
 - There is no expiry or timestamp, so a client offline from new releases cannot tell that it was shown an old manifest; it only refuses to treat it as newer.
 - There is no key rotation or revocation. A lost key means a new key embedded in a new build.
 - This format does not choose a host or install a download. The [M18 hosted channel](update-m18.md) builds on the same manifest wire format.
-- Ed25519 signatures do not replace Authenticode, Apple notarization, or [mobile distribution signatures](mobile-m18.md).
+- Ed25519 signatures do not replace Authenticode or macOS notarization.

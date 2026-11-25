@@ -12,7 +12,7 @@ The [collision guide](collision.md) explains how to move bodies against walls, t
 
 The [text and HUD guide](text-and-ui.md) covers fonts, menus, and the Font Editor. The [replay guide](replays.md) covers local recordings and saved games.
 
-The [audio guide](audio.md) covers overlapping sounds, positional cues, and music. The [vision guide](vision.md) explains line of sight and fog. The [building guide](building.md) covers desktop packages, installable web bundles, Android and iOS wrappers, and signed updates.
+The [audio guide](audio.md) covers overlapping sounds, positional cues, and music. The [vision guide](vision.md) explains line of sight and fog. The [building guide](building.md) covers desktop packages, installable web bundles, and signed updates.
 
 The [online play guide](online.md) explains lockstep, match logs, and the relay. The [playground guide](playground.md#play-the-outpost-online) shows how to host, join, or watch an outpost match.
 

@@ -19,8 +19,6 @@ import (
 
 const usageText = `usage: goje build|package [-o DIR] [-name NAME] [-version V] [-id BUNDLE_ID]
 	[-tags TAGS] [-icon PNG] [-target web|desktop|all] [-sign KEYFILE] [PACKAGE]
-       goje mobile -id APP_ID -build N [-o DIR] [-name NAME] [-version V]
-	[-tags TAGS] [-icon PNG] [-platform android|ios|all] [PACKAGE]
        goje keygen [-o PREFIX]
        goje manifest -name NAME -version V -sign KEYFILE -pub PUBFILE [-platforms LIST] [-o FILE] ARCHIVE...
        goje update -manifest URL -artifacts URL_PATTERN -key PUBFILE -name NAME -current V [-file NAME -o DIR]
@@ -67,8 +65,6 @@ func run(ctx context.Context, args []string, log io.Writer) error {
 			return manifest(args[1:])
 		case "update":
 			return checkUpdate(ctx, args[1:], log)
-		case "mobile":
-			return mobile(ctx, args[1:], log)
 		}
 	}
 	opts, err := parse(args, runtime.GOOS, log)
@@ -105,7 +101,7 @@ func run(ctx context.Context, args []string, log io.Writer) error {
 func parse(args []string, goos string, log io.Writer) (options, error) {
 	if len(args) == 0 || (args[0] != "build" && args[0] != "package") {
 		return options{}, fmt.Errorf(
-			"%w: the first argument must be build, package, mobile, keygen, manifest, or update",
+			"%w: the first argument must be build, package, keygen, manifest, or update",
 			errUsage,
 		)
 	}

@@ -8,7 +8,7 @@ The reference [playground](docs/playground.md) runs an isometric courtyard on de
 
 The [outpost](docs/playground.md#the-outpost) is a real-time battle with group orders, fog of war, positional sound, touch and gamepad input, and [saved games and replays](docs/replays.md). Play [co-op or versus](docs/playground.md#play-the-outpost-online) across desktop and web, [watch a live match](docs/playground.md#watch-live-or-rejoin), or replay the last online match offline. See [building and packaging](docs/building.md) to ship a game.
 
-The [Beacon challenge](specs/beacon-m18.md) is a small standalone game with keyboard and touch controls. Package its offline web build for [Android or iOS](specs/mobile-m18.md), or run it with `go run ./examples/beacon`.
+The [Beacon challenge](specs/beacon-m18.md) is a small standalone game with keyboard and touch controls. Run it with `go run ./examples/beacon`, or [package it](docs/building.md#package) for native desktop and the web.
 
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

@@ -22,4 +22,4 @@ The [M18 relay](specs/relay-m18.md) admits one read-only spectator with its own 
 
 [Signed updates](specs/update-m17.md) require a developer public key obtained independently of the download. Keep private signing keys out of project roots, bundles, and logs. The updater verifies the signed metadata, version, size, and artifact digest; it does not install or run a download.
 
-The [Beacon staging channel](specs/update-m18.md) and the [iOS archive workflow](specs/mobile-m18.md#verification) require separate protected release environments. Do not expose the channel's signing key or the store identity and provisioning profile to build or test jobs that do not need them.
+The [Beacon staging channel](specs/update-m18.md) signs only in a protected release environment. Do not expose its signing key to build or test jobs.

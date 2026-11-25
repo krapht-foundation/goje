@@ -26,9 +26,8 @@
     /** @file Start the game once, report what keeps it from running, and cache it for offline play. */
     const statusLine = document.querySelector("#status");
 
-    // Browsers allow service workers only in secure contexts, which include localhost. A Capacitor
-    // app ships its files, and a worker would keep serving the old game after an app update.
-    if ("serviceWorker" in navigator && !window.Capacitor) {
+    // Browsers allow service workers only in secure contexts, which include localhost.
+    if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(error => console.warn("Offline play is unavailable.", error));
     }
 

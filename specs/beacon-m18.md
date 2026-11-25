@@ -1,6 +1,6 @@
 # Beacon challenge, M18
 
-Beacon is the playable fixture for the M18 distribution features. [RFC 0019](../rfcs/0019-m18-live-matches-and-distribution.md) asks for a short challenge on a fixed board with a clear win, a timeout, and a restart, playable by keyboard and by touch. The same source and assets build for desktop, the browser, and the mobile wrappers, and the game needs no network or update check to start. The game lives in [`examples/beacon`](../examples/beacon).
+Beacon is the playable fixture for the M18 distribution features. [RFC 0019](../rfcs/0019-m18-live-matches-and-distribution.md) asks for a short challenge on a fixed board with a clear win, a timeout, and a restart, playable by keyboard and by touch. The same source and assets build for native desktop and the web. The game needs no network or update check to start and lives in [`examples/beacon`](../examples/beacon).
 
 ## Board
 
@@ -25,7 +25,7 @@ The rules depend only on tick input, so the result of a given input sequence is 
 - While the round is ready or running, a timer bar fills logical x 16 to 143 and y 6 to 9. The remaining time is (244, 241, 235) and the elapsed time is (52, 69, 87). The bar is full in the ready state.
 - A won round replaces the bar with a banner from x 16 to 143 and y 2 to 13 in (248, 190, 66), with the text `ALL LIT! TAP OR R`.
 - A timed-out round shows the same banner in (215, 84, 73) with the text `TIME UP! TAP OR R`.
-- Logical pixel (17, 3) is (20, 28, 41) during a round, the win color after a win, and the timeout color after a timeout. Tests and the mobile wrapper smokes use it to read the result.
+- Logical pixel (17, 3) is (20, 28, 41) during a round, the win color after a win, and the timeout color after a timeout. The pixel checks use it to read the result.
 
 The native window title starts with `Goje Beacon`, which the Windows package smoke relies on.
 
