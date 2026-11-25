@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/binary"
 	"encoding/json"
@@ -144,7 +145,8 @@ func (g *game) buildWeb(ctx context.Context) error {
 	if err := fresh(dir); err != nil {
 		return err
 	}
-	if err := g.goBuild(ctx, filepath.Join(dir, "game.wasm"), "GOOS=js", "GOARCH=wasm"); err != nil {
+	err := g.goBuild(ctx, filepath.Join(dir, "game.wasm"), "js", "GOOS=js", "GOARCH=wasm")
+	if err != nil {
 		return err
 	}
 	// #nosec G703 -- GOROOT comes from the go command.
@@ -160,10 +162,17 @@ func (g *game) buildWeb(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return writeFiles(dir, map[string][]byte{
+	if writeErr := writeFiles(dir, map[string][]byte{
 		"wasm_exec.js": support, "index.html": page,
 		"manifest.webmanifest": manifest, "icon-512.png": g.png,
-	})
+	}); writeErr != nil {
+		return writeErr
+	}
+	worker, err := serviceWorker(dir)
+	if err != nil {
+		return err
+	}
+	return writeFiles(dir, map[string][]byte{"sw.js": worker})
 }
 
 func (g *game) buildDesktop(ctx context.Context) error {
@@ -172,8 +181,12 @@ func (g *game) buildDesktop(ctx context.Context) error {
 		return err
 	}
 	goos, _, _ := strings.Cut(g.platform, "-")
+	if goos == "windows" {
+		// The executable is the whole application; it has no icon resource.
+		return g.goBuild(ctx, filepath.Join(dir, g.name+".exe"), goos, "CGO_ENABLED=1")
+	}
 	if goos != "darwin" {
-		if err := g.goBuild(ctx, filepath.Join(dir, g.name), "CGO_ENABLED=1"); err != nil {
+		if err := g.goBuild(ctx, filepath.Join(dir, g.name), goos, "CGO_ENABLED=1"); err != nil {
 			return err
 		}
 		return writeFiles(dir, map[string][]byte{
@@ -182,7 +195,7 @@ func (g *game) buildDesktop(ctx context.Context) error {
 	}
 	contents := filepath.Join(dir, g.name+".app", "Contents")
 	executable := filepath.Join(contents, "MacOS", g.name)
-	if err := g.goBuild(ctx, executable, "CGO_ENABLED=1"); err != nil {
+	if err := g.goBuild(ctx, executable, goos, "CGO_ENABLED=1"); err != nil {
 		return err
 	}
 	if err := writeFiles(contents, map[string][]byte{
@@ -195,17 +208,13 @@ func (g *game) buildDesktop(ctx context.Context) error {
 	})
 }
 
-// goBuild compiles the package with flags that make the same sources give the same bytes.
-func (g *game) goBuild(ctx context.Context, output string, env ...string) error {
+// goBuild compiles the package for goos so that the same sources give the same bytes.
+func (g *game) goBuild(ctx context.Context, output, goos string, env ...string) error {
 	output, err := filepath.Abs(output)
 	if err != nil {
 		return fmt.Errorf("resolve output path: %w", err)
 	}
-	args := []string{"build", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", output}
-	if g.tags != "" {
-		args = append(args, "-tags="+g.tags)
-	}
-	args = append(args, "--", g.pkg)
+	args := goBuildArgs(goos, output, g.tags, g.pkg)
 	cmd := exec.CommandContext(ctx, "go", args...) // #nosec G204 G702 -- The developer's own build.
 	// exec keeps the last value of a repeated variable, so these override the caller's.
 	cmd.Env = append(os.Environ(), env...)
@@ -214,6 +223,20 @@ func (g *game) goBuild(ctx context.Context, output string, env ...string) error 
 		return fmt.Errorf("go build %s for %s: %w", g.pkg, strings.Join(env, " "), err)
 	}
 	return nil
+}
+
+// goBuildArgs strips symbols and paths. On Windows it links a GUI program,
+// which opens no console window beside the game.
+func goBuildArgs(goos, output, tags, pkg string) []string {
+	ldflags := "-ldflags=-s -w"
+	if goos == "windows" {
+		ldflags += " -H=windowsgui"
+	}
+	args := []string{"build", "-trimpath", "-buildvcs=false", ldflags, "-o", output}
+	if tags != "" {
+		args = append(args, "-tags="+tags)
+	}
+	return append(args, "--", pkg)
 }
 
 func goOutput(ctx context.Context, args ...string) (string, error) {
@@ -265,25 +288,81 @@ type manifestIcon struct {
 	Purpose string `json:"purpose"`
 }
 
-// webManifest lets a browser add the game to a home screen.
+// webManifest lets a browser install the game. The icon is also offered as
+// maskable: the default icon keeps its tomato inside the central safe circle.
 func webManifest(name string) ([]byte, error) {
 	data, err := json.MarshalIndent(struct {
 		Name            string         `json:"name"`
 		ShortName       string         `json:"short_name"`
 		StartURL        string         `json:"start_url"`
+		Scope           string         `json:"scope"`
 		Display         string         `json:"display"`
 		BackgroundColor string         `json:"background_color"`
 		ThemeColor      string         `json:"theme_color"`
 		Icons           []manifestIcon `json:"icons"`
 	}{
-		name, name, "./", "fullscreen", background, background,
-		[]manifestIcon{{"icon-512.png", "512x512", "image/png", "any"}},
+		name, name, "./", "./", "fullscreen", background, background,
+		[]manifestIcon{
+			{"icon-512.png", "512x512", "image/png", "any"},
+			{"icon-512.png", "512x512", "image/png", "maskable"},
+		},
 	}, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode web manifest: %w", err)
 	}
 	return append(data, '\n'), nil
 }
+
+// serviceWorker returns sw.js, which precaches every file in dir and the
+// directory URL itself. Its cache name holds a digest of the files, so any
+// change to the bundle installs a new worker, which deletes older caches of the
+// same scope and no others.
+func serviceWorker(dir string) ([]byte, error) {
+	list, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", dir, err)
+	}
+	files := []string{"./"}
+	bundle := sha256.New()
+	for _, file := range list {
+		digest := sha256.New()
+		if copyErr := copyFile(digest, filepath.Join(dir, file.Name())); copyErr != nil {
+			return nil, copyErr
+		}
+		// The lines of a SHA256SUMS file of the bundle, in name order.
+		bundle.Write(fmt.Appendf(nil, "%x  %s\n", digest.Sum(nil), file.Name()))
+		files = append(files, file.Name())
+	}
+	names, err := json.Marshal(files)
+	if err != nil {
+		return nil, fmt.Errorf("encode the precache list: %w", err)
+	}
+	return fmt.Appendf(nil, workerSource, bundle.Sum(nil), names), nil
+}
+
+const workerSource = `// Generated by goje build. Precaches the game for offline play.
+const prefix = ` + "`goje ${self.registration.scope} `" + `;
+const cache = prefix + "%x";
+const files = %s;
+
+self.addEventListener("install", event => {
+  event.waitUntil(caches.open(cache).then(store =>
+    store.addAll(files.map(file => new Request(file, { cache: "reload" })))));
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys
+    .filter(key => key.startsWith(prefix) && key !== cache)
+    .map(key => caches.delete(key)))));
+});
+
+self.addEventListener("fetch", event => {
+  if (event.request.method !== "GET") return;
+  event.respondWith(caches.open(cache)
+    .then(store => store.match(event.request, { ignoreSearch: true }))
+    .then(cached => cached ?? fetch(event.request)));
+});
+`
 
 // infoPlist describes the bundle. Name, version, and ID are validated, so they need no escaping.
 // Apple bundle versions take only the numeric core of the version.

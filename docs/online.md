@@ -80,6 +80,12 @@ The first error ends the session; `Poll` and `Done` keep returning it. Show the 
 
 Use `errors.Is` and `errors.AsType` to tell them apart. Call `Leave` when the local player quits, so the others learn it at once rather than through a stall.
 
+For a natural result, call `Done` for the last completed tick, stop stepping, and continue polling until `Confirmed() == Tick()` or a timeout or error ends the wait. Otherwise the faster peer can send a goodbye before the slower one makes it to the result.
+
+## Record a match
+
+Pass `Ready`'s payloads and the resulting simulation hash to a [`matchlog.Recorder`](../engine/matchlog/matchlog.go) before `Done` releases those buffers. Save its completed prefix when the match ends, even after a connection error. To watch it later, validate the header against local content, read one tick at a time, and send the payloads through the same command checks and simulation as network play. Compare each recorded checkpoint and report the first difference. See the [match log specification](../specs/match-log-v1.md) for bounds and the wire format.
+
 ## Test without a network
 
 `lockstep.NewMemoryNet(players)` connects sessions in memory, so a test can run every player's scene in one process. It can delay messages, deliver them in bursts, and cut a player off:
@@ -113,6 +119,6 @@ for !conn.PeerJoined() {
 session, err := lockstep.New(cfg, conn)
 ```
 
-`Dial` returns after the relay's welcome, so `conn.Slot()` is the `Local` of your configuration: 0 for the host and 1 for the guest. A host that sends before the guest has joined loses those messages, which is why it waits. Close the connection when the match ends; the other player is told that you left. Treat the relay as untrusted, as you treat the other player: it sees every message, and a malicious relay can delay or drop them, which ends the match with a stall, but it cannot make two honest copies agree on a wrong state, because they compare hashes.
+`Dial` returns after the relay's welcome, so `conn.Slot()` is the `Local` of your configuration: 0 for the host and 1 for the guest. Host messages sent before the guest joins are dropped. Close the connection after leaving the match. Use TLS on public relays, and do not treat lockstep hashes as peer authentication or as a way to conceal fog from a modified client.
 
 The [outpost](playground.md#play-the-outpost-online) is a complete example of a lobby, a match, and the screens for how a match ends. Its `outpost_online.go` is the part that is not specific to the outpost's rules.

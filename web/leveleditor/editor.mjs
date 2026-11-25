@@ -28,6 +28,7 @@
  * @property {string} terrain - Row-major cells, "." for floor and "#" for wall.
  * @property {Placement[]} placements - Placements in row-major cell order.
  * @property {Zone[]} zones - Zones in file order.
+ * @property {number} sight - Sight radius in cells, or 0 when the level sets none.
  * @property {boolean} dirty - Whether edits have not been exported.
  * @property {boolean} canUndo - Whether undo has an action.
  * @property {boolean} canRedo - Whether redo has an action.
@@ -52,6 +53,7 @@
  * @property {() => EditorState} state - Snapshot the document.
  * @property {() => Uint8Array | string} exportLevel - Encode the document or return a diagnostic.
  * @property {() => string} markExported - Mark the exported revision clean.
+ * @property {(radius: number) => string} setSight - Set the sight radius; 0 removes it.
  */
 
 const CELL = 24;
@@ -83,6 +85,10 @@ const zoneNumbers = ["x", "y", "w", "h", "bottom", "top"].map(
 const zoneAdd = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-add"));
 const zoneApply = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-apply"));
 const zoneDelete = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-delete"));
+const zoneSightPreset = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-sight-preset"));
+const visionPanel = /** @type {HTMLFieldSetElement} */ (document.querySelector("#vision"));
+const sightRadius = /** @type {HTMLInputElement} */ (document.querySelector("#sight-radius"));
+const sightApply = /** @type {HTMLButtonElement} */ (document.querySelector("#sight-apply"));
 const placementPanel = /** @type {HTMLFieldSetElement} */ (document.querySelector("#placements"));
 const placementSelect = /** @type {HTMLSelectElement} */ (document.querySelector("#placement-select"));
 const placementKind = /** @type {HTMLInputElement} */ (document.querySelector("#placement-kind"));
@@ -98,7 +104,7 @@ const ctx = /** @type {CanvasRenderingContext2D} */ (board.getContext("2d"));
 let bridge;
 /**
  * Mirror of the Go document used for drawing; refreshed after each change.
- * @type {{width: number, height: number, terrain: Uint8Array, placements: Placement[], byIndex: Map<number, Placement>, byId: Map<number, Placement>, zones: Zone[], dirty: boolean, canUndo: boolean, canRedo: boolean} | null}
+ * @type {{width: number, height: number, terrain: Uint8Array, placements: Placement[], byIndex: Map<number, Placement>, byId: Map<number, Placement>, zones: Zone[], sight: number, dirty: boolean, canUndo: boolean, canRedo: boolean} | null}
  */
 let doc = null;
 /** @type {"floor" | "wall" | "placement" | "add" | "zone"} */
@@ -166,7 +172,9 @@ function refresh(replaced = false) {
   const placementsChanged = full || s.placements.length !== doc.placements.length ||
     s.placements.some((p, n) => { const q = doc.placements[n]; return p.id !== q.id || p.kind !== q.kind || p.x !== q.x || p.y !== q.y; });
   const zonesChanged = full || JSON.stringify(s.zones) !== JSON.stringify(doc.zones);
-  doc = { width: s.width, height: s.height, terrain, placements: s.placements, byIndex, byId, zones: s.zones, dirty: s.dirty, canUndo: s.canUndo, canRedo: s.canRedo };
+  // Only a change from Go overwrites the field, so a refresh never discards typing.
+  if (full || s.sight !== doc.sight) sightRadius.value = String(s.sight);
+  doc = { width: s.width, height: s.height, terrain, placements: s.placements, byIndex, byId, zones: s.zones, sight: s.sight, dirty: s.dirty, canUndo: s.canUndo, canRedo: s.canRedo };
   if (selectedId !== null && !byId.has(selectedId)) selectedId = null;
   if (selectedZoneId !== null && !s.zones.some(z => z.id === selectedZoneId)) selectedZoneId = null;
   if (full) resizeBoard();
@@ -273,6 +281,7 @@ function updateControls() {
   redoButton.disabled = !open || !doc.canRedo;
   exportButton.disabled = !open;
   zonePanel.disabled = !open;
+  visionPanel.disabled = !open;
   placementPanel.disabled = !open;
   placementApply.disabled = !open || selectedId === null;
   placementDelete.disabled = !open || selectedId === null;
@@ -729,6 +738,31 @@ function applyZoneForm() {
   setStatus(`Updated zone #${selectedZoneId}.`);
 }
 
+/** Set the level's sight radius from the Vision panel as one action. */
+function applySight() {
+  const radius = sightRadius.valueAsNumber;
+  if (!doc || !Number.isInteger(radius)) {
+    setStatus("The sight radius must be a whole number.", true);
+    return;
+  }
+  const err = bridge.setSight(radius);
+  if (err) {
+    setStatus(err, true);
+    return;
+  }
+  refresh();
+  setStatus(radius === 0 ? "The level sets no sight radius." : `Sight radius is ${radius} cells.`);
+}
+
+/** Fill the zone form with a sight blocker, which blocks sight but not movement, keeping its cells. */
+function applySightBlockPreset() {
+  zoneKind.value = "sight_block";
+  zoneRole.value = "trigger";
+  zoneNumbers[4].value = "0";
+  zoneNumbers[5].value = "32";
+  setStatus("Zone form set to a sight block. Draw it, or type its cells and choose Add zone.");
+}
+
 /** Delete the selected zone as one action. */
 function deleteSelectedZone() {
   if (!doc || selectedZoneId === null) return;
@@ -1072,6 +1106,8 @@ async function start() {
   zoneAdd.addEventListener("click", addZoneFromForm);
   zoneApply.addEventListener("click", applyZoneForm);
   zoneDelete.addEventListener("click", deleteSelectedZone);
+  zoneSightPreset.addEventListener("click", applySightBlockPreset);
+  sightApply.addEventListener("click", applySight);
   zoneSelect.addEventListener("change", () => {
     const id = Number(zoneSelect.value);
     const z = doc?.zones.find(candidate => candidate.id === id);

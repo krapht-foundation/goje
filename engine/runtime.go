@@ -62,6 +62,41 @@ type SoundOutput interface {
 	Clear()
 }
 
+// MusicOutput is the optional music half of a SoundOutput; the host's output
+// implements it. PlayMusic loops a prepared, zero-based track and replaces the
+// current one with a fade out and a fade in of fadeMS each; a request for the
+// track already playing only changes its gain. StopMusic fades the music out
+// and stops it. SetMusicGain moves its gain linearly over fadeMS. Music
+// continues across scene changes and Clear. See specs/music-m17.md.
+type MusicOutput interface {
+	PlayMusic(track int, gain float32, fadeMS int)
+	StopMusic(fadeMS int)
+	SetMusicGain(gain float32, fadeMS int)
+}
+
+// PlayMusic requests a looping track with a gain from 0 to 1 and a fade in
+// milliseconds. It does nothing when the output does not implement
+// MusicOutput. Request music when it should change, not on every update.
+func (t Tick) PlayMusic(track int, gain float32, fadeMS int) {
+	if m, ok := t.sound.(MusicOutput); ok {
+		m.PlayMusic(track, gain, fadeMS)
+	}
+}
+
+// StopMusic requests that the music fade out over fadeMS and stop.
+func (t Tick) StopMusic(fadeMS int) {
+	if m, ok := t.sound.(MusicOutput); ok {
+		m.StopMusic(fadeMS)
+	}
+}
+
+// SetMusicGain requests that the music's gain move to gain over fadeMS.
+func (t Tick) SetMusicGain(gain float32, fadeMS int) {
+	if m, ok := t.sound.(MusicOutput); ok {
+		m.SetMusicGain(gain, fadeMS)
+	}
+}
+
 type transitionKind uint8
 
 const (

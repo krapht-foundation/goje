@@ -1,0 +1,36 @@
+:root { color-scheme: light dark; font: 1rem/1.45 system-ui, sans-serif; }
+body { margin: 1rem; }
+main { max-width: 64rem; margin: auto; }
+fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+button, input { font: inherit; }
+input[type="number"] { width: 6em; }
+button[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: -2px; }
+#status[data-error] { font-weight: bold; }
+.viewport { max-width: 100%; overflow: auto; }
+#grid {
+  --z: 16;
+  position: relative;
+  /* Glyphs are white, so the editing grid sits on a dark checkerboard. */
+  background: repeating-conic-gradient(#30343a 0% 25%, #474c54 0% 50%) 0 0 / calc(var(--z) * 2px) calc(var(--z) * 2px);
+  outline: 1px solid currentColor;
+  touch-action: none;
+}
+#grid:focus-visible { outline: 3px solid Highlight; }
+#grid > * { position: absolute; inset: 0; pointer-events: none; }
+#art { width: 100%; height: 100%; }
+canvas { display: block; image-rendering: pixelated; }
+#lines {
+  background-image: linear-gradient(to right, #fff3 1px, transparent 1px), linear-gradient(to bottom, #fff3 1px, transparent 1px);
+  background-size: calc(var(--z) * 1px) calc(var(--z) * 1px);
+}
+#lines[hidden] { display: none; }
+#baseline-guide { bottom: auto; height: 2px; margin-top: -1px; background: #f4d03f; }
+#cursor {
+  right: auto;
+  bottom: auto;
+  width: calc(var(--z) * 1px);
+  height: calc(var(--z) * 1px);
+  box-shadow: inset 0 0 0 1px white, inset 0 0 0 2px black;
+}
+figure { margin: 1rem 0 0; }
+#sheet { background: #30343a; cursor: pointer; }

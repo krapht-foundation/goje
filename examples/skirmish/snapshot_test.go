@@ -17,9 +17,11 @@ import (
 // driven by every kind of order. Its input at a tick depends only on the seed
 // and the tick, so a run restored from a snapshot can be fed the same input.
 type orderHistory struct {
-	seed   uint64
-	units  []placed
-	radius int // The sight radius, or 0 to leave vision off.
+	seed    uint64
+	units   []placed
+	radius  int  // The sight radius, or 0 to leave vision off.
+	versus  bool // Human guards that explore (M17).
+	tactics bool // Tactical AI (M17).
 }
 
 var historyRows = []string{
@@ -60,8 +62,14 @@ func newOrderHistory(seed uint64) orderHistory {
 func (h orderHistory) build(tb testing.TB) *Sim {
 	tb.Helper()
 	s := build(tb, historyRows, h.units, historyAlarm)
+	if err := s.SetControl(Guards, h.versus); err != nil {
+		tb.Fatal(err)
+	}
+	if err := s.SetTactics(h.tactics); err != nil {
+		tb.Fatal(err)
+	}
 	if h.radius != 0 {
-		if err := s.EnableVision(VisionConfig{Radius: h.radius}); err != nil {
+		if err := s.EnableVision(VisionConfig{Radius: h.radius, GuardsExplore: h.versus}); err != nil {
 			tb.Fatal(err)
 		}
 	}
@@ -117,7 +125,7 @@ type state struct {
 	trace    uint64
 	boltSeq  uint64
 	overlaps []collide.Overlap
-	explored []uint64
+	explored [2][]uint64
 	visible  []bool // Each cell, seen by the scouts and then by the guards.
 }
 
@@ -140,7 +148,7 @@ func stateOf(s *Sim) state {
 		s.trace,
 		s.boltSeq,
 		s.tracker.AppendOverlaps(nil),
-		slices.Clone(s.explored),
+		[2][]uint64{slices.Clone(s.explored), slices.Clone(s.guardExplored)},
 		visible,
 	}
 }
@@ -279,7 +287,7 @@ func TestRandomOrderHistoriesReplayAndTheirOrdersEnd(t *testing.T) {
 					t.Fatalf("seed %d: unit %d still attacks dead unit %d", seed, u.ID, u.target)
 				}
 			case u.order == AttackMove:
-				if _, _, ok := first.nearest(u, weaponRange, true); !ok {
+				if _, _, ok := first.nearest(u, weaponRange, true, false); !ok {
 					t.Fatalf("seed %d: unit %d never finished its attack-move", seed, u.ID)
 				}
 			case u.Moving() && !u.chasing:

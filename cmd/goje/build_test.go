@@ -2,13 +2,18 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -29,6 +34,7 @@ func TestWebPage(t *testing.T) {
 		`touch-action: none`, `env(safe-area-inset-left)`,
 		`<script src="wasm_exec.js"></script>`, `fetch("game.wasm")`,
 		`does not support WebAssembly`, `does not support WebGL 2`, `failed to download`,
+		`navigator.serviceWorker.register("sw.js")`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("page lacks %q", want)
@@ -61,16 +67,76 @@ func TestWebManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{
-		"name": "beacon", "short_name": "beacon", "start_url": "./", "display": "fullscreen",
-		"background_color": background, "theme_color": background,
-		"icons": []any{map[string]any{
-			"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any",
-		}},
+		"name": "beacon", "short_name": "beacon", "start_url": "./", "scope": "./",
+		"display": "fullscreen", "background_color": background, "theme_color": background,
+		"icons": []any{
+			map[string]any{
+				"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any",
+			},
+			map[string]any{
+				"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable",
+			},
+		},
 	}
 	gotText, _ := json.Marshal(got)
 	wantText, _ := json.Marshal(want)
 	if !bytes.Equal(gotText, wantText) {
 		t.Fatalf("manifest = %s, want %s", gotText, wantText)
+	}
+}
+
+func TestServiceWorker(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write := func(name, data string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("index.html", "page")
+	write("game.wasm", "wasm")
+	first, err := serviceWorker(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The cache name is the digest of the bundle's SHA256SUMS lines, in name order.
+	wasm, page := sha256.Sum256([]byte("wasm")), sha256.Sum256([]byte("page"))
+	bundle := sha256.Sum256(fmt.Appendf(nil, "%x  game.wasm\n%x  index.html\n", wasm, page))
+	for _, want := range []string{
+		fmt.Sprintf("const cache = prefix + %q;", hex.EncodeToString(bundle[:])),
+		"const prefix = `goje ${self.registration.scope} `;",
+		`const files = ["./","game.wasm","index.html"];`,
+		`key.startsWith(prefix) && key !== cache`, `caches.delete(key)`,
+	} {
+		if !strings.Contains(string(first), want) {
+			t.Errorf("sw.js lacks %q:\n%s", want, first)
+		}
+	}
+	again, err := serviceWorker(dir)
+	if err != nil || !bytes.Equal(again, first) {
+		t.Fatalf("the same bundle gave a different worker (%v)", err)
+	}
+	write("game.wasm", "wasm2")
+	changed, err := serviceWorker(dir)
+	if err != nil || bytes.Equal(changed, first) {
+		t.Fatalf("a changed file kept the worker (%v)", err)
+	}
+}
+
+func TestGoBuildArgs(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ goos, tags, want string }{
+		{"js", "", "build -trimpath -buildvcs=false -ldflags=-s -w -o OUT -- ./game"},
+		{"linux", "a,b", "build -trimpath -buildvcs=false -ldflags=-s -w -o OUT -tags=a,b -- ./game"},
+		{"darwin", "", "build -trimpath -buildvcs=false -ldflags=-s -w -o OUT -- ./game"},
+		// A GUI program: Windows opens no console window beside the game.
+		{"windows", "", "build -trimpath -buildvcs=false -ldflags=-s -w -H=windowsgui -o OUT " +
+			"-- ./game"},
+	} {
+		got := strings.Join(goBuildArgs(test.goos, "OUT", test.tags, "./game"), " ")
+		if got != test.want {
+			t.Errorf("%s: args = %q, want %q", test.goos, got, test.want)
+		}
 	}
 }
 

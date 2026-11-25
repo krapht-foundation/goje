@@ -197,6 +197,18 @@ func New(cfg Config, link Link) (*Session, error) {
 // Tick returns the tick whose payloads Ready returns next.
 func (s *Session) Tick() uint64 { return s.tick }
 
+// Confirmed returns how many ticks every player has acknowledged by sending
+// the frame that follows Done. It lets a game wait for peers after a final tick
+// without stepping its finished simulation again. Poll advances this value.
+func (s *Session) Confirmed() uint64 {
+	confirmed := s.tick
+	first := uint64(s.cfg.Delay) + 1 // #nosec G115 -- Delay is nonnegative.
+	for _, next := range s.next[:s.cfg.Players] {
+		confirmed = min(confirmed, max(next, first)-first)
+	}
+	return confirmed
+}
+
 // Running reports whether every player's Hello has been received and agreed.
 func (s *Session) Running() bool { return s.agreed }
 

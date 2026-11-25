@@ -54,7 +54,8 @@ func (s *Sim) Bolts() []Bolt { return s.bolts }
 // nearest finds the living enemy of u whose center is within radius, preferring
 // the closest and then the lowest ID. It returns the squared distance in raw
 // units. With sighted, and vision on, it ignores enemies u's team does not see.
-func (s *Sim) nearest(u *Unit, radius fixed.Num, sighted bool) (*Unit, int64, bool) {
+// With weakest, it prefers the enemy with the least health first.
+func (s *Sim) nearest(u *Unit, radius fixed.Num, sighted, weakest bool) (*Unit, int64, bool) {
 	c := u.Center()
 	query := fixed.Rect{
 		Min: fixed.Vec2{X: c.X.Sub(radius), Y: c.Y.Sub(radius)},
@@ -71,28 +72,55 @@ func (s *Sim) nearest(u *Unit, radius fixed.Num, sighted bool) (*Unit, int64, bo
 		}
 		tc := t.Center()
 		dx, dy := int64(tc.X.Sub(c.X)), int64(tc.Y.Sub(c.Y))
-		if d2 := dx*dx + dy*dy; d2 <= limit && (best == nil || d2 < bestD2) {
+		d2 := dx*dx + dy*dy
+		if d2 > limit {
+			continue
+		}
+		better := best == nil || d2 < bestD2
+		if weakest && best != nil {
+			better = t.HP < best.HP || t.HP == best.HP && d2 < bestD2
+		}
+		if better {
 			best, bestD2 = t, d2
 		}
 	}
 	return best, bestD2, best != nil
 }
 
-// decide runs the guard AI: a guard at its post wakes when a scout comes within
-// sight or the alarm rings, then walks toward the nearest scout until that
-// scout is in weapon range, and goes back to its post when none is within the
-// leash. A guard carrying an attack or attack-move order follows the order
-// instead and returns to the AI when the order ends.
+// aim is one AI unit's hunt in the current tick: the index of the enemy it
+// hunts, or -1, the squared distance to it, and how many AI units of lower ID
+// hunt the same enemy.
+type aim struct {
+	target int
+	d2     int64
+	rank   int
+}
+
+// ai reports whether u's team is run by the AI rather than commanded.
+func (s *Sim) ai(u *Unit) bool { return !s.human[u.Team-1] }
+
+// decide runs the AI of every team that is not human-controlled, by default
+// the guards: a guard at its post wakes when a scout comes within sight or
+// the alarm rings, then walks toward the nearest scout until that scout is in
+// weapon range, and goes back to its post when none is within the leash. A
+// guard carrying an attack or attack-move order follows the order instead and
+// returns to the AI when the order ends.
 //
 // With vision on, a guard that is not alarmed considers only scouts within the
 // leash in cells its team sees, so it wakes when its team sees a scout, and
 // any guard stops walking for a scout in range only while it is in sight. An
 // alarmed guard still hunts the nearest scout at any distance without sight.
+//
+// Every unit picks its target first and then acts, both in ascending ID order,
+// so tactics can count who hunts whom. Picking reads nothing that acting
+// changes, so this is the single pass of M13.
 func (s *Sim) decide() {
 	whole := fixed.FromInt(max(s.width, s.height))
+	clear(s.chasers)
 	for i := range s.units {
 		u := &s.units[i]
-		if !u.Alive || u.Team != Guards || u.order != Move {
+		s.aims[i].target = -1
+		if !u.Alive || !s.ai(u) || u.order != Move {
 			continue
 		}
 		radius := sight
@@ -102,24 +130,51 @@ func (s *Sim) decide() {
 		case u.chasing || s.radius != 0:
 			radius = leash
 		}
-		target, d2, ok := s.nearest(u, radius, !u.alarmed)
-		if !ok {
+		if t, d2, ok := s.nearest(u, radius, !u.alarmed, false); ok {
+			ti := s.index[t.ID]
+			s.aims[i] = aim{target: ti, d2: d2, rank: s.chasers[ti]}
+			s.chasers[ti]++
+		}
+	}
+	for i := range s.units {
+		u := &s.units[i]
+		if !u.Alive || !s.ai(u) || u.order != Move {
+			u.waypoint = noWaypoint
+			continue
+		}
+		a := s.aims[i]
+		if a.target < 0 {
 			if u.chasing {
 				s.finish(u)
 			}
-			u.chasing, u.alarmed = false, false
+			u.chasing, u.alarmed, u.waypoint = false, false, noWaypoint
 			continue
 		}
+		target := &s.units[a.target]
 		u.chasing = true
-		if d2 <= int64(weaponRange)*int64(weaponRange) && s.sees(u, target) {
-			s.finish(u)
+		if s.tactics && s.fallBack(u, target) {
 			continue
 		}
-		if !u.Moving() || (s.tick+u.ID)%chasePeriod == 0 {
+		if a.d2 <= int64(weaponRange)*int64(weaponRange) && s.sees(u, target) {
+			s.finish(u)
+			if u.waypoint >= 0 {
+				u.waypoint = flankDone // In range on the way: the flank is over.
+			}
+			continue
+		}
+		goal, reroute := s.cellOf(target.Center()), !u.Moving() || (s.tick+u.ID)%chasePeriod == 0
+		if s.tactics {
+			if wp := s.flank(u, target, a.rank, s.chasers[a.target]); wp >= 0 {
+				goal, reroute = wp, !u.Moving() || u.goal != wp
+			}
+		}
+		if reroute {
 			// A new route must not hide how long the guard has been stuck behind others.
 			blocked, repaths := u.blocked, u.repaths
-			if s.order(u, s.cellOf(target.Center()), false) {
+			if s.order(u, goal, false) {
 				u.blocked, u.repaths = blocked, repaths
+			} else if goal == u.waypoint {
+				u.waypoint = flankDone
 			}
 		}
 	}
@@ -142,7 +197,7 @@ func (s *Sim) reportTriggers() {
 		s.alarm = true
 		s.report(EventAlarm, &s.units[s.index[e.Body]])
 		for i := range s.units {
-			if u := &s.units[i]; u.Alive && u.Team == Guards {
+			if u := &s.units[i]; u.Alive && u.Team == Guards && s.ai(u) {
 				u.alarmed = true
 			}
 		}
@@ -173,10 +228,11 @@ func (s *Sim) fire() {
 }
 
 // weaponTarget picks whom u shoots at this tick. With vision on, a target must
-// stand in a cell u's team sees.
+// stand in a cell u's team sees. With tactics on, an AI unit focuses on the
+// weakest enemy in range.
 func (s *Sim) weaponTarget(u *Unit) (*Unit, bool) {
 	if u.order != Attack {
-		t, _, ok := s.nearest(u, weaponRange, true)
+		t, _, ok := s.nearest(u, weaponRange, true, s.tactics && s.ai(u))
 		return t, ok
 	}
 	t := &s.units[s.index[u.target]]
@@ -281,7 +337,7 @@ func (s *Sim) reap() {
 		s.report(EventUnitFell, u)
 		s.bodies.Remove(u.ID)
 		u.route, u.next = u.route[:0], 0
-		u.order, u.target = Move, 0
+		u.order, u.target, u.waypoint = Move, 0, noWaypoint
 	}
 }
 
@@ -332,10 +388,20 @@ func (s *Sim) fold() {
 		for _, w := range s.explored {
 			h = mix(h, w)
 		}
+		// The guards' set joins only with VisionConfig.GuardsExplore (M17).
+		for _, w := range s.guardExplored {
+			h = mix(h, w)
+		}
 		for i := range s.units {
 			if u := &s.units[i]; u.order == Attack {
 				h = mixInt(h, int64(u.lastSeen))
 			}
+		}
+	}
+	// Flank waypoints join only with tactics on (M17).
+	if s.tactics {
+		for i := range s.units {
+			h = mixInt(h, int64(s.units[i].waypoint))
 		}
 	}
 	s.trace = h

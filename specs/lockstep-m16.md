@@ -83,6 +83,8 @@ The first error ends the session. `Poll` and `Done` return it on every later cal
 
 `Leave` sends Bye. It does not end the local session; the game stops using it.
 
+`Confirmed` reports the number of ticks for which every player has sent the frame that follows `Done`. Poll it after advancing the final tick and before calling `Leave` to avoid disconnecting an honest peer that still needs to run that tick. It does not compare game outcomes or make the transport trusted.
+
 ## Limits
 
 | Limit | Value |

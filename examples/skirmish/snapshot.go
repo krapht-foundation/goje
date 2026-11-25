@@ -10,12 +10,24 @@ import (
 )
 
 // snapshotVersion is the layout Snapshot writes and Restore reads without
-// vision, and visionSnapshotVersion the layout with vision, which appends the
-// vision section. See the snapshot sections of specs/skirmish-m13.md and
-// specs/vision-m15.md.
+// vision, visionSnapshotVersion the layout with vision, which appends the
+// vision section, and versusSnapshotVersion the layout with any M17 option,
+// which appends an options byte, the vision section if vision is on, and the
+// tactics section if tactics is on. See the snapshot sections of
+// specs/skirmish-m13.md and specs/vision-m15.md.
 const (
 	snapshotVersion       = 1
 	visionSnapshotVersion = 2
+	versusSnapshotVersion = 3
+)
+
+// Option bits of a version 3 snapshot.
+const (
+	optionScoutsAI = 1 << iota
+	optionGuardsHuman
+	optionTactics
+	optionGuardsExplore
+	optionVision
 )
 
 // Unit flag bits in a snapshot.
@@ -120,24 +132,57 @@ func (s *Sim) Snapshot() ([]byte, error) {
 		b = le.AppendUint64(b, o.Trigger)
 		b = le.AppendUint64(b, o.Body)
 	}
-	if s.radius == 0 {
-		return b, nil
+	options := s.options()
+	if options != 0 {
+		b = append(b, options|boolByte(s.radius != 0)*optionVision)
 	}
-	b = append(b, byte(s.radius)) // #nosec G115 -- at most vision.MaxRadius.
-	for k := range (cells + 7) / 8 {
-		b = append(b, byte(s.explored[k/8]>>(8*(k%8)))) // #nosec G115 -- one byte of the word is kept.
+	if s.radius != 0 {
+		b = append(b, byte(s.radius)) // #nosec G115 -- at most vision.MaxRadius.
+		for _, set := range [2][]uint64{s.explored, s.guardExplored} {
+			if set == nil {
+				continue // The guards keep no set without GuardsExplore.
+			}
+			for k := range (cells + 7) / 8 {
+				b = append(b, byte(set[k/8]>>(8*(k%8)))) // #nosec G115 -- one byte of the word is kept.
+			}
+		}
+		for i := range s.units {
+			b = le.AppendUint32(
+				b,
+				uint32(int32(s.units[i].lastSeen)),
+			) // #nosec G115 -- -1 or a cell index; the bits are kept.
+		}
 	}
-	for i := range s.units {
-		b = le.AppendUint32(
-			b,
-			uint32(int32(s.units[i].lastSeen)),
-		) // #nosec G115 -- -1 or a cell index; the bits are kept.
+	if s.tactics {
+		for i := range s.units {
+			b = le.AppendUint32(
+				b,
+				uint32(int32(s.units[i].waypoint)),
+			) // #nosec G115 -- flankDone, noWaypoint, or a cell index; the bits are kept.
+		}
 	}
 	return b, nil
 }
 
+// options returns the M17 option bits that make a snapshot version 3, or 0.
+func (s *Sim) options() byte {
+	return boolByte(
+		!s.human[Scouts-1],
+	)*optionScoutsAI | boolByte(
+		s.human[Guards-1],
+	)*optionGuardsHuman |
+		boolByte(
+			s.tactics,
+		)*optionTactics | boolByte(
+		s.guardExplored != nil,
+	)*optionGuardsExplore
+}
+
 func (s *Sim) snapshotVersion() uint16 {
-	if s.radius != 0 {
+	switch {
+	case s.options() != 0:
+		return versusSnapshotVersion
+	case s.radius != 0:
 		return visionSnapshotVersion
 	}
 	return snapshotVersion
@@ -242,9 +287,18 @@ func (s *Sim) Restore(data []byte) error {
 		}
 		overlaps = append(overlaps, o)
 	}
+	if options := s.options(); options != 0 {
+		want := options | boolByte(s.radius != 0)*optionVision
+		if got := d.u8(); d.ok && got != want {
+			return fmt.Errorf("%w: options %#x, want %#x", errSnapshot, got, want)
+		}
+	}
 	explored, verr := s.decodeVision(&d, units)
 	if verr != nil {
 		return verr
+	}
+	if err := s.decodeTactics(&d, units); err != nil {
+		return err
 	}
 	if !d.ok {
 		return fmt.Errorf("%w: truncated", errSnapshot)
@@ -267,7 +321,8 @@ func (s *Sim) Restore(data []byte) error {
 	s.tick, s.trace, s.boltSeq, s.alarm = tick, trace, boltSeq, alarm == 1
 	if s.radius != 0 {
 		// Sight is not stored: it follows from where the units stand.
-		copy(s.explored, explored)
+		copy(s.explored, explored[0])
+		copy(s.guardExplored, explored[1])
 		for _, f := range s.sight {
 			f.Reset()
 		}
@@ -278,26 +333,33 @@ func (s *Sim) Restore(data []byte) error {
 
 // decodeVision reads the vision section, which a snapshot has only when
 // vision is on, into the last-seen cells of units, and returns the explored
-// cells.
-func (s *Sim) decodeVision(d *decoder, units []Unit) ([]uint64, error) {
+// cells of the scouts and, with GuardsExplore, of the guards.
+func (s *Sim) decodeVision(d *decoder, units []Unit) ([2][]uint64, error) {
+	var explored [2][]uint64
 	if s.radius == 0 {
-		return nil, nil
+		return explored, nil
 	}
 	cells := s.width * s.height
 	if r := int(d.u8()); d.ok && r != s.radius {
-		return nil, fmt.Errorf("%w: sight radius %d, want %d", errSnapshot, r, s.radius)
+		return explored, fmt.Errorf("%w: sight radius %d, want %d", errSnapshot, r, s.radius)
 	}
-	explored := make([]uint64, len(s.explored))
-	for k, v := range d.take((cells + 7) / 8) {
-		explored[k/8] |= uint64(v) << (8 * (k % 8))
-	}
-	if tail := cells % 64; d.ok && tail != 0 && explored[len(explored)-1]>>tail != 0 {
-		return nil, fmt.Errorf("%w: explored cells off the board", errSnapshot)
+	for i, team := range [2]Team{Scouts, Guards} {
+		if s.exploredBy(team) == nil {
+			continue
+		}
+		set := make([]uint64, len(s.explored))
+		for k, v := range d.take((cells + 7) / 8) {
+			set[k/8] |= uint64(v) << (8 * (k % 8))
+		}
+		if tail := cells % 64; d.ok && tail != 0 && set[len(set)-1]>>tail != 0 {
+			return explored, fmt.Errorf("%w: explored cells off the board", errSnapshot)
+		}
+		explored[i] = set
 	}
 	for i := range units {
 		if c := int(d.i32()); d.ok {
 			if c < -1 || c >= cells {
-				return nil, fmt.Errorf(
+				return explored, fmt.Errorf(
 					"%w: unit %d last saw a cell off the board",
 					errSnapshot,
 					units[i].ID,
@@ -307,6 +369,24 @@ func (s *Sim) decodeVision(d *decoder, units []Unit) ([]uint64, error) {
 		}
 	}
 	return explored, nil
+}
+
+// decodeTactics reads the tactics section, which a snapshot has only when
+// tactics is on, into the flank waypoints of units.
+func (s *Sim) decodeTactics(d *decoder, units []Unit) error {
+	if !s.tactics {
+		return nil
+	}
+	cells := s.width * s.height
+	for i := range units {
+		if c := int(d.i32()); d.ok {
+			if c < flankDone || c >= cells || c >= 0 && s.solid[c] {
+				return fmt.Errorf("%w: unit %d has a bad flank waypoint", errSnapshot, units[i].ID)
+			}
+			units[i].waypoint = c
+		}
+	}
+	return nil
 }
 
 // unit reads one unit's dynamic state into u, whose static fields are set.

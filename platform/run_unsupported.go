@@ -1,4 +1,4 @@
-//go:build !(js && wasm) && !(cgo && (darwin || linux))
+//go:build !(js && wasm) && !(cgo && (darwin || linux || windows))
 
 package platform
 
@@ -12,6 +12,6 @@ import (
 
 func run(context.Context, driver.Config, engine.SceneFactory) error {
 	return errors.New(
-		"Goje graphics require macOS or Linux with CGO, or a js/wasm build with WebGL 2",
+		"Goje graphics require macOS, Linux, or Windows with CGO, or a js/wasm build with WebGL 2",
 	)
 }

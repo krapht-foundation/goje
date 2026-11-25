@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
 	"image/draw"
 	"io/fs"
 
+	"github.com/krapht-foundation/goje/audio"
 	"github.com/krapht-foundation/goje/engine"
+	"github.com/krapht-foundation/goje/engine/matchlog"
 	"github.com/krapht-foundation/goje/engine/replay"
 	"github.com/krapht-foundation/goje/font"
 	"github.com/krapht-foundation/goje/level"
@@ -28,6 +31,7 @@ const (
 	// outpostContent is part of the content check, so a change to the rules the
 	// level cannot express can retire old replays and saves by changing it.
 	outpostContent = "outpost-2"
+	versusContent  = "versus-1"
 	// outpostRecordTicks is the room reserved for one recording: five minutes.
 	outpostRecordTicks = 5 * 60 * 60
 	// outpostSight is how far a unit sees, in cells.
@@ -44,10 +48,12 @@ const (
 // for recordings and saves, the font in the launch atlas, and the store. The
 // store is nil when the host has none, and the game then plays without saving.
 type outpostWorld struct {
-	board level.Board
-	meta  replay.Meta
-	face  font.Face
-	store platform.Store
+	board       level.Board
+	meta        replay.Meta
+	versusBoard level.Board
+	versusMeta  replay.Meta
+	face        font.Face
+	store       platform.Store
 	// volume scales every sound. It is a setting of the player, not of the match, so
 	// it is not recorded, hashed, or saved.
 	volume float32
@@ -57,17 +63,21 @@ type outpostWorld struct {
 
 // loadOutpost reads the outpost level and computes the content check from its bytes.
 func loadOutpost(root fs.FS) (level.Board, replay.Meta, error) {
-	data, err := fs.ReadFile(root, "levels/outpost.json")
+	return loadOutpostLevel(root, "levels/outpost.json", outpostContent)
+}
+
+func loadOutpostLevel(root fs.FS, path, content string) (level.Board, replay.Meta, error) {
+	data, err := fs.ReadFile(root, path)
 	if err != nil {
-		return level.Board{}, replay.Meta{}, fmt.Errorf("read outpost level: %w", err)
+		return level.Board{}, replay.Meta{}, fmt.Errorf("read %s: %w", path, err)
 	}
 	board, err := level.Decode(bytes.NewReader(data))
 	if err != nil {
-		return level.Board{}, replay.Meta{}, fmt.Errorf("decode outpost level: %w", err)
+		return level.Board{}, replay.Meta{}, fmt.Errorf("decode %s: %w", path, err)
 	}
 	return board, replay.Meta{
 		Game:    outpostGame,
-		Content: replay.ContentHash(data, []byte(outpostContent)),
+		Content: replay.ContentHash(data, []byte(content)),
 	}, nil
 }
 
@@ -99,6 +109,10 @@ func newOutpost(
 	if err != nil {
 		return nil, platform.Config{}, err
 	}
+	versusBoard, versusMeta, err := loadOutpostLevel(root, "levels/versus.json", versusContent)
+	if err != nil {
+		return nil, platform.Config{}, err
+	}
 	atlas, face := packOutpostAtlas(project.atlas, font.Builtin())
 	config := project.config()
 	config.Image = atlas
@@ -108,8 +122,22 @@ func newOutpost(
 		return nil, platform.Config{}, err
 	}
 	config.Sounds = sounds
+	scoreData, err := fs.ReadFile(authoredFiles, "outpost_music.json")
+	if err != nil {
+		return nil, platform.Config{}, fmt.Errorf("read outpost score: %w", err)
+	}
+	score, err := audio.DecodeScore(scoreData)
+	if err != nil {
+		return nil, platform.Config{}, fmt.Errorf("decode outpost score: %w", err)
+	}
+	track, err := audio.RenderScore(score)
+	if err != nil {
+		return nil, platform.Config{}, fmt.Errorf("render outpost score: %w", err)
+	}
+	config.Music = []audio.Clip{track}
 	return &outpostWorld{
 		board: board, meta: meta, face: face, store: store, volume: 1,
+		versusBoard: versusBoard, versusMeta: versusMeta,
 		online: cleanOnlineConfig(onlineConfigFromEnvironment()),
 	}, config, nil
 }
@@ -121,6 +149,30 @@ func (w *outpostWorld) newSession(restore []byte) *outpostSession {
 	s := &outpostSession{world: w, restore: restore}
 	s.board, s.sight = w.board, outpostSight
 	return s
+}
+
+func (w *outpostWorld) soloMeta(tactics bool) replay.Meta {
+	meta := w.meta
+	if tactics {
+		var base [8]byte
+		binary.LittleEndian.PutUint64(base[:], meta.Content)
+		meta.Content = replay.ContentHash(base[:], []byte("tactical-1"))
+	}
+	return meta
+}
+
+func (w *outpostWorld) matchHeader(setup matchSetup) matchlog.Header {
+	meta, name := w.soloMeta(setup.tactics), outpostContent
+	if setup.mode == matchlog.Versus {
+		meta, name = w.versusMeta, versusContent
+	}
+	return matchlog.Header{
+		Meta:        meta,
+		ContentName: name,
+		Mode:        setup.mode,
+		Tactics:     setup.tactics,
+		Players:     2,
+	}
 }
 
 // errOutpostSaving is shown when a save or a load is asked for but the host has no store.

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goje Font Editor</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <main>
+    <h1>Goje Font Editor</h1>
+    <p>Edit a monospaced bitmap font and download its PNG sheet and JSON description. Files stay in this browser.</p>
+    <fieldset id="font" disabled>
+      <legend>Font</legend>
+      <button id="builtin" type="button">Built-in font</button>
+      <button id="open" type="button">Open PNG and JSON</button>
+      <input id="files" type="file" accept=".png,.json,image/png,application/json" multiple hidden>
+      <button id="export-png" type="button" disabled>Download PNG</button>
+      <button id="export-json" type="button" disabled>Download JSON</button>
+    </fieldset>
+    <fieldset id="create" disabled>
+      <legend>New font</legend>
+      <label>Cell width <input id="cell-width" type="number" min="1" max="32" step="1" value="6" required></label>
+      <label>Cell height <input id="cell-height" type="number" min="1" max="32" step="1" value="8" required></label>
+      <label>Baseline <input id="baseline" type="number" min="0" max="32" step="1" value="7" required></label>
+      <label>First code point <input id="first" type="number" min="0" max="1114111" step="1" value="32" required></label>
+      <label>Glyphs <input id="count" type="number" min="1" step="1" value="95" required></label>
+      <button id="new" type="button">New font</button>
+    </fieldset>
+    <fieldset id="tools" disabled>
+      <legend>Glyph</legend>
+      <label>Character <input id="character" type="text" maxlength="2" size="3" aria-describedby="glyph"></label>
+      <button id="previous" type="button" disabled>Previous</button>
+      <button id="next" type="button" disabled>Next</button>
+      <output id="glyph" aria-live="polite"></output>
+      <button id="undo" type="button" disabled>Undo</button>
+      <button id="redo" type="button" disabled>Redo</button>
+      <button id="pencil" type="button" aria-pressed="true">Pencil</button>
+      <button id="eraser" type="button" aria-pressed="false">Eraser</button>
+    </fieldset>
+    <p id="status" role="status">Loading the Font Editor…</p>
+    <p id="keys">Focus the grid, use arrow keys to move, then Enter or Space to edit a pixel. Escape cancels a drag. The line marks the baseline.</p>
+    <p><output id="coordinate" aria-label="Active pixel"></output> · <output id="dirty">No font open</output></p>
+    <div class="viewport">
+      <div id="grid" role="group" aria-label="Glyph editing grid" aria-describedby="keys glyph coordinate" hidden>
+        <canvas id="art" width="1" height="1" aria-hidden="true"></canvas>
+        <div id="lines" aria-hidden="true"></div>
+        <div id="baseline-guide" aria-hidden="true"></div>
+        <div id="cursor" aria-hidden="true"></div>
+      </div>
+    </div>
+    <figure id="preview" hidden>
+      <figcaption>Font sheet. Click a glyph to edit it.</figcaption>
+      <canvas id="sheet" width="1" height="1" aria-label="Font sheet"></canvas>
+    </figure>
+  </main>
+  <script src="wasm_exec.js"></script>
+  <script type="module" src="editor.mjs"></script>
+</body>
+</html>

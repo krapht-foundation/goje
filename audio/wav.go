@@ -1,5 +1,6 @@
-// Package audio decodes the short sound clips Goje games play. It does not
-// open files or devices; desktop and web hosts share the same decoder.
+// Package audio decodes the short sound clips Goje games play, renders music
+// scores to looping clips, and mixes both. It does not open files or devices;
+// desktop and web hosts share the same decoder, renderer, and mixer rules.
 package audio
 
 import (
@@ -14,13 +15,18 @@ const (
 	SampleRate = 48000
 	// MaxWAVBytes limits the encoded file, including ancillary chunks.
 	MaxWAVBytes = 300 << 10
+	// MaxSoundSeconds limits a sound clip, from DecodeWAV or for EncodeWAV.
+	MaxSoundSeconds = 3
+	// MaxMusicSeconds limits a music clip from RenderScore.
+	MaxMusicSeconds = 64
 
-	maxSeconds  = 3
-	maxPCMBytes = maxSeconds * SampleRate * 2
+	maxSeconds       = MaxSoundSeconds
+	maxPCMBytes      = MaxSoundSeconds * SampleRate * 2
+	maxMusicPCMBytes = MaxMusicSeconds * SampleRate * 2
 )
 
-// Clip is a decoded mono clip. A zero Clip is invalid; DecodeWAV never
-// returns an empty Clip without an error.
+// Clip is a decoded or rendered mono clip. A zero Clip is invalid; DecodeWAV
+// and RenderScore never return an empty Clip without an error.
 type Clip struct {
 	pcm []byte
 }

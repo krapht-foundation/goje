@@ -25,8 +25,8 @@ const (
 	// Recorder takes.
 	CheckpointInterval = 60
 	maxInterval        = 1<<16 - 1
-	// knownKeys has a bit for every engine key, from KeyArrowLeft to Key9.
-	knownKeys = engine.Key9<<1 - 1
+	// knownKeys has a bit for every engine key, from KeyArrowLeft to KeyTab.
+	knownKeys = engine.KeyTab<<1 - 1
 )
 
 // ErrContentMismatch reports a recording or save made for another game or with

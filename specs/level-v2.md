@@ -4,9 +4,9 @@ The [M13 RFC](../rfcs/0014-m13-crowds-authored-collision-and-combat.md) adds aut
 
 ## Versions and compatibility
 
-- `level.Decode` accepts versions 1 and 2. A version 1 board has no zones, and a version 1 document that contains `zones` is rejected with the message "zones need version 2". A version 2 document without `zones` is rejected as missing that field. Any other version is rejected with "unsupported level version N (want 1 or 2)".
-- `level.Encode` takes terrain rows, placements, and zones. It writes version 1 when there are no zones and version 2 otherwise, so a level that uses no zone is byte-identical to what earlier releases wrote, and tools that only read version 1 keep working with it.
-- Programs that call `level.Decode` need no change to read version 1 files. A game that wants zones reads them from `Board.Zones()`.
+- `level.Decode` accepts versions 1, 2, and [3](level-v3.md). A version 1 board has no zones, and a version 1 document that contains `zones` is rejected with the message "zones need version 2". A version 2 document without `zones` is rejected as missing that field, and one with a `sight` object is rejected with "sight needs version 3". Any other version is rejected with "unsupported level version N (want 1, 2, or 3)".
+- `level.Encode` takes terrain rows, placements, and zones. It writes version 1 when there are no zones and version 2 otherwise, so a level that uses no zone is byte-identical to what earlier releases wrote, and tools that only read version 1 keep working with it. `level.EncodeSight` with a radius of 0 gives the same bytes, and with a radius writes version 3.
+- Programs that call `level.Decode` need no change to read version 1 files. A game that wants zones reads them from `Board.Zones()`. In a version 2 level a zone of kind `sight_block` has no meaning to the decoder, keeps any role, and `Board.SightBlocked` reports false for it.
 
 ## Zones
 

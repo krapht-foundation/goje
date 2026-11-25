@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux)
+//go:build cgo && (darwin || linux || windows)
 
 // Package desktop connects the shared game loop to a GLFW window and an OpenGL
 // context. GLFW owns window events and gamepad polling; tick scheduling and
@@ -295,6 +295,8 @@ func engineKey(key glfw.Key) engine.Keys {
 		return engine.KeyH
 	case glfw.KeyF:
 		return engine.KeyF
+	case glfw.KeyTab:
+		return engine.KeyTab
 	case glfw.Key1, glfw.Key2, glfw.Key3, glfw.Key4, glfw.Key5,
 		glfw.Key6, glfw.Key7, glfw.Key8, glfw.Key9:
 		return engine.Key1 << (key - glfw.Key1)

@@ -54,7 +54,13 @@ func Open(r io.Reader) (*Document, error) {
 		pixels = image.NewNRGBA(image.Rectangle{Max: checked.Size()})
 		draw.Draw(pixels, pixels.Bounds(), decoded, decoded.Bounds().Min, draw.Src)
 	}
-	return &Document{pixels: pixels, saved: bytes.Clone(pixels.Pix)}, nil
+	return TakePixels(pixels), nil
+}
+
+// TakePixels stages a clean sheet, taking ownership of a zero-origin, tightly
+// packed image with validated dimensions. The caller must stop using pixels.
+func TakePixels(pixels *image.NRGBA) *Document {
+	return &Document{pixels: pixels, saved: bytes.Clone(pixels.Pix)}
 }
 
 // Size returns the width and height of the sheet in pixels.

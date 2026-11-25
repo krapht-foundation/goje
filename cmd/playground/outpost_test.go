@@ -362,7 +362,7 @@ func TestOutpostRecordedMatchWinsAndReplays(t *testing.T) {
 	if last.outcome != outcomeVictory {
 		t.Fatalf("outcome = %d after %d ticks, want a victory", last.outcome, last.sim.Ticks())
 	}
-	if scouts := last.hud.scouts; scouts != 2 {
+	if scouts := last.hud.friends; scouts != 2 {
 		t.Errorf("%d scouts survived, want the recorded 2", scouts)
 	}
 	if got := last.sim.Trace(); got != wantTrace {

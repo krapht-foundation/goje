@@ -124,6 +124,11 @@ func runLoop(
 				sounds.unlock(window)
 			}
 			if key := gameKey(e.Get("code").String()); key != 0 {
+				if key == engine.KeyTab && kind == "keydown" &&
+					(e.Get("shiftKey").Bool() || e.Get("ctrlKey").Bool() ||
+						e.Get("altKey").Bool() || e.Get("metaKey").Bool()) {
+					break // Modified Tab still navigates browser focus and tabs.
+				}
 				e.Call("preventDefault")
 				switch {
 				case key == engine.KeyShift || key == engine.KeyControl:
@@ -386,6 +391,8 @@ func gameKey(code string) engine.Keys {
 		return engine.KeyH
 	case "KeyF":
 		return engine.KeyF
+	case "Tab":
+		return engine.KeyTab
 	case "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9":
 		return engine.Key1 << (code[len("Digit")] - '1')
 	default:

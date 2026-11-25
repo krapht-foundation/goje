@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build Beacon with cmd/goje from a separate module, play the desktop and web
-# outputs, and check that packaging twice gives identical, verifiable files.
+# outputs, play the web output offline from its service worker, and check that
+# signed packaging twice gives identical, verifiable files.
 # Usage: scripts/smoke-goje-build.sh. Run `make build-level-editor
 # build-tile-maker setup-web` first, and wrap it in `xvfb-run -a` on Linux.
 set -euo pipefail
@@ -17,6 +18,7 @@ tmp=$(mktemp -d "$repo/.build/goje-build.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 goje=$tmp/goje
 "$go" build -o "$goje" ./cmd/goje
+"$goje" keygen -o "$tmp/signing"
 goos=$("$go" env GOOS)
 host=$goos-$("$go" env GOARCH)
 go_version=$("$go" list -m -f '{{.GoVersion}}')
@@ -46,13 +48,14 @@ rm "$game/run_smoke.go" "$game/run_bench.go"
     -replace=github.com/krapht-foundation/goje="$repo"
   "$go" mod tidy
   for run in 1 2; do
-    "$goje" package -o "$tmp/dist$run" -version 1.0.0
+    "$goje" package -o "$tmp/dist$run" -version 1.0.0 -sign "$tmp/signing.key"
   done
 )
 "$node" scripts/smoke-beacon.mjs build "$tmp/dist1/web"
+"$node" scripts/smoke-pwa.mjs "$tmp/dist1/web"
 
 release=$tmp/dist1/release
-files=(SHA256SUMS beacon-1.0.0-web.zip "beacon-1.0.0-$host.tar.gz")
+files=(SHA256SUMS SHA256SUMS.sig update.json beacon-1.0.0-web.zip "beacon-1.0.0-$host.tar.gz")
 diff <(ls "$release") <(printf '%s\n' "${files[@]}" | LC_ALL=C sort)
 diff <(ls "$release") <(ls "$tmp/dist2/release")
 for file in "${files[@]}"; do
@@ -62,6 +65,11 @@ if command -v sha256sum > /dev/null; then
   (cd "$release" && sha256sum -c SHA256SUMS)
 else
   (cd "$release" && shasum -a 256 -c SHA256SUMS)
+fi
+# Players verify the detached signature with OpenSSL 3; LibreSSL lacks raw Ed25519 input.
+if openssl version 2> /dev/null | grep -q '^OpenSSL 3'; then
+  openssl pkeyutl -verify -pubin -inkey "$tmp/signing.pub" -rawin \
+    -in "$release/SHA256SUMS" -sigfile "$release/SHA256SUMS.sig"
 fi
 
 extracted=$tmp/extracted
@@ -79,4 +87,5 @@ else
   test -f "$extracted/desktop/beacon.png"
 fi
 echo "passed: goje build and package for Beacon on web and $host: desktop and Chromium smokes," \
-  "identical packages from two runs, checksums, extraction, and the bundle files"
+  "offline replay from the service worker, identical signed packages from two runs, checksums," \
+  "the signature, extraction, and the bundle files"

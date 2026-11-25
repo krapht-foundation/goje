@@ -59,8 +59,8 @@ func TestOutpostFogHidesGuardsUntilTheScoutsSeeThem(t *testing.T) {
 		}
 		return n
 	}
-	if got := guards(); got != 0 || s.hud.guards != 0 {
-		t.Fatalf("%d guards are drawn and %d counted at the start, want none", got, s.hud.guards)
+	if got := guards(); got != 0 || s.hud.foes != 0 {
+		t.Fatalf("%d guards are drawn and %d counted at the start, want none", got, s.hud.foes)
 	}
 	w, h := s.board.Size()
 	explored := 0

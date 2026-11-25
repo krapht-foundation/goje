@@ -37,7 +37,7 @@ func TestDecodeBoard(t *testing.T) {
 
 func TestDecodeRejectsInvalidLevels(t *testing.T) {
 	for _, tc := range []struct{ name, old, replacement, diagnostic string }{
-		{"version", `"version":1`, `"version":3`, "unsupported level version 3"},
+		{"version", `"version":1`, `"version":4`, "unsupported level version 4 (want 1, 2, or 3)"},
 		{"duplicate root", `"version":1`, `"version":1,"vers\u0069on":1`, `duplicate field "version"`},
 		{"missing field", `,"version":1`, ``, `missing field "version"`},
 		{"unknown field", `"version":1`, `"version":1,"path":"file"`, `unknown field "path"`},

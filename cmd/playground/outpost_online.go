@@ -11,15 +11,14 @@ import (
 	"time"
 
 	"github.com/krapht-foundation/goje/engine/lockstep"
+	"github.com/krapht-foundation/goje/engine/matchlog"
 	"github.com/krapht-foundation/goje/examples/skirmish"
 	"github.com/krapht-foundation/goje/netlink"
 )
 
-// Online play is the cooperative outpost of RFC 0017: two players command the six
-// scouts between them, the guards stay under the simulation's control, and every
-// tick runs on both machines only when both players' commands for it have
-// arrived. This file holds the lobby, the lockstep gate of a match, and the rules
-// for what a player may command. See specs/lockstep-m16.md and specs/outpost-m14.md.
+// Every copy of an online match waits for both players' commands before it
+// runs a tick. The lobby chooses how those players divide control; the
+// lockstep package itself knows nothing about teams or orders.
 const (
 	onlineGame = "outpost"
 	// onlineDelay is the lockstep delay. A command issued during tick t is applied at
@@ -27,7 +26,7 @@ const (
 	// frame for the first tick that can take it is sent a tick later.
 	onlineDelay = 5
 	// onlineHashInterval is how often the players compare state hashes.
-	onlineHashInterval = 60
+	onlineHashInterval = matchlog.Interval
 	// onlineStallLimit is how many consecutive ticks the match may wait for the
 	// other player before it ends, ten seconds.
 	onlineStallLimit = 600
@@ -63,6 +62,41 @@ func cleanOnlineConfig(c onlineConfig) onlineConfig {
 // first player and the even IDs to the second.
 func onlineOwner(id uint64) int { return int((id + 1) % 2) }
 
+// matchSetup precedes the lockstep Hello. The relay forwards it unchanged.
+type matchSetup struct {
+	mode    matchlog.Mode
+	tactics bool
+}
+
+const setupMessage = 0x53
+
+func decodeMatchSetup(msg []byte) (matchSetup, error) {
+	if len(msg) != 3 || msg[0] != setupMessage || msg[1] > byte(matchlog.Versus) ||
+		msg[2] > 1 || msg[1] == byte(matchlog.Versus) && msg[2] != 0 {
+		return matchSetup{}, &lockstep.ProtocolError{Player: 0, Reason: "invalid match setup"}
+	}
+	return matchSetup{mode: matchlog.Mode(msg[1]), tactics: msg[2] == 1}, nil
+}
+
+func playerTeam(player int) skirmish.Team {
+	if player == 1 {
+		return skirmish.Guards
+	}
+	return skirmish.Scouts
+}
+
+func (w *outpostWorld) onlineSession(setup matchSetup, local int) *outpostSession {
+	s := w.newSession(nil)
+	s.tactics = setup.tactics
+	if setup.mode == matchlog.Versus {
+		s.board, s.versus, s.fogTeam = w.versusBoard, true, playerTeam(local)
+	} else {
+		s.owns = func(id uint64) bool { return onlineOwner(id) == local }
+		s.foreign = func(id uint64) bool { return onlineOwner(id) != local }
+	}
+	return s
+}
+
 // onlineHashFault lets a smoke build change a state hash before it is compared,
 // to prove that a divergence is caught. It is nil outside such builds.
 var onlineHashFault func(tick, hash uint64) uint64
@@ -80,16 +114,18 @@ func (e *onlineEnd) Unwrap() error { return e.err }
 type outpostSync interface {
 	before(s *outpostSession) (run bool, err error)
 	after(hash uint64) error
-	waiting() bool
 }
 
 // onlineSync gates one player's copy of a match. It implements outpostSync.
 type onlineSync struct {
-	lock   *lockstep.Session
-	local  int
-	cmds   []skirmish.Command
-	buf    []byte
-	waited int // Consecutive ticks that could not run.
+	lock     *lockstep.Session
+	local    int
+	cmds     matchCommands
+	buf      []byte
+	waited   int // Consecutive ticks that could not run.
+	recorder *matchlog.Recorder
+	payloads [][]byte // Borrowed until Done advances the lockstep ring.
+	logErr   error
 	// fault changes a hash before it is sent. It is the package's onlineHashFault.
 	fault func(tick, hash uint64) uint64
 }
@@ -97,7 +133,7 @@ type onlineSync struct {
 func newOnlineSync(lock *lockstep.Session, local int) *onlineSync {
 	return &onlineSync{
 		lock: lock, local: local,
-		cmds:  make([]skirmish.Command, 0, 8),
+		cmds:  newMatchCommands(),
 		buf:   make([]byte, 0, skirmish.MaxCommandBytes),
 		fault: onlineHashFault,
 	}
@@ -123,34 +159,62 @@ func (o *onlineSync) before(s *outpostSession) (bool, error) {
 	payloads, ready := o.lock.Ready()
 	if !ready {
 		o.waited++
+		if !o.lock.Running() && o.waited >= onlineStallLimit {
+			return false, &onlineEnd{lockstep.ErrStalled}
+		}
 		return false, nil
 	}
 	o.waited = 0
-	for player, payload := range payloads {
-		cmds, err := skirmish.DecodeCommands(o.cmds[:0], payload)
-		if err != nil {
-			return false, &onlineEnd{fmt.Errorf("player %d sent bad commands: %w", player, err)}
-		}
-		o.cmds = cmds
-		for i := range cmds {
-			if err := checkOwnership(s, player, &cmds[i]); err != nil {
-				return false, &onlineEnd{err}
-			}
-			s.sim.Apply(cmds[i])
-		}
+	if err := o.cmds.apply(s, payloads); err != nil {
+		return false, &onlineEnd{err}
 	}
+	o.payloads = payloads
 	return true, nil
 }
 
-// checkOwnership rejects a command that names a unit its sender cannot command:
-// one that does not exist, is not a scout, or belongs to the other player. A scout
-// that has fallen since the command was issued is allowed, because the sender
-// could not have known.
+type matchCommands [2][]skirmish.Command
+
+func newMatchCommands() matchCommands {
+	return matchCommands{make([]skirmish.Command, 0, 8), make([]skirmish.Command, 0, 8)}
+}
+
+func (m *matchCommands) apply(s *outpostSession, payloads [][]byte) error {
+	// Validate the whole tick before applying any orders, including when reading
+	// a log. A bad command must not leave a half-applied tick behind.
+	for player, payload := range payloads {
+		cmds, err := skirmish.DecodeCommands(m[player][:0], payload)
+		if err != nil {
+			return &lockstep.ProtocolError{Player: player, Reason: "bad commands: " + err.Error()}
+		}
+		m[player] = cmds
+		for i := range cmds {
+			if err := checkOwnership(s, player, &cmds[i]); err != nil {
+				return err
+			}
+		}
+	}
+	for _, cmds := range m {
+		for _, cmd := range cmds {
+			s.sim.Apply(cmd)
+		}
+	}
+	return nil
+}
+
+// checkOwnership rejects IDs the player does not own. Fallen units are allowed
+// because they may have died after an honest player issued the command.
 func checkOwnership(s *outpostSession, player int, c *skirmish.Command) error {
 	for _, id := range c.IDs {
 		u, ok := s.sim.Unit(id)
-		if !ok || u.Team != skirmish.Scouts || onlineOwner(id) != player {
-			return fmt.Errorf("player %d commanded unit %d, which is not theirs", player, id)
+		owns := ok && u.Team == skirmish.Scouts && onlineOwner(id) == player
+		if s.versus {
+			owns = ok && u.Team == playerTeam(player)
+		}
+		if !owns {
+			return &lockstep.ProtocolError{
+				Player: player,
+				Reason: fmt.Sprintf("player %d commanded unit %d, which is not theirs", player, id),
+			}
 		}
 	}
 	return nil
@@ -159,6 +223,10 @@ func checkOwnership(s *outpostSession, player int, c *skirmish.Command) error {
 // after sends the hash of the tick that ran, to be compared at checkpoints.
 func (o *onlineSync) after(hash uint64) error {
 	tick := o.lock.Tick() + 1
+	if o.recorder != nil && o.logErr == nil {
+		o.logErr = o.recorder.Append(o.payloads, hash)
+	}
+	o.payloads = nil
 	if o.fault != nil {
 		hash = o.fault(tick, hash)
 	}
@@ -185,6 +253,8 @@ type onlineLobby struct {
 	result chan onlineDialed
 	conn   *netlink.Conn
 	err    error
+	setup  matchSetup
+	waited int
 	// announced is true once the room code has been logged.
 	announced bool
 }
@@ -229,11 +299,31 @@ func (l *onlineLobby) poll() (ready bool, err error) {
 			return false, nil
 		}
 	}
-	if err := l.conn.Err(); err != nil {
+	if err = l.conn.Err(); err != nil {
 		l.err = err
 		return false, err
 	}
-	return l.conn.PeerJoined(), nil
+	if !l.conn.PeerJoined() {
+		return false, nil
+	}
+	if l.host {
+		msg := [...]byte{setupMessage, byte(l.setup.mode), boolByte(l.setup.tactics)}
+		err = l.conn.Send(msg[:])
+		return err == nil, err
+	}
+	msg, ok, err := l.conn.Recv()
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		l.waited++
+		if l.waited >= onlineStallLimit {
+			return false, lockstep.ErrStalled
+		}
+		return false, nil
+	}
+	l.setup, err = decodeMatchSetup(msg)
+	return err == nil, err
 }
 
 // close abandons the lobby. The connection is kept when the match takes it over.

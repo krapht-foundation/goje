@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux)
+//go:build cgo && (darwin || linux || windows)
 
 package desktop
 
@@ -26,6 +26,7 @@ type speaker struct {
 type mix struct {
 	queue      *sound.Queue
 	clips      []audio.Clip
+	music      []audio.Clip
 	generation uint64
 	mixer      audio.Mixer
 	frames     []float32 // grows to the largest callback, then is reused
@@ -45,7 +46,12 @@ func openSpeaker(ctx context.Context, logger *slog.Logger, queue *sound.Queue) *
 	config.SampleRate = audio.SampleRate
 	config.Playback.Format = malgo.FormatF32
 	config.Playback.Channels = 2
-	m := &mix{queue: queue, clips: queue.Clips(), generation: queue.Generation()}
+	m := &mix{
+		queue:      queue,
+		clips:      queue.Clips(),
+		music:      queue.Music(),
+		generation: queue.Generation(),
+	}
 	s.device, err = malgo.InitDevice(audioContext.Context, config, malgo.DeviceCallbacks{
 		Data: func(out, _ []byte, _ uint32) {
 			probeAudio(m.fill(out))
@@ -82,10 +88,11 @@ func (s *speaker) close() {
 	s.context.Free()
 }
 
-// fill starts the pending requests, mixes the next frames, and writes them to
+// fill applies the pending requests, mixes the next frames, and writes them to
 // out as little-endian float32 stereo. A generation change (suspension,
-// restart) stops every voice before taking new requests. It returns the mixed
-// frames, which stay valid until the next call.
+// restart) stops every sound voice before taking new requests; the music
+// voice continues. It returns the mixed frames, which stay valid until the
+// next call.
 func (m *mix) fill(out []byte) []float32 {
 	if generation := m.queue.Generation(); generation != m.generation {
 		m.generation = generation
@@ -96,7 +103,16 @@ func (m *mix) fill(out []byte) []float32 {
 		if !ok {
 			break
 		}
-		m.mixer.Start(m.clips[r.Cue], r.Gain, r.Pan)
+		switch r.Kind {
+		case sound.KindPlayMusic:
+			m.mixer.PlayMusic(m.music[r.Cue], r.Gain, r.FadeMS)
+		case sound.KindStopMusic:
+			m.mixer.StopMusic(r.FadeMS)
+		case sound.KindMusicGain:
+			m.mixer.SetMusicGain(r.Gain, r.FadeMS)
+		default:
+			m.mixer.Start(m.clips[r.Cue], r.Gain, r.Pan)
+		}
 	}
 	n := len(out) / 4
 	if cap(m.frames) < n {
@@ -120,6 +136,9 @@ func logAudio(ctx context.Context, logger *slog.Logger, message string, err erro
 // would hide a missing device behind a silent timer.
 func platformBackends() []malgo.Backend {
 	return []malgo.Backend{
+		malgo.BackendWasapi,
+		malgo.BackendDsound,
+		malgo.BackendWinmm,
 		malgo.BackendCoreaudio,
 		malgo.BackendPulseaudio,
 		malgo.BackendAlsa,

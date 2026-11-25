@@ -15,10 +15,10 @@ import (
 
 // Limits of font sheet v1; see specs/font-v1.md.
 const (
-	maxPNGBytes  = 256 << 10
-	maxPNGAxis   = 512
-	maxJSONBytes = 16 << 10
-	maxCell      = 32
+	MaxPNGBytes  = 256 << 10
+	MaxPNGAxis   = 512
+	MaxJSONBytes = 16 << 10
+	MaxCell      = 32
 )
 
 // Decode reads one font sheet v1 asset: a PNG of equal cells and its JSON
@@ -26,7 +26,7 @@ const (
 // decodes any pixels, returns the zero Face on error, and does not close the
 // readers.
 func Decode(sheetPNG, fontJSON io.Reader) (Face, error) {
-	data, err := readBounded(sheetPNG, maxPNGBytes)
+	data, err := readBounded(sheetPNG, MaxPNGBytes)
 	if err != nil {
 		return Face{}, fmt.Errorf("read font PNG: %w", err)
 	}
@@ -34,11 +34,11 @@ func Decode(sheetPNG, fontJSON io.Reader) (Face, error) {
 	if err != nil {
 		return Face{}, fmt.Errorf("read font PNG dimensions: %w", err)
 	}
-	if config.Width < 1 || config.Width > maxPNGAxis || config.Height < 1 ||
-		config.Height > maxPNGAxis {
-		return Face{}, fmt.Errorf("font PNG axes must be 1–%d pixels", maxPNGAxis)
+	if config.Width < 1 || config.Width > MaxPNGAxis || config.Height < 1 ||
+		config.Height > MaxPNGAxis {
+		return Face{}, fmt.Errorf("font PNG axes must be 1–%d pixels", MaxPNGAxis)
 	}
-	metadata, err := readBounded(fontJSON, maxJSONBytes)
+	metadata, err := readBounded(fontJSON, MaxJSONBytes)
 	if err != nil {
 		return Face{}, fmt.Errorf("read font metadata: %w", err)
 	}
@@ -131,8 +131,8 @@ func validate(values [advancesField]int, advances []uint8, size image.Point) (me
 	switch {
 	case version != 1:
 		return metadata{}, fmt.Errorf("unsupported version %d", version)
-	case width < 1 || width > maxCell || height < 1 || height > maxCell:
-		return metadata{}, fmt.Errorf("cell axes must be 1–%d pixels", maxCell)
+	case width < 1 || width > MaxCell || height < 1 || height > MaxCell:
+		return metadata{}, fmt.Errorf("cell axes must be 1–%d pixels", MaxCell)
 	case baseline < 0 || baseline > height:
 		return metadata{}, errors.New("baseline must be 0 to the cell height")
 	case first < 0 || first > utf8.MaxRune:
@@ -159,7 +159,7 @@ func validate(values [advancesField]int, advances []uint8, size image.Point) (me
 	}, nil
 }
 
-// readAdvances reads integers of 0–maxCell. The bounded input limits the
+// readAdvances reads integers of 0–MaxCell. The bounded input limits the
 // slice; the count check happens once all fields are known.
 func readAdvances(d *json.Decoder) ([]uint8, error) {
 	if err := delimiter(d, '['); err != nil {
@@ -171,8 +171,8 @@ func readAdvances(d *json.Decoder) ([]uint8, error) {
 		if err != nil {
 			return nil, err
 		}
-		if advance < 0 || advance > maxCell {
-			return nil, fmt.Errorf("entry %d must be 0–%d", len(advances)+1, maxCell)
+		if advance < 0 || advance > MaxCell {
+			return nil, fmt.Errorf("entry %d must be 0–%d", len(advances)+1, MaxCell)
 		}
 		advances = append(advances, uint8(advance)) // #nosec G115 -- Checked above.
 	}

@@ -13,6 +13,23 @@ import (
 // modify any slice, and returns no bytes on validation failure. The caller owns
 // the returned bytes.
 func Encode(rows []string, placements []Placement, zones []Zone) ([]byte, error) {
+	return encode(rows, placements, zones, 0)
+}
+
+// EncodeSight is Encode with a sight radius. A radius of 0 means the level sets
+// none and gives Encode's output; a radius from 1 to vision.MaxRadius writes
+// version 3 with a sight object, where every sight_block zone must be a trigger.
+// A version 3 level always writes its zones array, even when it is empty.
+func EncodeSight(rows []string, placements []Placement, zones []Zone, radius int) ([]byte, error) {
+	if radius != 0 {
+		if err := checkSight(radius); err != nil {
+			return nil, err
+		}
+	}
+	return encode(rows, placements, zones, radius)
+}
+
+func encode(rows []string, placements []Placement, zones []Zone, sight int) ([]byte, error) {
 	if len(rows) == 0 || len(rows) > maxSide {
 		return nil, fmt.Errorf("board must have 1–%d rows", maxSide)
 	}
@@ -28,7 +45,7 @@ func Encode(rows []string, placements []Placement, zones []Zone) ([]byte, error)
 			return nil, err
 		}
 	}
-	b := Board{rows: rows, placements: placements, zones: zones}
+	b := Board{rows: rows, placements: placements, zones: zones, sight: sight}
 	if err := b.checkPlacements(); err != nil {
 		return nil, err
 	}
@@ -38,9 +55,12 @@ func Encode(rows []string, placements []Placement, zones []Zone) ([]byte, error)
 
 	// Validation limits rows, kinds, and roles to ASCII that needs no JSON
 	// escaping. Reserve the maximum per entry so emission never grows the buffer.
-	data := make([]byte, 0, 64+len(rows)*(width+8)+len(placements)*96+len(zones)*160)
+	data := make([]byte, 0, 96+len(rows)*(width+8)+len(placements)*96+len(zones)*160)
 	version := byte('1')
-	if len(zones) != 0 {
+	switch {
+	case sight != 0:
+		version = '3'
+	case len(zones) != 0:
 		version = '2'
 	}
 	data = append(data, "{\n  \"version\": "...)
@@ -73,7 +93,7 @@ func Encode(rows []string, placements []Placement, zones []Zone) ([]byte, error)
 		data = append(data, "\n  "...)
 	}
 	data = append(data, ']')
-	if len(zones) != 0 {
+	if len(zones) != 0 || sight != 0 {
 		data = append(data, ",\n  \"zones\": ["...)
 		for i, z := range zones {
 			if i != 0 {
@@ -97,7 +117,15 @@ func Encode(rows []string, placements []Placement, zones []Zone) ([]byte, error)
 			}
 			data = append(data, '}')
 		}
-		data = append(data, "\n  ]"...)
+		if len(zones) != 0 {
+			data = append(data, "\n  "...)
+		}
+		data = append(data, ']')
+	}
+	if sight != 0 {
+		data = append(data, ",\n  \"sight\": {\"radius\": "...)
+		data = strconv.AppendInt(data, int64(sight), 10)
+		data = append(data, '}')
 	}
 	data = append(data, "\n}\n"...)
 	if len(data) > MaxBytes {

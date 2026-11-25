@@ -23,8 +23,13 @@
   <p id="status" role="status">Loading {{.}}…</p>
   <script src="wasm_exec.js"></script>
   <script>
-    /** @file Start the game once and report what keeps it from running. */
+    /** @file Start the game once, report what keeps it from running, and cache it for offline play. */
     const statusLine = document.querySelector("#status");
+
+    // Browsers allow service workers only in secure contexts, which include localhost.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js").catch(error => console.warn("Offline play is unavailable.", error));
+    }
 
     /** @returns {Promise<void>} Resolves when the game exits. */
     async function start() {

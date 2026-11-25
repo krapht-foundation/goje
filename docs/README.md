@@ -4,17 +4,17 @@ Goje is a Go game framework and toolchain in development. The project is focused
 
 The [runtime guide](runtime.md) explains how to step a scene headlessly, launch it on desktop or web, and collect a local diagnostics report. The [M1 performance baseline](runtime-baseline.md) documents how to measure the cost of diagnostics on both hosts.
 
-The [level authoring guide](levels.md) shows how to open, edit, and export a Goje level, including its collision zones, in the browser Level Builder, then validate and play it.
+The [level authoring guide](levels.md) shows how to edit, export, and play a Goje level with collision zones and authored sight.
 
 The [brand asset guide](brand/) covers the Goje logo and the Android, iOS, and web icon sets.
 
 The [collision guide](collision.md) explains how to move bodies against walls, trigger zones, and each other with exact, repeatable arithmetic, and how to build a world from a level. The [playground guide](playground.md#the-skirmish) describes the skirmish, a reference game in which squads of units block each other and fight.
 
-The [text and HUD guide](text-and-ui.md) shows how to draw text and build menus, and the [replay guide](replays.md) how to record, replay, save, and load a game. The [playground guide](playground.md#the-outpost) describes the outpost, a reference game that uses both together with commands for groups of units.
+The [text and HUD guide](text-and-ui.md) covers fonts, menus, and the Font Editor. The [replay guide](replays.md) covers local recordings and saved games.
 
-The [audio guide](audio.md) explains how to play overlapping and positional sounds, and the [vision guide](vision.md) how to give units line of sight and draw fog of war. The [building guide](building.md) shows how to turn a game into a web bundle and a package for macOS or Linux with `goje build` and `goje package`.
+The [audio guide](audio.md) covers overlapping sounds, positional cues, and music. The [vision guide](vision.md) explains line of sight and fog. The [building guide](building.md) covers desktop packages, installable web bundles, and signed updates.
 
-The [online play guide](online.md) explains how to keep several copies of a deterministic game in step with lockstep, and how to connect players through the relay. The [playground guide](playground.md#play-the-outpost-online) describes playing the outpost together from desktop and the browser.
+The [online play guide](online.md) explains lockstep, match logs, and the relay. The [playground guide](playground.md#play-the-outpost-online) shows how to host, join, or watch an outpost match.
 
 ## What Goje aims to provide
 

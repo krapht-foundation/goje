@@ -25,6 +25,7 @@ type Document struct {
 	occupancy     []int // Placement index plus one; zero means empty.
 	placements    []level.Placement
 	zones         []level.Zone
+	sight         int // Sight radius in cells; zero means the level sets none.
 	brush         byte
 	stroke        []int
 	history       []transaction
@@ -42,11 +43,13 @@ func (d *Document) Open(r io.Reader) error {
 		return fmt.Errorf("open level: %w", err)
 	}
 	w, h := board.Size()
+	sight, _ := board.Sight()
 	next := Document{
 		width: w, height: h,
 		terrain: make([]byte, w*h), occupancy: make([]int, w*h),
 		placements: slices.Collect(board.Placements()),
 		zones:      slices.Collect(board.Zones()),
+		sight:      sight,
 	}
 	for y := range h {
 		for x := range w {
@@ -95,7 +98,7 @@ func (d *Document) Export() ([]byte, error) {
 	for y := range rows {
 		rows[y] = terrain[y*d.width : (y+1)*d.width]
 	}
-	data, err := level.Encode(rows, d.placements, d.zones)
+	data, err := level.EncodeSight(rows, d.placements, d.zones, d.sight)
 	if err != nil {
 		return nil, fmt.Errorf("export level: %w", err)
 	}

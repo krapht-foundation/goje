@@ -63,6 +63,12 @@ func loadOutpostSounds(root fs.FS) ([]audio.Clip, error) {
 func (s *outpostSession) play(tick engine.Tick) {
 	now := s.sim.Ticks()
 	for _, e := range s.sim.Events() {
+		if s.versus && !s.seen(e.At.X.Float64(), e.At.Y.Float64()) {
+			u, ok := s.sim.Unit(e.Unit)
+			if !ok || u.Team != s.fogTeam {
+				continue
+			}
+		}
 		var cue int
 		switch e.Kind {
 		case skirmish.EventBoltFired:
@@ -86,7 +92,7 @@ func (s *outpostSession) play(tick engine.Tick) {
 		s.cue(tick, cueOrder, now, 1, 0)
 	}
 	s.ordered = false
-	if s.outcome != outcomePlaying && s.outcome != s.announced {
+	if s.outcome != outcomePlaying && s.outcome != outcomeDraw && s.outcome != s.announced {
 		cue := cueVictory
 		if s.outcome == outcomeDefeat {
 			cue = cueDefeat
@@ -107,4 +113,37 @@ func (s *outpostSession) cue(tick engine.Tick, cue int, now uint64, gain, pan fl
 	}
 	s.lastCue[cue] = now
 	tick.PlaySoundAt(cue, gain, pan)
+}
+
+// updateMusic follows the local UI and leaves the loop running across a scene
+// transition, so starting a match does not restart the title's track.
+func (a *outpostApp) updateMusic(tick engine.Tick) {
+	if _, ok := tick.Sound().(engine.MusicOutput); !ok {
+		return
+	}
+	var on bool
+	switch a.state {
+	case stateTitle, stateLobby:
+		on = true
+	case statePlaying, statePaused, stateOnline:
+		on = a.session.outcome == outcomePlaying
+	case stateWatching:
+		on = !a.player.Done()
+	case stateMatchWatch:
+		on = !a.matchPlayer.done()
+	case stateOnlineEnded:
+	}
+	gain := a.world.volume * 0.35
+	if a.state == statePaused || a.state == stateOnline && a.onlineMenu {
+		gain *= 0.3
+	}
+	switch {
+	case !on && a.musicOn:
+		tick.StopMusic(500)
+	case on && !a.musicOn:
+		tick.PlayMusic(0, gain, 500)
+	case on && a.musicGain != gain:
+		tick.SetMusicGain(gain, 200)
+	}
+	a.musicOn, a.musicGain = on, gain
 }

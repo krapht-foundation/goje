@@ -337,5 +337,3 @@ func TestOrderGroupSpreadsTheGroupWithoutAllocating(t *testing.T) {
 		t.Fatalf("OrderGroup allocated %v times", n)
 	}
 }
-
-func abs(v int) int { return max(v, -v) }

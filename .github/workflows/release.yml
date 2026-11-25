@@ -17,9 +17,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -53,15 +56,22 @@ jobs:
             version=${GITHUB_REF_NAME#v}
           fi
           mkdir -p .build
-          go build -o .build/goje ./cmd/goje
+          goje=.build/goje$(go env GOEXE)
+          go build -o "$goje" ./cmd/goje
           for game in playground:./cmd/playground beacon:./examples/beacon; do
             name=goje-${game%%:*}
-            .build/goje package -o "dist/$name" -name "$name" -version "$version" \
+            "$goje" package -o "dist/$name" -name "$name" -version "$version" \
               -id "io.github.krapht-foundation.$name" "${game#*:}"
           done
           # Each package writes its own checksums; the release job writes one combined file.
           mkdir -p dist/release
-          cp dist/goje-*/release/goje-* dist/release/
+          if [[ $RUNNER_OS == Windows ]]; then
+            # Windows records no execute bits, so its web archives differ from the
+            # Unix ones in game.wasm's mode; only its desktop archives are released.
+            cp dist/goje-*/release/goje-*-windows-* dist/release/
+          else
+            cp dist/goje-*/release/goje-* dist/release/
+          fi
           ls -l dist/release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

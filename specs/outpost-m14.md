@@ -1,4 +1,4 @@
-# Outpost: the reference game of M14 and M15
+# Outpost: the reference game of M14–M17
 
 The outpost is the playground fixture that exercises the milestone 14 features together: [text and widgets](font-v1.md), pointer input and group selection, the [RTS orders](skirmish-m13.md#orders-and-stances-m14) of the skirmish simulation, [recordings](replay-v1.md), and [saved games](save-v1.md). Milestone 15 revised it, as the section [The M15 revision](#the-m15-revision) describes: line of sight and fog of war from [vision](vision-m15.md), positional sound from the [mixer](audio-mixer-m15.md), and touch and gamepad control. It is selected with `GOJE_PLAYGROUND=outpost` on desktop and `?fixture=outpost` in the browser. The skirmish fixture is unchanged and keeps its own pinned traces.
 
@@ -57,25 +57,42 @@ Both are interpreted inside the scene from the recorded input, so a match played
 
 ## Online play (M16)
 
-When the host is configured with a relay, the title menu gains **Host online game** and, when a room code is also given, **Join room CODE**. The relay is `GOJE_RELAY` on desktop and the `relay` query parameter in the browser, and the room is `GOJE_ROOM` or the `room` parameter. A value that is not a `ws://` or `wss://` address without a path, or a room that is not six characters of the code alphabet, is ignored. The [relay](relay-m16.md) pairs the players and the [lockstep protocol](lockstep-m16.md) keeps their matches in step. The design is in [RFC 0017](../rfcs/0017-m16-online-lockstep-play.md).
+With a relay configured, the title menu adds **Host co-op**, **Host versus**, and **Join room CODE** when a room code is given. Set `GOJE_RELAY` and `GOJE_ROOM` on desktop or `relay` and `room` in the browser. Invalid addresses or room codes are ignored. The [relay](relay-m16.md) pairs players and the [lockstep protocol](lockstep-m16.md) keeps their matches in step.
 
-The outpost gains three states:
+The title has a **Guards: Classic/Tactical** option that applies to new solo and hosted co-op matches. Tactical guards use the [opt-in skirmish rules](skirmish-m13.md#versus-and-tactics-m17). Versus ignores this option because the guest commands the guards.
 
 | State | What it shows | Keys and pointer |
 | --- | --- | --- |
 | Lobby | The connection being made, and for a host the room code and a wait for the guest. | **Escape** or a gamepad's Start button cancels and returns to the title. |
-| Online | The match, with the partner's scouts in teal, a notice while it waits for the other player, and a menu: Resume, Sound, Leave the match. | The match controls, except that **R** does nothing. **Escape**, Start, or the Menu button opens the menu over a match that keeps running. |
-| Ended | One or more lines that say why the match ended: the other player left, stopped responding, sent invalid data, the games no longer agree, or the connection was lost. | **Enter**, **Escape**, Start, or a tap returns to the title. |
+| Online | The match, a notice while it waits for the other player, and a menu with Resume, Sound, and Leave the match. In co-op, the partner's scouts are teal. | The match controls, except that **R** does nothing. **Escape**, Start, or the Menu button opens the menu over a match that keeps running. |
+| Ended | The result or the reason the game stopped: a leave, stall, invalid data, divergence, or a lost connection. | **Enter**, **Escape**, Start, or a tap returns to the title. |
+| Watching an online match | The last recorded match reconstructed without a relay, with a free camera. The final state remains on screen. | **Tab** or the **Fog** button switches the viewing team. **Escape**, Start, or **Leave** returns to the title. |
 
-A match has two players, and the guards stay under the simulation's control, so it is cooperative. The first player commands the scouts with odd IDs and the second those with even IDs. Selection, a box, and a control group contain only the player's own scouts. A command that a player gives is encoded as an [M16 command](skirmish-m13.md#commands-m16), sent through the session, and applied at the scheduled tick by every copy in player order, the player's own included, so each copy changes its units only through commands that every copy has. A received command that names a unit that does not exist, is not a scout, or is not the sender's ends the match, because an honest copy never sends one. A scout that fell after the command was issued is allowed.
+### Match setup and ownership
 
-The session runs at the lockstep delay of five, so a command takes effect six ticks, 100 ms, after it was issued. The match checks the hash of the simulation, `Sim.Trace`, every 60 ticks and ends when the limit of 600 ticks without the other player's commands passes. Selection, the camera, the volume, and the menus are local and are not in the hash. A match is not recorded, saved, or restored, and a match started with the **Start** entry is unchanged by any of this.
+After the guest joins, the host sends exactly three bytes before its lockstep Hello: `0x53`, mode (`0` co-op, `1` versus), and tactics (`0` Classic, `1` Tactical). Versus requires tactics `0`. The guest refuses any other setup. The Hello checks the content hash for the selected level and rules.
+
+In co-op, the first player owns the scouts with odd IDs and the second owns the even IDs; the guards are still driven by the simulation. In versus, the first player owns all scouts and the second owns all guards. [`versus.json`](../cmd/playground/levels/versus.json) is an 11 × 9 [version 3 level](level-v3.md) with mirrored spawns and walls, two sight-blocking hedges, and no alarm. Each side sees and hears the events it can observe, and the HUD counts the opponents in sight. A side wins when only its units remain; no living units on either side is a draw.
+
+Only units owned by the local player can be selected or put in a control group. Commands use the [M16 encoding](skirmish-m13.md#commands-m16). Both copies validate the full tick, apply its commands in player order, then step. A command that names an unknown unit or one its sender does not own ends the match. A fallen unit the sender owns is allowed.
+
+The session runs with a delay of five, so an order takes effect after six ticks, or 100 ms at 60 Hz. The simulation trace is checked every 60 ticks, and a wait of 600 updates ends the match. At a natural result, both copies stop stepping and wait for confirmation of the final tick before closing. The camera, selection, volume, and menus are local and do not affect the trace.
+
+### Recording and playback
+
+Each player saves the [match log](match-log-v1.md) as `last-online` when the match exits, even after a disconnect, leave, or desync. It contains only completed ticks and local checkpoints, including a final hash; pending commands do not appear. If the log fills, the app keeps the recorded prefix and reports the limit. If storage is unavailable, the app keeps the last log for the current run.
+
+**Watch last online match** checks the log's content and replays the same commands without a connection. At a mismatched checkpoint it stops and reports the divergent tick. Online matches cannot be saved as resumable snapshots.
+
+### Music
+
+The title and match share a [score](music-m17.md) rendered once on startup. The music plays across the title-to-match transition, ducks under either in-game menu, and fades out when the match ends. The **Sound** setting controls both the music and the cues. In a browser, the host waits for a user gesture before playing.
 
 ## What a recording and a save hold
 
 A match is the `outpostSession` scene. It reads only the input it is given and its own state, so it is replayable under the rules in [Make a scene replayable](../docs/replays.md#make-a-scene-replayable). `StateHash` digests the simulation's trace, which includes the explored cells, the selection and groups, the pending mode, a drag in progress, the zoom, the camera center, and the state of the touch buttons and the gamepad cursor. The recorder samples it at its checkpoint interval, and playback fails with a divergence error at the first checkpoint that differs.
 
-The content check of both formats is `replay.ContentHash` of the level file's bytes and the string `outpost-2`. A level edited in the Level Builder, or a change to the rules that the level cannot express, retires old recordings and saves. Changing the string `outpost-2` retires them deliberately.
+The Classic content check is `replay.ContentHash` of the level file's bytes and `outpost-2`. Tactical solo and co-op derive a distinct check from that value and `tactical-1`; solo playback and loading choose the rules from the check, not the current title option. Versus uses the hash of its level file and `versus-1`. A different level or rule version fails the content check.
 
 A snapshot is one tag byte with the value 2, then the following in little-endian order:
 
@@ -96,8 +113,8 @@ A host without storage plays without saving: Save and Load report that saving is
 
 ## Verification
 
-- Headless tests in `cmd/playground` cover two players' copies of a match over an in-memory network with and without latency agreeing on every checked tick and selecting only their own scouts, a player who stops being stalled out, forged commands being rejected, a changed hash stopping both players, and the launch parameters.
-- `make smoke-online` plays a match between a native host with no window and the WebAssembly build in Chromium through a real relay, requires fifteen hashes to be logged by both and to be equal, and then injects a changed hash into the host and requires both players to report it.
+- Headless tests exercise command ownership and fog in co-op and versus, stalled and malicious peers, result confirmation, persistence, and replay checkpoint verification.
+- `make smoke-online` runs co-op, an injected mismatch, and versus across a native host and Chromium. The versus run also plays back both locally recorded logs.
 - Headless tests in `cmd/playground` cover box, click, Shift, and group selection, every order and mode, a drag that never releases, snapshot restore at several ticks continuing identically, damaged snapshots, the recorded fight with a pinned trace and a divergence from a changed input, the app flow with an in-memory store, and a draw that allocates nothing.
 - Further headless tests cover fog hiding the guards until a scout sees them and never listing a guard the scouts cannot see, the sounds of the recorded fight, their range, rate limit, determinism, and independence from the volume, a gamepad moving a cursor and clicking, touch buttons giving commands without starting a drag, a match played by pad alone replaying and restoring exactly, and Start opening and closing the pause menu.
 - `make smoke-desktop` runs `--outpost`, which scripts the title, the recorded fight to a victory, a restart, a drag selection with the box drawn, hold, pause, save, load, quitting, playing back the recording, a touch tap that shows the buttons, a gamepad cursor, and Start pausing, checking text, markers, bolts, and that the guards and their ground are not drawn at the start in the native back buffer.

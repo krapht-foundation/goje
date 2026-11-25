@@ -1,5 +1,6 @@
-// Package soundmaker owns the Sound Maker's effect settings, deterministic
-// synthesis, and WAV export. It does not choose files or own preview state.
+// Package soundmaker owns the Sound Maker's effect settings and music score
+// documents, their deterministic synthesis, and their export. It does not
+// choose files or own preview state.
 package soundmaker
 
 import (
@@ -11,14 +12,14 @@ import (
 	"github.com/krapht-foundation/goje/audio"
 )
 
-// Waveform selects the oscillator shape.
-type Waveform string
+// Waveform selects the oscillator shape that effects and scores share.
+type Waveform = audio.Waveform
 
 // The supported oscillator shapes.
 const (
-	Sine     Waveform = "sine"
-	Triangle Waveform = "triangle"
-	Square   Waveform = "square"
+	Sine     = audio.Sine
+	Triangle = audio.Triangle
+	Square   = audio.Square
 )
 
 // Bounds on every control. Pitch stays well under the 24 kHz Nyquist limit.
@@ -58,9 +59,7 @@ func Default() Settings {
 
 // Validate reports the first control outside its bounds.
 func (s Settings) Validate() error {
-	switch s.Waveform {
-	case Sine, Triangle, Square:
-	default:
+	if !s.Waveform.Valid() {
 		return fmt.Errorf("waveform %q is not sine, triangle, or square", s.Waveform)
 	}
 	for _, pitch := range []struct {
@@ -107,7 +106,7 @@ func render(s Settings) []byte {
 		if tail := n - 1 - i; tail < release {
 			gain = min(gain, float64(tail)/float64(release))
 		}
-		v := amplitude * gain * oscillate(s.Waveform, phase)
+		v := amplitude * gain * s.Waveform.Oscillate(phase)
 		//nolint:gosec // G115: |v| <= 0.8, so the rounded value fits int16.
 		binary.LittleEndian.PutUint16(pcm[2*i:], uint16(int16(math.Round(v*32767))))
 		freq := float64(s.StartHz) + float64(s.EndHz-s.StartHz)*float64(i)/float64(n)
@@ -115,29 +114,6 @@ func render(s Settings) []byte {
 		phase -= math.Floor(phase)
 	}
 	return pcm
-}
-
-// oscillate returns one sample in [-1, 1] for a phase in [0, 1).
-func oscillate(w Waveform, phase float64) float64 {
-	switch w {
-	case Triangle:
-		// Starts at zero like the sine: up, down, then back to zero.
-		switch {
-		case phase < 0.25:
-			return 4 * phase
-		case phase < 0.75:
-			return 2 - 4*phase
-		default:
-			return 4*phase - 4
-		}
-	case Square:
-		if phase < 0.5 {
-			return 1
-		}
-		return -1
-	default:
-		return math.Sin(2 * math.Pi * phase)
-	}
 }
 
 // Document holds the current effect. Its zero value is not usable; call New.

@@ -5,15 +5,20 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/krapht-foundation/goje/update"
 )
 
 // fakeBuild writes a build output with a deliberately unsorted creation order and odd modes.
@@ -66,14 +71,14 @@ func TestPackDeterministic(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
 	fakeBuild(t, first)
 	modTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := pack(first, "game", "1.0.0", "linux-amd64", modTime); err != nil {
+	if err := pack(first, "game", "1.0.0", "linux-amd64", modTime, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := readRelease(t, first)
 	// Rebuilding elsewhere with new file times must give the same bytes.
 	time.Sleep(10 * time.Millisecond)
 	fakeBuild(t, second)
-	if err := pack(second, "game", "1.0.0", "linux-amd64", modTime); err != nil {
+	if err := pack(second, "game", "1.0.0", "linux-amd64", modTime, nil); err != nil {
 		t.Fatal(err)
 	}
 	for name, data := range readRelease(t, second) {
@@ -118,7 +123,7 @@ func checkZip(tb testing.TB, data []byte, modTime time.Time) {
 		checkContent(tb, file.Open, "web/"+file.Name)
 	}
 	want := []string{
-		"game.wasm -rwxr-xr-x", "index.html -rw-r--r--", "manifest.webmanifest -rw-r--r--",
+		"game.wasm " + executableMode(), "index.html -rw-r--r--", "manifest.webmanifest -rw-r--r--",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		tb.Errorf("zip entries = %q, want %q", got, want)
@@ -160,10 +165,119 @@ func checkTar(tb testing.TB, data []byte, modTime time.Time) {
 	}
 	want := []string{
 		"data/ drwxr-xr-x", "data/a.txt -rw-r--r--", "data/z.txt -rw-r--r--",
-		"game -rwxr-xr-x", "game.desktop -rw-r--r--", "game.png -rw-r--r--",
+		"game " + executableMode(), "game.desktop -rw-r--r--", "game.png -rw-r--r--",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		tb.Errorf("tar entries = %q, want %q", got, want)
+	}
+}
+
+// executableMode is the archived mode of a file with an execute bit. Windows
+// file systems have no execute bits, so every file there archives as 0644.
+func executableMode() string {
+	if runtime.GOOS == "windows" {
+		return "-rw-r--r--"
+	}
+	return "-rwxr-xr-x"
+}
+
+func TestPackWindows(t *testing.T) {
+	t.Parallel()
+	out := t.TempDir()
+	fakeBuild(t, out)
+	for _, name := range []string{
+		"desktop/windows-amd64/game.exe", "desktop/windows-amd64/data/a.txt",
+	} {
+		path := filepath.Join(out, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pack(out, "game", "1.0.0", "windows-amd64", defaultDate, nil); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(out, "release"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	want := "SHA256SUMS,game-1.0.0-web.zip,game-1.0.0-windows-amd64.zip"
+	if strings.Join(names, ",") != want {
+		t.Fatalf("release = %q, want %s", names, want)
+	}
+	data, err := os.ReadFile(filepath.Join(out, "release", "game-1.0.0-windows-amd64.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(archive.File))
+	for _, file := range archive.File {
+		if !file.Modified.Equal(defaultDate) || file.Method != zip.Deflate {
+			t.Errorf("%s: time %v method %d", file.Name, file.Modified, file.Method)
+		}
+		got = append(got, file.Name+" "+file.Mode().String())
+		checkContent(t, file.Open, "desktop/windows-amd64/"+file.Name)
+	}
+	if want := "data/a.txt -rw-r--r--,game.exe -rw-r--r--"; strings.Join(got, ",") != want {
+		t.Errorf("zip entries = %q, want %s", got, want)
+	}
+}
+
+func TestPackSigned(t *testing.T) {
+	t.Parallel()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var releases [2]map[string][]byte
+	for i := range releases {
+		out := t.TempDir()
+		fakeBuild(t, out)
+		if err = pack(out, "game", "1.0.0", "linux-amd64", defaultDate, private); err != nil {
+			t.Fatal(err)
+		}
+		releases[i] = readRelease(t, out)
+		for _, name := range []string{"SHA256SUMS.sig", "update.json"} {
+			if releases[i][name], err = os.ReadFile(filepath.Join(out, "release", name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	files := releases[0]
+	for name, data := range releases[1] {
+		if !bytes.Equal(data, files[name]) {
+			t.Errorf("%s differs between two signed packages of the same build", name)
+		}
+	}
+	if !ed25519.Verify(public, files["SHA256SUMS"], files["SHA256SUMS.sig"]) {
+		t.Error("SHA256SUMS.sig does not verify")
+	}
+	manifest, err := update.Verify(files["update.json"], public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Name != "game" || manifest.Version != "1.0.0" || len(manifest.Files) != 2 {
+		t.Fatalf("manifest = %+v", manifest)
+	}
+	// update.json and SHA256SUMS describe the same archives.
+	var sums strings.Builder
+	for _, file := range manifest.Files {
+		sums.WriteString(file.SHA256 + "  " + file.Name + "\n")
+		if file.Size != int64(len(files[file.Name])) {
+			t.Errorf("%s: size %d, want %d", file.Name, file.Size, len(files[file.Name]))
+		}
+	}
+	if sums.String() != string(files["SHA256SUMS"]) {
+		t.Errorf("update.json files %q disagree with SHA256SUMS %q", sums.String(), files["SHA256SUMS"])
 	}
 }
 
@@ -192,7 +306,7 @@ func TestPackWebOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(out, "release", "old.zip"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := pack(out, "game", "1.0.0", "", defaultDate); err != nil {
+	if err := pack(out, "game", "1.0.0", "", defaultDate, nil); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Join(out, "release"))
@@ -209,7 +323,7 @@ func TestPackRejectsSymlinks(t *testing.T) {
 	if err := os.Symlink("/etc/passwd", filepath.Join(out, "web", "link")); err != nil {
 		t.Skipf("cannot create symlink: %v", err)
 	}
-	if err := pack(out, "game", "1.0.0", "", defaultDate); err == nil ||
+	if err := pack(out, "game", "1.0.0", "", defaultDate, nil); err == nil ||
 		!strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("symlink error = %v", err)
 	}

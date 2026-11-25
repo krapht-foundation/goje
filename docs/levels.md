@@ -29,6 +29,19 @@ Run `make smoke-zone-roundtrip` to author the yard's deck and doorway in Chromiu
 
 Run `make smoke-placement-editor` to exercise adding, rejecting, changing, deleting, undoing, and exporting placements in Chromium. Run `make smoke-outpost-roundtrip` to strip the outpost level down to its terrain, add its twelve placements and two zones through the Level Builder's forms, export the result, and play it on desktop and web. It needs the same graphics session as the zone round trip.
 
+## Set what units can see
+
+A level can set how far units see and which cells block their sight. A level with a sight radius is a [version 3 level](../specs/level-v3.md); the Level Builder writes version 1 or 2, as before, when the radius is 0.
+
+1. Open a level, such as the [versus level](../cmd/playground/levels/versus.json).
+2. In the **Vision** panel, type the **Sight radius** in cells, from 1 to 181, and choose **Set sight radius**. Type 0 to remove it. Each change is one action that **Undo** and **Redo** step through, and the field follows them.
+3. To add a hedge, choose **Sight block preset** in the **Zones** panel. It sets the kind to `sight_block`, the role to trigger, and the heights to 0 to 32, and keeps the column, row, width, and height. Then draw the zone with **Draw zone** or type its cells and choose **Add zone**. A sight block hides what is behind it but does not stop movement, so units can walk through a hedge.
+4. Export the level. A `sight_block` zone whose role you changed to solid is reported and not written, because a solid already blocks movement.
+
+A game reads the radius from `board.Sight()` and builds its blocked mask once from `board.SightBlocked(x, y)`, then adds its walls to that mask.
+
+After `make setup-web` and `make build-level-editor`, run `PLAYWRIGHT_BROWSERS_PATH=.build/playwright node scripts/smoke-versus-editor.mjs /tmp/versus.json`. It strips the shipped versus level to its terrain, sets the radius, undoes and redoes it, adds the twelve units and both hedges through the forms, and checks that the export equals the shipped file byte for byte.
+
 ## Add and remove placements
 
 A placement is a game-defined object, such as a unit, on one floor cell. Each has an ID that is unique in the level and a kind, such as `scout` or `guard`. A kind starts with a lowercase letter, continues with lowercase letters, digits, or underscores, and has at most 32 characters. The decoder checks only that a kind is well formed, so a game must reject the kinds it does not support.
@@ -45,7 +58,7 @@ After `make setup-web`, run `make build-level-editor` and then `PLAYWRIGHT_BROWS
 
 ## Validate a level from the command line
 
-A Goje level is a JSON document with walkable cells, walls, named placements, and, from version 2, collision zones. Edit the [authored courtyard](../cmd/playground/levels/courtyard.json) in a text editor, then validate it from the repository root:
+A Goje level is a JSON document with walkable cells, walls, named placements, from version 2, collision zones, and, from version 3, a sight radius. Edit the [authored courtyard](../cmd/playground/levels/courtyard.json) in a text editor, then validate it from the repository root:
 
 ```sh
 go run ./cmd/levelcheck cmd/playground/levels/courtyard.json
@@ -53,9 +66,9 @@ go run ./cmd/levelcheck cmd/playground/levels/courtyard.json
 
 Replace a `#` with `.` in one of the courtyard rows to open that ground cell. `levelcheck` reports the board size, placement count, and zone count, or points to a malformed field or invalid cell. The courtyard needs one `scout` and one `lookout`; the validator checks the same rule and never rewrites the file, so it rejects the skirmish level, which lists several scouts and guards.
 
-Other games can use `level.Decode` with a reader they supply. The decoder validates geometry and identifier syntax; the game must decide which placement kinds it can instantiate. See the [v1](../specs/level-v1.md) and [v2](../specs/level-v2.md) format specifications for coordinates, bounds, and compatibility.
+Other games can use `level.Decode` with a reader they supply. The decoder validates geometry and identifier syntax; the game must decide which placement kinds it can instantiate. See the [v1](../specs/level-v1.md), [v2](../specs/level-v2.md), and [v3](../specs/level-v3.md) format specifications for coordinates, bounds, and compatibility.
 
-Tools that already hold terrain rows, placements, and zones can call `level.Encode`. It validates the same constraints as `Decode`, preserves row, placement, and zone order, writes version 1 when there are no zones and version 2 otherwise, and returns deterministic JSON bytes. It does not open or overwrite a file. The [Level Builder RFC](../rfcs/0005-m4-level-builder.md) describes the browser editor workflow.
+Tools that already hold terrain rows, placements, and zones can call `level.Encode`. It validates the same constraints as `Decode`, preserves row, placement, and zone order, writes version 1 when there are no zones and version 2 otherwise, and returns deterministic JSON bytes. `level.EncodeSight` takes a sight radius as well and writes version 3 when it is not 0. Neither opens or overwrites a file. The [Level Builder RFC](../rfcs/0005-m4-level-builder.md) describes the browser editor workflow.
 
 ## Validate a project from the command line
 

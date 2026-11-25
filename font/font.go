@@ -56,6 +56,27 @@ func (f Face) LineHeight() int { return f.cell.Y }
 // scale 1, for aligning text with other art.
 func (f Face) Baseline() int { return f.baseline }
 
+// Cell returns the width and height of every glyph cell in sheet pixels.
+func (f Face) Cell() image.Point { return f.cell }
+
+// First returns the code point of glyph 0.
+func (f Face) First() rune { return f.first }
+
+// Count returns the number of glyphs. Glyph n holds code point First() + n
+// and sits in cell n of the sheet, left to right and then top to bottom.
+func (f Face) Count() int { return f.count }
+
+// Monospaced reports whether every glyph advances by the cell width, with or
+// without an advances list.
+func (f Face) Monospaced() bool {
+	for _, advance := range f.advances {
+		if int(advance) != f.cell.X {
+			return false
+		}
+	}
+	return true
+}
+
 // Draw paints text with the upper-left corner of its first cell at (x, y),
 // using one ImageTinted call per glyph, each cell scale times its sheet size.
 // A scale below 1 draws at scale 1. Each UTF-8 rune is one glyph, and \n

@@ -46,7 +46,7 @@ func (s *scene) Draw(canvas engine.Canvas) {
 
 ## Make your own font
 
-A font sheet is a PNG of equal cells plus a short JSON description. Paint the glyphs in white on transparent, for example in the Pixel Art Maker, in code-point order, left to right and then top to bottom:
+A font sheet is a PNG of equal cells plus a short JSON description. The easiest way to make one is the Font Editor, below. You can also paint the glyphs yourself in white on transparent, for example in the Pixel Art Maker, in code-point order, left to right and then top to bottom:
 
 ```json
 { "version": 1, "cellWidth": 8, "cellHeight": 10, "baseline": 8, "first": 32, "count": 95 }
@@ -59,6 +59,20 @@ go run ./cmd/fontcheck my-font.png my-font.json
 ```
 
 Load it with `font.Decode(pngReader, jsonReader)` and pack it into your atlas as above.
+
+### Edit a font in the browser
+
+The Font Editor edits monospaced fonts: every glyph has the same cell. Start it from the repository root and open the address it prints:
+
+```sh
+make serve-font-editor
+```
+
+- **Built-in font** opens Goje's own 5 × 7 font, so you can restyle it. **Open PNG and JSON** opens an existing font; choose both files together. **New font** starts a blank one from a cell size, a baseline, the first code point, and a glyph count.
+- Choose a glyph by typing its character in **Character**, with **Previous** and **Next**, or by clicking it in the sheet below. Paint with **Pencil** and clear with **Eraser**, by dragging or with the arrow keys and **Enter**. The yellow line is the baseline. **Undo** and **Redo** step through whole strokes.
+- **Download PNG** and **Download JSON** save the pair. It passes `fontcheck` and loads with `font.Decode` exactly as the editor showed it.
+
+The editor refuses a font with an `advances` list that differs from the cell width rather than drop those widths; edit such a font by hand. It saves the sheet with 16 glyphs a row, or more when a font has too many glyphs for 512 pixels of rows, so an opened font's PNG can change layout while its glyphs stay the same. The [Font Editor specification](../specs/font-editor-m17.md) lists every rule.
 
 ## Build a HUD and menus
 

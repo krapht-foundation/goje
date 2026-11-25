@@ -102,3 +102,48 @@ jobs:
         run: make smoke-online
       - name: Build and package Beacon with goje
         run: xvfb-run -a make smoke-goje-build
+      - name: Edit a glyph in the Font Editor and render the export
+        run: xvfb-run -a make smoke-font-editor
+      - name: Author the versus level in the Level Builder
+        run: xvfb-run -a make smoke-versus-editor
+
+  # Provisional, as RFC 0018 records: if this job cannot pass, the Windows
+  # target is reverted and documented as unsupported.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CGO_ENABLED: 1
+      MESA_VERSION: 26.3.1
+      MESA_SHA256: 64e84cf13d67dd354640bf443ed0445e6a83afd06a5729f0750b3744d633b3f1
+    steps:
+      # Pinned traces and golden files are compared byte for byte.
+      - name: Keep checked-out line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - name: Check the C compiler for cgo
+        run: gcc --version
+      - name: Vet the desktop host and build tools
+        run: go vet ./platform/ ./internal/platform/... ./cmd/goje/ ./update/ ./examples/beacon/
+      - name: Test the build, package, signing, and desktop host logic
+        run: go test ./cmd/goje/ ./update/ ./internal/platform/...
+      - name: Install Mesa's software OpenGL for the windowless runner
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o mesa.7z \
+            "https://github.com/pal1000/mesa-dist-win/releases/download/$MESA_VERSION/mesa3d-$MESA_VERSION-release-msvc.7z"
+          echo "$MESA_SHA256  mesa.7z" | sha256sum -c
+          7z x -omesa mesa.7z > /dev/null
+          echo "MESA_DIR=$PWD/mesa/x64" >> "$GITHUB_ENV"
+      - name: Build, package, and run Beacon with goje
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: bash scripts/smoke-goje-windows.sh

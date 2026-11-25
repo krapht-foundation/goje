@@ -198,7 +198,7 @@ func TestEncodeRejects(t *testing.T) {
 		"large start":         func(r *replay.Recording) { r.Start = make([]byte, replay.MaxStartSize+1) },
 		"empty run":           func(r *replay.Recording) { r.Runs[0].Ticks = 0 },
 		"too many ticks":      func(r *replay.Recording) { r.Runs[0].Ticks = replay.MaxTicks },
-		"unknown held key":    func(r *replay.Recording) { r.Runs[0].Input.Held = engine.Key9 << 1 },
+		"unknown held key":    func(r *replay.Recording) { r.Runs[0].Input.Held = engine.KeyTab << 1 },
 		"unknown pressed key": func(r *replay.Recording) { r.Runs[0].Input.Pressed = 1 << 31 },
 		"same adjacent runs":  func(r *replay.Recording) { r.Runs[1].Input = r.Runs[0].Input },
 		"checkpoint order":    func(r *replay.Recording) { r.Checkpoints[1].Tick = 2 },
@@ -321,6 +321,7 @@ func TestDecodeRejectsNonCanonicalRuns(t *testing.T) {
 	}
 	for _, data := range [][]byte{
 		run(1 << 12),
+		run(1, 0, 0, 0, 2), // Tab extends the key bit set without changing the layout.
 		run(touches, list(1, touch(1))...),
 		run(pads, list(2, pad(0), pad(3))...),
 		run(touches|pads, append(list(1, touch(9)), list(1, pad(2))...)...),
@@ -336,7 +337,7 @@ func TestDecodeRejectsNonCanonicalRuns(t *testing.T) {
 		"held zero":        {run(1, 0, 0, 0, 0), "held keys flagged but empty"},
 		"pressed zero":     {run(2, 0, 0, 0, 0), "pressed keys flagged but empty"},
 		"pointer zero":     {run(4, make([]byte, 16)...), "coordinates flagged but zero"},
-		"unknown key":      {run(1, 0, 0, 0, 2), "unknown key bits"},
+		"unknown key":      {run(1, 0, 0, 0, 4), "unknown key bits"},
 		"no touches":       {run(touches, 0), "touch count 0"},
 		"too many touches": {run(touches, 6), "touch count 6"},
 		"inactive touch":   {run(touches, list(2, touch(1), touch(0))...), "touch 1 is inactive"},

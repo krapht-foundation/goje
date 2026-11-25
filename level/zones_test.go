@@ -45,7 +45,7 @@ func TestDecodeRejectsInvalidZones(t *testing.T) {
 		{"version 1 with zones", `"version":2`, `"version":1`, "zones need version 2"},
 		{"misspelled zones field", `"zones":[`, `"xzones":[`, `unknown field "xzones"`},
 		{"missing zones", validV2, head + `}`, `missing field "zones"`},
-		{"version 3", `"version":2`, `"version":3`, "unsupported level version 3"},
+		{"version 4", `"version":2`, `"version":4`, "unsupported level version 4 (want 1, 2, or 3)"},
 		{"duplicate zones field", `"zones":[`, `"zones":[],"zones":[`, `duplicate field "zones"`},
 		{"null zones", validV2, head + `,"zones":null}`, "expected"},
 		{"missing zone field", `"role":"solid",`, ``, `missing field "role"`},
@@ -220,6 +220,8 @@ func FuzzDecodeZones(f *testing.F) {
 	f.Add(
 		`{"version":2,"rows":["."],"placements":[],"zones":[{"id":1,"kind":"a","role":"trigger","x":0,"y":0,"w":1,"h":1,"bottom":0,"top":1}]}`,
 	)
+	f.Add(validV3)
+	f.Add(`{"version":3,"rows":["."],"placements":[],"zones":[],"sight":{"radius":181}}`)
 	f.Fuzz(func(t *testing.T, input string) {
 		board, err := level.Decode(strings.NewReader(input))
 		if err != nil {
@@ -234,10 +236,12 @@ func FuzzDecodeZones(f *testing.F) {
 			ids[z.ID] = true
 		}
 		// Anything the decoder accepts, the encoder must write and the decoder read back unchanged.
-		data, err := level.Encode(
+		radius, _ := board.Sight()
+		data, err := level.EncodeSight(
 			rowsOf(board),
 			slices.Collect(board.Placements()),
 			slices.Collect(board.Zones()),
+			radius,
 		)
 		if err != nil {
 			t.Fatalf("encode of an accepted level: %v", err)
@@ -245,6 +249,9 @@ func FuzzDecodeZones(f *testing.F) {
 		again, err := level.Decode(bytes.NewReader(data))
 		if err != nil || !slices.Equal(slices.Collect(again.Zones()), slices.Collect(board.Zones())) {
 			t.Fatalf("round trip changed zones: %v", err)
+		}
+		if r, ok := again.Sight(); r != radius || ok != (radius != 0) {
+			t.Fatalf("round trip changed sight %d to %d", radius, r)
 		}
 	})
 }

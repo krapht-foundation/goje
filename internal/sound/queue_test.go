@@ -90,6 +90,50 @@ func TestQueueDoesNotAllocate(t *testing.T) {
 	}
 }
 
+func TestQueueKeepsMusicAcrossClearsAndUnreadyDevices(t *testing.T) {
+	t.Parallel()
+	q := twoCues(t)
+	q.PlayMusic(0, 2, -5) // Before the device is ready.
+	q.PlayMusic(1, 1, 0)  // No such track.
+	q.Play(0, 1, 0)       // Dropped: not ready.
+	q.SetMusicGain(0.5, 1<<30)
+	q.Enable()
+	q.Play(1, 1, 0)
+	q.Clear()
+	q.StopMusic(250)
+	q.Disable()
+	want := []Request{
+		{Kind: KindPlayMusic, Cue: 0, Gain: 1},
+		{Kind: KindMusicGain, Gain: 0.5, FadeMS: audio.MaxFadeMS},
+		{Kind: KindStopMusic, FadeMS: 250},
+	}
+	for i, w := range want {
+		if r, ok := q.Next(); !ok || r != w {
+			t.Fatalf("request %d is %+v, %v; want %+v", i, r, ok, w)
+		}
+	}
+	if r, ok := q.Next(); ok {
+		t.Fatalf("queue kept %+v", r)
+	}
+}
+
+func TestQueueRejectsLongSoundClips(t *testing.T) {
+	t.Parallel()
+	long, err := audio.RenderScore(audio.Score{
+		Version: audio.ScoreVersion, Tempo: 120, Steps: 32,
+		Channels: []audio.Channel{{Waveform: audio.Sine}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New([]audio.Clip{long}, nil); err == nil {
+		t.Fatal("a 4-second sound cue was accepted")
+	}
+	if q, err := New(nil, []audio.Clip{long}); err != nil || q == nil {
+		t.Fatalf("a music-only bank gave %v, %v", q, err)
+	}
+}
+
 func BenchmarkQueue(b *testing.B) {
 	q := twoCues(b)
 	q.Enable()
@@ -108,7 +152,7 @@ func twoCues(tb testing.TB) *Queue {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	q, err := New([]audio.Clip{clip, clip})
+	q, err := New([]audio.Clip{clip, clip}, []audio.Clip{clip})
 	if err != nil {
 		tb.Fatal(err)
 	}

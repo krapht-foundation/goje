@@ -31,6 +31,8 @@ const (
 	Key7
 	Key8
 	Key9
+	// KeyTab is the Tab key, used for switching a view.
+	KeyTab
 )
 
 // Has reports whether all the specified keys are in the set.

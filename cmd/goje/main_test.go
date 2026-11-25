@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -42,10 +43,14 @@ func TestParse(t *testing.T) {
 	if log.Len() != 0 {
 		t.Fatalf("unexpected log %q", log.String())
 	}
-	opts, err = parse([]string{"build"}, "windows", &log)
+	opts, err = parse([]string{"build"}, "freebsd", &log)
 	if err != nil || !opts.web || opts.desktop ||
 		!strings.Contains(log.String(), "only for the web") {
-		t.Fatalf("all on windows = %+v, %v, log %q; want web only with a note", opts, err, log.String())
+		t.Fatalf("all on freebsd = %+v, %v, log %q; want web only with a note", opts, err, log.String())
+	}
+	opts, err = parse([]string{"package", "-target", "desktop", "-sign", "k.key"}, "windows", &log)
+	if err != nil || opts.web || !opts.desktop || opts.sign != "k.key" {
+		t.Fatalf("signed desktop package on windows = %+v, %v", opts, err)
 	}
 }
 
@@ -72,15 +77,16 @@ func TestParseRejects(t *testing.T) {
 		{[]string{"build", "-id", "com.example/game"}, "linux", "-id"},
 		{[]string{"build", "-tags", "a b"}, "linux", "-tags"},
 		{[]string{"build", "-target", "android"}, "linux", "-target"},
+		{[]string{"build", "-sign", "k.key"}, "linux", "-sign applies only to package"},
 	} {
 		_, err := parse(test.args, test.goos, &bytes.Buffer{})
 		if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), test.want) {
 			t.Errorf("parse(%q) error = %v, want usage error mentioning %q", test.args, err, test.want)
 		}
 	}
-	for _, goos := range []string{"windows", "freebsd", "js"} {
+	for _, goos := range []string{"freebsd", "js"} {
 		_, err := parse([]string{"package", "-target", "desktop"}, goos, &bytes.Buffer{})
-		if err == nil || !strings.Contains(err.Error(), "supports only darwin and linux") ||
+		if err == nil || !strings.Contains(err.Error(), "supports only darwin, linux, and windows") ||
 			!strings.Contains(err.Error(), goos) {
 			t.Errorf("desktop on %s error = %v, want unsupported host", goos, err)
 		}
@@ -105,7 +111,11 @@ func TestResolveRejects(t *testing.T) {
 		t.Fatalf("icon error = %v", err)
 	}
 	opts.icon, opts.desktop = "", true
-	t.Setenv("GOOS", "windows")
+	cross := "windows"
+	if runtime.GOOS == cross {
+		cross = "linux"
+	}
+	t.Setenv("GOOS", cross)
 	if _, err := resolve(t.Context(), opts); err == nil ||
 		!strings.Contains(err.Error(), "only for the host system") {
 		t.Fatalf("cross desktop error = %v", err)

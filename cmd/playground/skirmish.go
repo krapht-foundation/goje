@@ -59,17 +59,17 @@ func (p authoredProject) skirmishFactory(board level.Board) engine.SceneFactory 
 }
 
 type skirmishScene struct {
-	board        level.Board
-	sim          *skirmish.Sim
-	camera       engine.Camera
-	zoomLevel    int
-	homeX, homeY float64
-	walls        []engine.WorldItem // Static, in sorted order.
-	items        []engine.WorldItem // Walls, living units, and deck tiles, sorted every tick.
-	ground       []point
-	groundCells  []grid.Cell // The cell of each ground tile, for the fog.
-	deck, alarm  []grid.Cell
-	selected     uint64 // The selected scout's ID, or zero.
+	board               level.Board
+	sim                 *skirmish.Sim
+	camera              engine.Camera
+	zoomLevel           int
+	homeX, homeY        float64
+	walls               []engine.WorldItem // Static, in sorted order.
+	items               []engine.WorldItem // Walls, living units, and deck tiles, sorted every tick.
+	ground              []point
+	groundCells         []grid.Cell // The cell of each ground tile, for the fog.
+	deck, alarm, hedges []grid.Cell
+	selected            uint64 // The selected scout's ID, or zero.
 	// marked reports further units that draw the selection marker, for scenes that
 	// select several. It is nil in the skirmish.
 	marked func(id uint64) bool
@@ -78,7 +78,11 @@ type skirmishScene struct {
 	foreign func(id uint64) bool
 	// sight is the sight radius in cells that turns on line of sight and fog of war,
 	// or zero for a board that is seen whole, as in the skirmish.
-	sight int
+	sight   int
+	versus  bool
+	fogTeam skirmish.Team
+	// guardMemory is presentation-only exploration when watching a classic co-op log.
+	guardMemory []bool
 }
 
 func (s *skirmishScene) Enter() error {
@@ -86,13 +90,38 @@ func (s *skirmishScene) Enter() error {
 	if err != nil {
 		return err
 	}
+	if radius, authored := s.board.Sight(); authored {
+		s.sight = radius
+	}
+	if s.fogTeam == 0 {
+		s.fogTeam = skirmish.Scouts
+	}
+	if s.versus {
+		if err := sim.SetControl(skirmish.Guards, true); err != nil {
+			return err
+		}
+	}
+	w, h := s.board.Size()
 	if s.sight > 0 {
-		if err := sim.EnableVision(skirmish.VisionConfig{Radius: s.sight}); err != nil {
+		var blocked []bool
+		for y := range h {
+			for x := range w {
+				if s.board.SightBlocked(x, y) {
+					if blocked == nil {
+						blocked = make([]bool, w*h)
+					}
+					blocked[y*w+x] = true
+					s.hedges = append(s.hedges, grid.Cell{X: x, Y: y})
+				}
+			}
+		}
+		if err := sim.EnableVision(skirmish.VisionConfig{
+			Radius: s.sight, GuardsExplore: s.versus, Blocked: blocked,
+		}); err != nil {
 			return err
 		}
 	}
 	s.sim = sim
-	w, h := s.board.Size()
 	s.zoomLevel = 1
 	s.homeX, s.homeY = courtyardProjection.Project(float64(w)*0.5, float64(h)*0.5, 0)
 	s.camera = engine.Camera{
@@ -184,12 +213,12 @@ func (s *skirmishScene) refresh() {
 			}
 			continue
 		}
-		if u.Team == skirmish.Guards && !s.seen(u.Center().X.Float64(), u.Center().Y.Float64()) {
+		if u.Team != s.fogTeam && !s.seenUnit(u) {
 			continue
 		}
 		c := u.Center()
 		hit := engine.HitBlock
-		if u.Team == skirmish.Scouts {
+		if s.versus || u.Team == skirmish.Scouts {
 			hit = engine.HitSelect
 		}
 		s.items = append(s.items, engine.WorldItem{
@@ -199,7 +228,7 @@ func (s *skirmishScene) refresh() {
 	}
 	// Deck tiles sort by their far corner, so the deck draws over a unit beneath it.
 	for i, cell := range s.deck {
-		if !s.sim.Explored(cell) {
+		if !s.exploredCell(cell) {
 			continue
 		}
 		s.items = append(s.items, engine.WorldItem{
@@ -211,13 +240,31 @@ func (s *skirmishScene) refresh() {
 
 func (s *skirmishScene) Draw(canvas engine.Canvas) { s.drawWorld(canvas) }
 
-// explored reports whether the scouts have seen the cell at a ground position.
+// explored reports whether the viewing team has seen the cell at a ground position.
 // A board without fog is always explored.
 func (s *skirmishScene) explored(x, y float64) bool {
-	return s.sight == 0 || s.sim.Explored(grid.Cell{X: int(math.Floor(x)), Y: int(math.Floor(y))})
+	return s.exploredCell(grid.Cell{X: int(math.Floor(x)), Y: int(math.Floor(y))})
 }
 
-// seenUnit reports whether the scouts see the cell that holds the unit's center.
+func (s *skirmishScene) exploredCell(cell grid.Cell) bool {
+	if s.fogTeam == skirmish.Guards && s.guardMemory != nil {
+		w, h := s.board.Size()
+		return cell.X >= 0 && cell.X < w && cell.Y >= 0 && cell.Y < h &&
+			s.guardMemory[cell.Y*w+cell.X]
+	}
+	return s.sight == 0 || s.sim.ExploredBy(s.fogTeam, cell)
+}
+
+func (s *skirmishScene) rememberGuardSight() {
+	w, _ := s.board.Size()
+	for i, explored := range s.guardMemory {
+		if !explored && s.sim.Visible(skirmish.Guards, grid.Cell{X: i % w, Y: i / w}) {
+			s.guardMemory[i] = true
+		}
+	}
+}
+
+// seenUnit reports whether the viewing team sees the cell that holds the unit's center.
 func (s *skirmishScene) seenUnit(u *skirmish.Unit) bool {
 	c := u.Center()
 	return s.seen(c.X.Float64(), c.Y.Float64())
@@ -227,7 +274,7 @@ func (s *skirmishScene) seenUnit(u *skirmish.Unit) bool {
 // without fog is always seen.
 func (s *skirmishScene) seen(x, y float64) bool {
 	return s.sight == 0 ||
-		s.sim.Visible(skirmish.Scouts, grid.Cell{X: int(math.Floor(x)), Y: int(math.Floor(y))})
+		s.sim.Visible(s.fogTeam, grid.Cell{X: int(math.Floor(x)), Y: int(math.Floor(y))})
 }
 
 // drawWorld paints the board, the units, and the bolts, without any interface.
@@ -238,21 +285,34 @@ func (s *skirmishScene) drawWorld(canvas engine.Canvas) {
 		x, y := s.camera.ToLogical(tile.x, tile.y)
 		left, top, w, h := float32(x)-16*zoom, float32(y)-8*zoom, 32*zoom, 16*zoom
 		switch cell := s.groundCells[i]; {
-		case s.sight == 0 || s.sim.Visible(skirmish.Scouts, cell):
+		case s.sight == 0 || s.sim.Visible(s.fogTeam, cell):
 			canvas.Image(groundRegion, left, top, w, h)
-		case s.sim.Explored(cell):
+		case s.exploredCell(cell):
 			canvas.ImageTinted(groundRegion, left, top, w, h, fogTint)
 		}
 	}
 	if s.sight == 0 {
 		s.drawGrid(canvas)
 	}
+	for _, cell := range s.hedges {
+		if !s.exploredCell(cell) {
+			continue
+		}
+		x, y := s.camera.ToLogical(
+			courtyardProjection.Project(float64(cell.X)+0.5, float64(cell.Y)+0.5, 0),
+		)
+		tint := color.NRGBA{R: 50, G: 100, B: 71, A: 255}
+		if !s.sim.Visible(s.fogTeam, cell) {
+			tint = color.NRGBA{R: 28, G: 54, B: 42, A: 255}
+		}
+		canvas.Rect(float32(x)-5*zoom, float32(y)-5*zoom, 10*zoom, 5*zoom, tint)
+	}
 	alarm := skirmishAlarmQuiet
 	if s.sim.Alarm() {
 		alarm = skirmishAlarmLoud
 	}
 	for _, cell := range s.alarm {
-		if !s.sim.Explored(cell) {
+		if !s.exploredCell(cell) {
 			continue
 		}
 		x, y := s.camera.ToLogical(

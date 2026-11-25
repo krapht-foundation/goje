@@ -86,6 +86,57 @@ func TestTickSoundReachesNestedRuntime(t *testing.T) {
 	}
 }
 
+type musicLog struct{ soundLog }
+
+func (m *musicLog) PlayMusic(track int, gain float32, fadeMS int) {
+	m.soundLog = append(m.soundLog, fmt.Sprintf("music %d %v %d", track, gain, fadeMS))
+}
+
+func (m *musicLog) StopMusic(fadeMS int) {
+	m.soundLog = append(m.soundLog, fmt.Sprintf("stop music %d", fadeMS))
+}
+
+func (m *musicLog) SetMusicGain(gain float32, fadeMS int) {
+	m.soundLog = append(m.soundLog, fmt.Sprintf("music gain %v %d", gain, fadeMS))
+}
+
+func TestTickMusicReachesMusicOutputOnly(t *testing.T) {
+	update := func(tick engine.Tick) (engine.Transition, error) {
+		tick.PlayMusic(0, 0.5, 200)
+		tick.SetMusicGain(0.25, 100)
+		tick.StopMusic(300)
+		return engine.Transition{}, nil
+	}
+	r, err := engine.Start(func() engine.Scene { return &testScene{update: update} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plain soundLog
+	r.SetSoundOutput(&plain)
+	if err := r.Step(engine.Input{}); err != nil || len(plain) != 0 {
+		t.Fatalf("an output without music got %q, %v", plain, err)
+	}
+	var log musicLog
+	r.SetSoundOutput(&log)
+	if err := r.Step(engine.Input{}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{
+		"music 0 0.5 200",
+		"music gain 0.25 100",
+		"stop music 300",
+	}; !slices.Equal(
+		log.soundLog,
+		want,
+	) {
+		t.Fatalf("music requests %q, want %q", log.soundLog, want)
+	}
+	r.SetSoundOutput(nil)
+	if err := r.Step(engine.Input{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimeTransitions(t *testing.T) {
 	var calls []string
 	makeScene := func(name string, transition func(engine.Tick) engine.Transition) engine.Scene {

@@ -21,6 +21,7 @@ type transaction struct {
 	tile          byte
 	zone          *zoneEdit
 	placement     *placementEdit
+	sight         *[2]int // The radius before and after; zero means none.
 }
 
 // zoneEdit is nil-free for a replacement. Before is nil for an addition and
@@ -93,6 +94,13 @@ func (d *Document) record(tx transaction) {
 }
 
 func (d *Document) apply(tx transaction, forward bool) {
+	if tx.sight != nil {
+		d.sight = tx.sight[1]
+		if !forward {
+			d.sight = tx.sight[0]
+		}
+		return
+	}
 	if tx.placement != nil {
 		d.applyPlacement(tx.placement, forward)
 		return

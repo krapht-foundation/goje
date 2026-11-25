@@ -5,10 +5,13 @@ import (
 	"image"
 	"image/color"
 	"log/slog"
+	"strings"
 
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/engine/lockstep"
+	"github.com/krapht-foundation/goje/engine/matchlog"
 	"github.com/krapht-foundation/goje/font"
+	"github.com/krapht-foundation/goje/netlink"
 	"github.com/krapht-foundation/goje/ui"
 )
 
@@ -37,8 +40,10 @@ func (a *outpostApp) updateLobby(in engine.Input) {
 // over the lobby's connection.
 func (a *outpostApp) beginOnline() {
 	conn := a.lobby.conn
+	setup := a.lobby.setup
+	header := a.world.matchHeader(setup)
 	lock, err := lockstep.New(lockstep.Config{
-		Game: onlineGame, Content: a.world.meta.Content, Players: 2, Local: conn.Slot(),
+		Game: onlineGame, Content: header.Content, Players: header.Players, Local: conn.Slot(),
 		Delay: onlineDelay, HashInterval: onlineHashInterval, StallLimit: onlineStallLimit,
 	}, conn)
 	if err != nil {
@@ -46,11 +51,14 @@ func (a *outpostApp) beginOnline() {
 		return
 	}
 	sync := newOnlineSync(lock, conn.Slot())
+	sync.recorder, err = matchlog.New(header)
+	if err != nil {
+		a.endOnline(err)
+		return
+	}
 	match, err := engine.Start(func() engine.Scene {
-		s := a.world.newSession(nil)
+		s := a.world.onlineSession(setup, sync.local)
 		s.sync, s.issuer = sync, sync.issue
-		s.owns = func(id uint64) bool { return onlineOwner(id) == sync.local }
-		s.foreign = func(id uint64) bool { return onlineOwner(id) != sync.local }
 		a.session = s
 		return s
 	})
@@ -61,13 +69,21 @@ func (a *outpostApp) beginOnline() {
 	a.lobby.cancel()
 	a.lobby, a.conn, a.osync = nil, conn, sync
 	a.match, a.state, a.onlineMenu = match, stateOnline, false
-	slog.Info("Online match started", slog.Int("player", conn.Slot()))
+	slog.Info(
+		"Online match started",
+		slog.Int("player", conn.Slot()),
+		slog.Int("mode", int(setup.mode)),
+	)
 }
 
 // updateOnline runs one tick of an online match. The match never pauses: the menu
 // opens over it and the match keeps its own clock, which waits only for the other
 // player.
 func (a *outpostApp) updateOnline(in engine.Input) error {
+	if a.session.outcome != outcomePlaying {
+		a.confirmOnlineResult()
+		return nil
+	}
 	touchMenu := a.session.controls.touchUI && a.menuButton.Update(in)
 	if a.start || touchMenu || (in.Pressed.Has(engine.KeyEscape) && !a.session.cancelable()) {
 		a.click()
@@ -109,6 +125,34 @@ func (a *outpostApp) updateOnline(in engine.Input) error {
 		return err
 	}
 	return nil
+}
+
+// confirmOnlineResult keeps the last state frozen until both peers have
+// stepped the winning tick. An eager Bye could otherwise reach the slower
+// peer before it has a chance to read the result.
+func (a *outpostApp) confirmOnlineResult() {
+	o := a.osync
+	err := o.lock.Poll()
+	switch {
+	case o.lock.Confirmed() == o.lock.Tick() &&
+		(err == nil || errors.Is(err, lockstep.ErrPeerLeft) || errors.Is(err, netlink.ErrPeerLeft)):
+		line := strings.ToLower(a.session.hud.result.Text)
+		slog.Info(
+			"Online match completed",
+			slog.String("result", line),
+			slog.Uint64("tick", o.lock.Tick()),
+		)
+		a.stopMatch()
+		a.endLines = []string{"Match complete: " + line}
+		a.state = stateOnlineEnded
+	case err != nil:
+		a.endOnline(err)
+	default:
+		o.waited++
+		if o.waited >= onlineStallLimit {
+			a.endOnline(lockstep.ErrStalled)
+		}
+	}
 }
 
 // endOnline stops the lobby or the match and shows why it ended.

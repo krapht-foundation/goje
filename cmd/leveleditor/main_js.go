@@ -91,6 +91,10 @@ func main() {
 			}
 			return diagnostic(doc.DeletePlacement(id))
 		}),
+		// setSight takes a radius, where 0 removes the level's sight object.
+		"setSight": callback(
+			func(args []js.Value) any { return diagnostic(doc.SetSight(args[0].Int())) },
+		),
 		"undo":         callback(func(_ []js.Value) any { doc.Undo(); return "" }),
 		"redo":         callback(func(_ []js.Value) any { doc.Redo(); return "" }),
 		"markExported": callback(func(_ []js.Value) any { doc.MarkExported(); return "" }),
@@ -169,6 +173,7 @@ func snapshot(doc *leveleditor.Document) map[string]any {
 		"terrain":    terrain.String(),
 		"placements": placements,
 		"zones":      zones,
+		"sight":      doc.Sight(),
 		"dirty":      doc.Dirty(),
 		"canUndo":    doc.CanUndo(),
 		"canRedo":    doc.CanRedo(),

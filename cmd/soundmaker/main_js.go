@@ -1,4 +1,5 @@
-// Command soundmaker hosts the effect document for the browser Sound Maker.
+// Command soundmaker hosts the effect and music documents for the browser
+// Sound Maker.
 package main
 
 import (
@@ -10,6 +11,7 @@ import (
 
 func main() {
 	doc := soundmaker.New()
+	music := soundmaker.NewMusic()
 	uint8Array := js.Global().Get("Uint8Array")
 	api := map[string]any{
 		"limits": map[string]any{
@@ -52,6 +54,19 @@ func main() {
 			}
 			return bytesToJS(uint8Array, data)
 		}),
+		// score returns the canonical JSON of the current score, which the
+		// Music panel edits and exports.
+		"score": callback(func(_ []js.Value) any { return string(music.JSON()) }),
+		// applyScore(text) returns "" on success or a diagnostic; a rejected
+		// score keeps the current one.
+		"applyScore": callback(func(args []js.Value) any {
+			if len(args) != 1 || args[0].Type() != js.TypeString {
+				return "Expected the score as text."
+			}
+			return diagnostic(music.ApplyJSON([]byte(args[0].String())))
+		}),
+		// scorePCM returns a copy of one rendered loop of the score.
+		"scorePCM": callback(func(_ []js.Value) any { return bytesToJS(uint8Array, music.PCM()) }),
 	}
 	js.Global().Set("gojeSoundMaker", api)
 	// The page owns these callbacks for the lifetime of the Wasm instance.

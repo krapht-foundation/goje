@@ -1,4 +1,4 @@
-//go:build !goje_smoke && cgo && (darwin || linux)
+//go:build !goje_smoke && cgo && (darwin || linux || windows)
 
 package desktop
 

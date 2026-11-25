@@ -42,6 +42,7 @@ const (
 	outcomePlaying outpostOutcome = iota
 	outcomeVictory
 	outcomeDefeat
+	outcomeDraw
 )
 
 // outpostDrag is a primary-button drag in progress, in logical pixels.
@@ -58,10 +59,12 @@ type outpostDrag struct {
 // engine.Snapshotter, which the app uses for checkpoints and saves.
 type outpostSession struct {
 	skirmishScene
-	world   *outpostWorld
-	restore []byte // A snapshot to apply when the scene is entered, or nil.
+	world    *outpostWorld
+	restore  []byte // A snapshot to apply when the scene is entered, or nil.
+	tactics  bool
+	watching bool
 
-	selection []uint64 // Living scouts in ascending ID order.
+	selection []uint64 // Living owned units in ascending ID order.
 	groups    [outpostGroups][]uint64
 	mode      outpostMode
 	drag      outpostDrag
@@ -84,8 +87,7 @@ type outpostSession struct {
 	issuer func(skirmish.Command) int
 
 	// sync is set in an online match. It decides when a tick may run and gives it
-	// the commands of every player. owns reports which scouts the local player may
-	// select, and is nil when all of them are theirs.
+	// the commands of every player. owns optionally splits the local team by ID.
 	sync outpostSync
 	owns func(id uint64) bool
 }
@@ -111,13 +113,13 @@ func (s *outpostSession) attack(target uint64) {
 // outpostHUD holds the text of the HUD. The strings are rebuilt in Update when a
 // number changes, so Draw allocates nothing.
 type outpostHUD struct {
-	key                 [8]int
+	key                 [10]int
 	top, bottom         ui.Panel
 	counts, alarm       ui.Label
 	selection, hint     ui.Label
 	result, resultHint  ui.Label
 	resultPanel         ui.Panel
-	scouts, guards      int
+	friends, foes       int
 	selected, hp, maxHP int
 	held                int
 }
@@ -125,6 +127,16 @@ type outpostHUD struct {
 func (s *outpostSession) Enter() error {
 	if err := s.skirmishScene.Enter(); err != nil {
 		return err
+	}
+	if s.tactics {
+		if err := s.sim.SetTactics(true); err != nil {
+			return err
+		}
+	}
+	if s.watching && !s.versus {
+		w, h := s.board.Size()
+		s.guardMemory = make([]bool, w*h)
+		s.rememberGuardSight()
 	}
 	s.marked = s.isSelected
 	s.selection = make([]uint64, 0, skirmish.MaxUnits)
@@ -135,6 +147,9 @@ func (s *outpostSession) Enter() error {
 	s.layoutHUD()
 	if s.sync != nil {
 		s.hud.resultHint.Text = "Esc opens the menu"
+	}
+	if s.watching {
+		s.hud.resultHint.Text = "Tab switches teams"
 	}
 	s.controls.layout()
 	s.prune()
@@ -162,8 +177,14 @@ func (s *outpostSession) Update(tick engine.Tick) (engine.Transition, error) {
 	if in.Pressed.Has(engine.KeyR) && s.sync == nil {
 		return engine.Restart(), nil
 	}
-	s.keys(in)
-	s.pointer(in)
+	if s.watching {
+		if in.Pressed.Has(engine.KeyTab) {
+			s.switchWatchFog()
+		}
+	} else {
+		s.keys(in)
+		s.pointer(in)
+	}
 	moveCourtyardCamera(&s.camera, &s.zoomLevel, in, s.homeX, s.homeY)
 	if s.sync != nil {
 		// The camera, selection, and menus run every tick; the simulation runs only
@@ -182,11 +203,25 @@ func (s *outpostSession) Update(tick engine.Tick) (engine.Transition, error) {
 			return engine.Transition{}, err
 		}
 	}
+	if s.guardMemory != nil {
+		s.rememberGuardSight()
+	}
 	s.prune()
 	s.refresh()
 	s.updateHUD()
 	s.play(tick)
 	return engine.Transition{}, nil
+}
+
+func (s *outpostSession) switchWatchFog() {
+	if s.fogTeam == skirmish.Scouts {
+		s.fogTeam = skirmish.Guards
+	} else {
+		s.fogTeam = skirmish.Scouts
+	}
+	s.prune()
+	s.refresh()
+	s.updateHUD()
 }
 
 // keys handles the keyboard commands. Escape cancels a pending mode or drag; the
@@ -255,14 +290,14 @@ func (s *outpostSession) pointer(in engine.Input) {
 	}
 }
 
-// endDrag selects what the finished drag covers: a click picks one scout, and a
-// longer drag selects every scout inside the box as drawn on the screen.
+// endDrag selects what the finished drag covers: a click picks one unit, and a
+// longer drag selects every owned unit inside the box as drawn on the screen.
 func (s *outpostSession) endDrag() {
 	d := s.drag
 	s.scratch = s.scratch[:0]
 	if math.Hypot(d.currentX-d.startX, d.currentY-d.startY) < outpostDragMin {
 		if id, hit := s.pick(d.startX, d.startY); hit {
-			if u, ok := s.sim.Unit(id); ok && u.Alive && u.Team == skirmish.Scouts && s.mine(id) {
+			if u, ok := s.sim.Unit(id); ok && s.selectable(u) {
 				s.scratch = append(s.scratch, id)
 			}
 		}
@@ -271,7 +306,7 @@ func (s *outpostSession) endDrag() {
 		top, bottom := min(d.startY, d.currentY), max(d.startY, d.currentY)
 		for i := range s.sim.Units() {
 			u := &s.sim.Units()[i]
-			if !u.Alive || u.Team != skirmish.Scouts || !s.mine(u.ID) {
+			if !s.selectable(u) {
 				continue
 			}
 			c := u.Center()
@@ -299,8 +334,11 @@ func (s *outpostSession) endDrag() {
 	}
 }
 
-// pick returns the ID of the item under a logical point, if any.
-// mine reports whether the local player may select the scout.
+func (s *outpostSession) selectable(u *skirmish.Unit) bool {
+	return u.Alive && u.Team == s.fogTeam && s.mine(u.ID)
+}
+
+// mine reports whether the local player owns this ID within their team.
 func (s *outpostSession) mine(id uint64) bool { return s.owns == nil || s.owns(id) }
 
 func (s *outpostSession) pick(x, y float64) (uint64, bool) {
@@ -314,14 +352,13 @@ func (s *outpostSession) cellUnder(x, y float64) (grid.Cell, bool) {
 	return s.sim.CellAt(courtyardProjection.Unproject(px, py, 0))
 }
 
-// order sends the selection to the point: an attack when a living guard is under
-// it, and otherwise the given kind of order to a goal cell near it.
+// order attacks a visible enemy under the point or gives the chosen ground order.
 func (s *outpostSession) order(at engine.MousePress, kind skirmish.OrderKind) {
 	if len(s.selection) == 0 {
 		return
 	}
 	if id, hit := s.pick(at.X, at.Y); hit {
-		if u, ok := s.sim.Unit(id); ok && u.Alive && u.Team == skirmish.Guards {
+		if u, ok := s.sim.Unit(id); ok && u.Alive && u.Team != s.fogTeam {
 			s.attack(id)
 			return
 		}
@@ -349,9 +386,8 @@ func (s *outpostSession) toggleHold() {
 	}
 }
 
-// focus orders the selection to attack the guard under the pointer, or else the
-// guard nearest to the pointer's ground position, or to the first selected
-// scout when the pointer is outside the viewport.
+// focus attacks the enemy under the pointer or the nearest visible enemy to
+// the pointer's ground position, or to the first selected unit if outside.
 func (s *outpostSession) focus(pointer engine.Pointer) {
 	if len(s.selection) == 0 {
 		return
@@ -360,7 +396,7 @@ func (s *outpostSession) focus(pointer engine.Pointer) {
 	switch first, ok := s.sim.Unit(s.selection[0]); {
 	case pointer.Inside:
 		if id, hit := s.pick(pointer.X, pointer.Y); hit {
-			if target, found := s.sim.Unit(id); found && target.Alive && target.Team == skirmish.Guards {
+			if target, found := s.sim.Unit(id); found && target.Alive && target.Team != s.fogTeam {
 				s.attack(id)
 				return
 			}
@@ -376,7 +412,7 @@ func (s *outpostSession) focus(pointer engine.Pointer) {
 	best, bestDistance := uint64(0), math.Inf(1)
 	for i := range s.sim.Units() {
 		u := &s.sim.Units()[i]
-		if !u.Alive || u.Team != skirmish.Guards || !s.seenUnit(u) {
+		if !u.Alive || u.Team == s.fogTeam || !s.seenUnit(u) {
 			continue
 		}
 		c := u.Center()
@@ -395,24 +431,37 @@ func (s *outpostSession) prune() {
 	for g := range s.groups {
 		s.groups[g] = s.living(s.groups[g])
 	}
-	scouts, guards, inSight := 0, 0, 0
+	s.hud.friends, s.hud.foes = 0, 0
+	var alive [skirmish.Guards + 1]int
 	for i := range s.sim.Units() {
-		if u := &s.sim.Units()[i]; u.Alive {
-			if u.Team == skirmish.Scouts {
-				scouts++
-			} else {
-				guards++
-				if s.seenUnit(u) {
-					inSight++
-				}
-			}
+		u := &s.sim.Units()[i]
+		if !u.Alive {
+			continue
+		}
+		alive[u.Team]++
+		if u.Team != s.fogTeam && s.seenUnit(u) {
+			s.hud.foes++
 		}
 	}
-	s.hud.scouts, s.hud.guards = scouts, inSight
+	s.hud.friends = alive[s.fogTeam]
+	if s.versus {
+		winner, ended := s.sim.Winner()
+		switch {
+		case !ended:
+			s.outcome = outcomePlaying
+		case winner == 0:
+			s.outcome = outcomeDraw
+		case winner == s.fogTeam:
+			s.outcome = outcomeVictory
+		default:
+			s.outcome = outcomeDefeat
+		}
+		return
+	}
 	switch {
-	case guards == 0:
+	case alive[skirmish.Guards] == 0:
 		s.outcome = outcomeVictory
-	case scouts == 0:
+	case alive[skirmish.Scouts] == 0:
 		s.outcome = outcomeDefeat
 	default:
 		s.outcome = outcomePlaying
@@ -649,12 +698,23 @@ func (s *outpostSession) updateHUD() {
 	for g := range s.groups {
 		groups = groups*257 + len(s.groups[g])
 	}
-	key := [8]int{h.scouts, h.guards, h.selected, h.hp, h.maxHP, h.held, int(s.mode), groups}
+	key := [10]int{
+		h.friends, h.foes, h.selected, h.hp, h.maxHP, h.held,
+		int(s.mode), groups, int(s.fogTeam), int(s.outcome),
+	}
 	if key == h.key && h.counts.Text != "" {
 		return
 	}
 	h.key = key
-	h.counts.Text = "Scouts " + strconv.Itoa(h.scouts) + "  Guards seen " + strconv.Itoa(h.guards)
+	friends, enemies := "Scouts", "Guards"
+	if s.fogTeam == skirmish.Guards {
+		friends, enemies = enemies, friends
+	}
+	h.counts.Text = friends + " " + strconv.Itoa(
+		h.friends,
+	) + "  " + enemies + " seen " + strconv.Itoa(
+		h.foes,
+	)
 	switch {
 	case s.mode == modeMove:
 		h.selection.Text = "Move: tap the destination."
@@ -679,9 +739,13 @@ func (s *outpostSession) updateHUD() {
 	if groupText.Len() > 0 {
 		h.hint.Text = "Groups" + groupText.String()
 	}
-	h.result.Text = "VICTORY"
-	if s.outcome == outcomeDefeat {
+	switch s.outcome {
+	case outcomeDefeat:
 		h.result.Text = "DEFEAT"
+	case outcomeDraw:
+		h.result.Text = "DRAW"
+	default:
+		h.result.Text = "VICTORY"
 	}
 }
 

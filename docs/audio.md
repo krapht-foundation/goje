@@ -1,6 +1,6 @@
 # Play sounds
 
-Goje plays short prepared clips on desktop and in the browser. A game gives the host its clips at startup and requests them from `Update` by number, with a gain and a stereo pan. Requests overlap: each one becomes a voice, and up to 16 voices play at once. The exact rules are in the [audio mixer specification](../specs/audio-mixer-m15.md).
+Goje plays short prepared clips and one looping music track on desktop and in the browser. A game gives the host its clips and tracks at startup and requests them from `Update` by number, sounds with a gain and a stereo pan. Sound requests overlap: each one becomes a voice, and up to 16 voices play at once. The exact rules are in the [audio mixer specification](../specs/audio-mixer-m15.md) and the [music specification](../specs/music-m17.md).
 
 ## Prepare clips
 
@@ -35,10 +35,39 @@ Overlapping voices add up. Keep the sum of the gains of sounds that often play t
 
 Mute and volume belong to the game. Multiply the gain you pass by your volume setting, and pass 0, or skip the request, when muted. Goje has no master volume. Keep these settings out of replayed state: they do not change the match, so they belong next to the other presentation settings, not in the scene's hash or snapshot.
 
+## Play music
+
+A track is a loop rendered from a score: a small JSON file of a tempo, a loop length in sixteenth-note steps, and up to four channels of notes. Write one in the Sound Maker's Music panel, or by hand following the [music specification](../specs/music-m17.md), and render it once at startup. Pass the tracks, at most 16, in `platform.Config.Music`; the index is the track number.
+
+```go
+//go:embed theme.json
+var themeScore []byte
+
+score, err := audio.DecodeScore(themeScore)
+if err != nil {
+	return err
+}
+theme, err := audio.RenderScore(score)
+if err != nil {
+	return err
+}
+config.Music = []audio.Clip{theme} // track 0
+```
+
+From `Update`, `tick.PlayMusic(track, gain, fadeMS)` starts a track, fading it in. Asking for another track fades the current one out and the new one in; asking for the track that is already playing only changes its gain, so a title screen and a match can both ask for the same theme without restarting it. `tick.SetMusicGain(gain, fadeMS)` ducks or restores it, for example under a pause menu, and `tick.StopMusic(fadeMS)` fades it out. Fades are in milliseconds, up to 10 seconds.
+
+```go
+tick.PlayMusic(0, 0.6*s.volume, 500)
+tick.SetMusicGain(0.2*s.volume, 200) // pause menu opened
+tick.StopMusic(1000)                  // match over
+```
+
+Music is not cleared with sounds. It keeps playing across scene changes, restarts, and focus loss, and stops only when asked or when the game ends. Requests made before the browser's first click are kept and take effect then. Music requests share the 64-request queue with sounds, so request music when it should change, not on every update. The music track plays centered at its gain, on top of the sounds, so leave room for both: keep the music gain well below 1.
+
 ## Lifecycle
 
-- Browsers start audio only after a trusted click, tap, or key press. Requests made before that are dropped and are not played later.
-- Focus loss, page suspension, and scene exit, including a restart, clear pending requests and stop every voice. Nothing resumes when the game comes back.
+- Browsers start audio only after a trusted click, tap, or key press. Sound requests made before that are dropped and are not played later; music requests wait.
+- Focus loss, page suspension, and scene exit, including a restart, clear pending sound requests and stop every sound voice. Nothing resumes when the game comes back. Music is not cleared; a suspended browser page pauses it.
 - Without an audio device, or when the browser lacks Web Audio, the host logs once and the game runs silently.
 
 ## Nested runtimes and replays
@@ -54,7 +83,7 @@ The nested runtime shares the queue. When its scene exits, for example when the 
 
 ## Check your change
 
-- `go test ./audio ./internal/sound ./engine` runs the mixer, queue, and runtime tests. Add `GOOS=js GOARCH=wasm` and `-exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec"` to run them as WebAssembly under Node.
-- `node scripts/smoke-mixer.mjs` compares the Go mixer with the browser's Web Audio graph for a fixed script of overlapping voices in Chromium. Run it with `PLAYWRIGHT_BROWSERS_PATH` set to the repository's Playwright cache.
+- `go test ./audio ./internal/sound ./engine` runs the mixer, music, score, queue, and runtime tests. Add `GOOS=js GOARCH=wasm` and `-exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec"` to run them as WebAssembly under Node. `go test -fuzz FuzzDecodeScore ./audio` fuzzes the score decoder.
+- `node scripts/smoke-mixer.mjs` compares the Go mixer with the browser's Web Audio graphs for a fixed script of overlapping voices and one of music requests in Chromium. Run it with `PLAYWRIGHT_BROWSERS_PATH` set to the repository's Playwright cache.
 - `make smoke-beacon-audio` checks the mixed output of the desktop device callback and the browser's playback in Beacon.
 - `go test -run '^$' -bench MixerRender ./audio` reports the time to mix 16 voices into one 512-frame buffer, which lasts 10.7 ms.

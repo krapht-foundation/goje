@@ -15,15 +15,17 @@ import (
 	"github.com/krapht-foundation/goje/internal/sound"
 )
 
-// webAudio plays up to audio.MaxVoices prepared cues at once through Web
-// Audio. Buffers exist from boot; the AudioContext starts only inside a trusted
-// user gesture, so the queue stays disabled and drops requests until the
-// browser allows output. See specs/audio-mixer-m15.md.
+// webAudio plays up to audio.MaxVoices prepared cues at once and one looping
+// music track through Web Audio. Buffers exist from boot; the AudioContext
+// starts only inside a trusted user gesture, so the queue stays disabled and
+// drops sound requests until the browser allows output, and music requests
+// wait. See specs/audio-mixer-m15.md.
 type webAudio struct {
 	queue   *sound.Queue
 	logger  *slog.Logger
 	ctx     context.Context
 	buffers []js.Value // indexed by cue; undefined for an unusable clip
+	tracks  []js.Value // indexed by music track
 	// Boolean is a native no-op that observes rejections without a Go callback,
 	// so a promise that settles after shutdown cannot call a released function.
 	observe js.Value
@@ -38,6 +40,7 @@ type webAudio struct {
 	gen     uint64
 	running bool
 	failed  bool
+	music   webMusic
 }
 
 // webVoice is a source and the last node of its graph, which connects to the
@@ -69,18 +72,21 @@ func newWebAudio(
 		observe: window.Get("Boolean"),
 		gen:     queue.Generation(),
 	}
-	if err := catchJS(func() { a.prepare(window, queue.Clips()) }); err != nil {
+	if err := catchJS(func() {
+		a.buffers = prepare(window, queue.Clips())
+		a.tracks = prepare(window, queue.Music())
+	}); err != nil {
 		logAudio(ctx, logger, "audio unavailable", "error", err)
 		return nil
 	}
 	return a
 }
 
-func (a *webAudio) prepare(window js.Value, clips []audio.Clip) {
+func prepare(window js.Value, clips []audio.Clip) []js.Value {
 	constructor := window.Get("AudioBuffer")
 	bytes := window.Get("Uint8Array")
 	floats := window.Get("Float32Array")
-	a.buffers = make([]js.Value, len(clips))
+	buffers := make([]js.Value, len(clips))
 	var scratch []byte
 	for i, clip := range clips {
 		pcm := clip.PCM()
@@ -102,8 +108,9 @@ func (a *webAudio) prepare(window js.Value, clips []audio.Clip) {
 			"length": n, "numberOfChannels": 1, "sampleRate": audio.SampleRate,
 		})
 		buffer.Call("copyToChannel", floats.New(staging.Get("buffer")), 0)
-		a.buffers[i] = buffer
+		buffers[i] = buffer
 	}
+	return buffers
 }
 
 // unlock runs only from a trusted gesture handler, never from a tick.
@@ -156,8 +163,9 @@ func (a *webAudio) sync() {
 	}
 }
 
-// poll applies a cleared queue and starts the pending cues. It runs once per
+// poll applies a cleared queue and the pending requests. It runs once per
 // frame on the host loop and after focus changes, when frames may stop.
+// Requests wait in the queue while the context is not running.
 func (a *webAudio) poll() {
 	if a == nil {
 		return
@@ -166,18 +174,42 @@ func (a *webAudio) poll() {
 		a.gen = g
 		a.stopAll()
 	}
+	if !a.running {
+		return
+	}
+	if err := catchJS(func() { a.music.settle(a.context.Get("currentTime").Float()) }); err != nil {
+		a.disable(err)
+		return
+	}
 	for range sound.Capacity {
 		r, ok := a.queue.Next()
-		if !ok || !a.running {
+		if !ok {
 			return
 		}
-		if a.buffers[r.Cue].IsUndefined() {
+		if r.Kind == sound.KindSound && a.buffers[r.Cue].IsUndefined() {
 			continue
 		}
-		if err := catchJS(func() { a.start(r) }); err != nil {
+		if err := catchJS(func() { a.apply(r) }); err != nil {
 			a.disable(err)
 			return
 		}
+	}
+}
+
+func (a *webAudio) apply(r sound.Request) {
+	if r.Kind == sound.KindSound {
+		a.start(r)
+		return
+	}
+	now := a.context.Get("currentTime").Float()
+	fade := float64(r.FadeMS) / 1000
+	switch r.Kind {
+	case sound.KindPlayMusic:
+		a.music.play(a.context, a.tracks[r.Cue], r.Cue, float64(r.Gain), now, fade)
+	case sound.KindStopMusic:
+		a.music.stop(now, fade)
+	case sound.KindMusicGain:
+		a.music.setGain(float64(r.Gain), now, fade)
 	}
 }
 
@@ -229,6 +261,8 @@ func (a *webAudio) close() {
 	}
 	a.stopAll()
 	if !a.context.IsUndefined() {
+		a.music.current.end()
+		a.music.next.end()
 		a.context.Call("removeEventListener", "statechange", a.state)
 		a.context.Call("close").Call("catch", a.observe)
 		a.state.Release()

@@ -42,11 +42,16 @@ Try it: drag a box over the whole board to select every scout, right-click the g
 
 The browser keeps the save and the last recording in `localStorage`, and the desktop build keeps them as files in the `goje/outpost` folder of your user configuration directory. See [Put text and a HUD in your game](text-and-ui.md) and [Record, replay, save, and load](replays.md) to use the same packages, and the [outpost specification](../specs/outpost-m14.md) for the exact controls and formats. The outpost's placements and zones come from a [version 2 level](levels.md#add-and-remove-placements) that you can rebuild in the Level Builder with `make smoke-outpost-roundtrip`.
 
+For a different solo match, switch **Guards: Classic** to **Guards: Tactical** at the title. Tactical guards focus weakened scouts, alert nearby allies when hurt, retreat when near defeat, and flank in groups. This does not change older recordings or saves.
+
 ## Play the outpost online
 
-Two players can command the outpost's six scouts together against the guards. One player hosts and the other joins through a relay, a small server that pairs them and forwards their messages. Start a relay with `go run ./cmd/relay -addr 127.0.0.1:8080`, then start the host with `GOJE_RELAY=ws://127.0.0.1:8080 GOJE_PLAYGROUND=outpost make run-desktop`. Its title menu gains **Host online game**. Choosing it connects to the relay and shows a six-character room code. In the browser, open `http://127.0.0.1:8080/?fixture=outpost&relay=ws://127.0.0.1:8080&room=CODE` with that code, and choose **Join room** in the menu. A desktop guest uses `GOJE_ROOM=CODE` as well. A browser and a desktop build can play in the same match.
+Start a relay with `go run ./cmd/relay -addr 127.0.0.1:8089`. Start the host with `GOJE_RELAY=ws://127.0.0.1:8089 GOJE_PLAYGROUND=outpost make run-desktop`, choose **Host co-op** or **Host versus**, and share the six-character room code. For a browser guest, run `make serve-web` and open `http://127.0.0.1:8080/?fixture=outpost&relay=ws://127.0.0.1:8089&room=CODE`. A desktop guest instead sets `GOJE_ROOM=CODE` in addition to the host's launch variables. Choose **Join room CODE**.
 
-Each player commands three scouts: the first player's are the ones with odd numbers and the second player's are the others, and the partner's scouts are drawn in teal. You select and order only your own. Commands take effect a tenth of a second after you give them, so that both machines apply them at the same tick, and the match waits, with a message, when the other player's commands have not arrived. **Escape** opens a menu to resume, change the sound, or leave, but it does not pause the match, because the other player cannot be paused. There is no saving, loading, restarting, or replay online. The match ends, with a screen that says why, when a player leaves, when the other player stops responding for ten seconds, or when the two games no longer agree about the state, which they check once a second. The guide to [online play](online.md) shows how to put your own game on the same packages, and `make smoke-online` plays a match between a native host and a Chromium guest.
+- In co-op, each player commands three scouts. The partner's scouts are teal. The host can switch the guards to **Tactical** before opening the room.
+- In versus, the host commands the scouts and the guest commands the guards. The board has mirrored spawns and hedges that block sight but not movement. Each side sees its own fog and wins by eliminating the other team.
+
+Orders take effect a tenth of a second after you give them. **Escape** opens a local menu to change the sound or leave, but does not pause the remote player. After the match, choose **Watch last online match** from the title menu on either machine. Use the camera controls freely; **Tab** or **Fog** switches the viewing team. Watching does not need a relay.
 
 ## Use the playground in your game
 
@@ -105,6 +110,8 @@ Run `make serve-sound-maker` with Go and Node installed, then open `http://127.0
 2. Press **Apply** or **Enter**. The controls are a draft until you apply them. If a value is out of range, the status explains why, your draft stays in the fields so you can correct it, and the current sound is not changed.
 3. Choose **Play** to preview the sound. The preview plays the same samples that the download contains. If the browser has no Web Audio, the preview reports that it is unavailable and everything else still works.
 4. Choose **Download WAV**. The file is mono, 48 kHz, signed 16-bit PCM, so Beacon and your own games can load it with [`audio.DecodeWAV`](../audio/wav.go). The same settings always produce the same bytes. The editor cannot reopen a WAV to recover its settings, so note the settings you want to keep.
+
+The **Music** panel edits a JSON score instead of a one-off cue. Apply a score to validate it, choose **Play loop** to hear the rendered music, and download the JSON to embed in your game. See [Play music](audio.md#play-music).
 
 Run `make setup-web` once, then `make smoke-sound-maker` to exercise the keyboard controls, preview, and downloads in Chromium. The smoke decodes the WAV and compares it with the preview samples, and checks that rejected settings leave the sound unchanged.
 

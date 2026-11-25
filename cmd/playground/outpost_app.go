@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/krapht-foundation/goje/engine"
+	"github.com/krapht-foundation/goje/engine/matchlog"
 	"github.com/krapht-foundation/goje/engine/replay"
 	"github.com/krapht-foundation/goje/engine/save"
 	"github.com/krapht-foundation/goje/netlink"
@@ -34,6 +35,7 @@ const (
 	stateLobby       // Connecting to the relay and waiting for the other player.
 	stateOnline      // An online match, which never pauses.
 	stateOnlineEnded // The reason an online match or lobby ended.
+	stateMatchWatch  // Watching an online command log without a connection.
 )
 
 // Pause menu entries.
@@ -52,7 +54,10 @@ const (
 	titleStart = iota
 	titleLoad
 	titleWatch
-	titleHost
+	titleGuards
+	titleWatchMatch
+	titleHostCoop
+	titleHostVersus
 	titleJoin
 )
 
@@ -73,10 +78,13 @@ type outpostApp struct {
 	state outpostState
 	menu  ui.Menu
 
-	match    *engine.Runtime // The running match or replay, or nil on the title.
-	session  *outpostSession // The scene in match; the factory publishes it.
-	recorder *replay.Recorder
-	player   *replay.Player
+	match       *engine.Runtime // The running match or replay, or nil on the title.
+	session     *outpostSession // The scene in match; the factory publishes it.
+	recorder    *replay.Recorder
+	player      *replay.Player
+	matchPlayer *matchWatch
+	lastMatch   []byte
+	tactics     bool // The title's guard option, not the option of a loaded match.
 
 	notice     string
 	noticeLeft int
@@ -85,11 +93,15 @@ type outpostApp struct {
 	panel      ui.Panel
 	err        error
 
-	sound engine.SoundOutput // This tick's output, or nil. Valid only inside Update.
+	sound     engine.SoundOutput // This tick's output, or nil. Valid only inside Update.
+	musicOn   bool
+	musicGain float32
+
 	// start is true on the tick a gamepad's Start button goes down, and menuButton
 	// is the touch button that opens the pause menu or leaves a replay.
 	start, prevStart bool
 	menuButton       ui.Button
+	fogButton        ui.Button
 
 	lobby      *onlineLobby // The connection being made, or nil.
 	osync      *onlineSync  // The gate of the online match, or nil.
@@ -105,6 +117,7 @@ func newOutpostApp(world *outpostWorld) *outpostApp {
 		recLabel:   ui.Label{Bounds: image.Rect(240, 0, width, 12), Text: "REC 00:00", Style: style},
 		panel:      ui.Panel{Bounds: image.Rect(0, 0, width, height), Style: style},
 		menuButton: ui.Button{Bounds: image.Rect(276, 14, 318, 26), Style: style},
+		fogButton:  ui.Button{Bounds: image.Rect(224, 14, 273, 26), Text: "Fog", Style: style},
 	}
 }
 
@@ -121,18 +134,33 @@ func (a *outpostApp) Exit() { a.stopMatch() }
 func (a *outpostApp) toTitle() {
 	a.stopMatch()
 	a.state = stateTitle
-	items := []string{"Start", "Load", "Watch last replay"}
+	items := []string{
+		"Start",
+		"Load",
+		"Watch last replay",
+		a.guardsLabel(),
+		"Watch last online match",
+	}
+	top, row := 92, 16
 	if online := a.world.online; online.relay != "" {
-		items = append(items, "Host online game")
+		top, row = 76, 12
+		items = append(items, "Host co-op", "Host versus")
 		if online.room != "" {
 			items = append(items, "Join room "+online.room)
 		}
 	}
 	a.menu = ui.Menu{
-		Bounds: image.Rect(100, 92, 220, 92+16*len(items)),
+		Bounds: image.Rect(72, top, 248, top+row*len(items)),
 		Items:  items,
 		Style:  ui.DefaultStyle(),
 	}
+}
+
+func (a *outpostApp) guardsLabel() string {
+	if a.tactics {
+		return "Guards: Tactical"
+	}
+	return "Guards: Classic"
 }
 
 func (a *outpostApp) toPause() {
@@ -169,7 +197,6 @@ func (a *outpostApp) cycleVolume() {
 	default:
 		a.world.volume = 1
 	}
-	a.menu.Items[pauseSound] = a.soundLabel()
 }
 
 // click plays a menu sound.
@@ -186,6 +213,7 @@ func (a *outpostApp) closeOnline() {
 		a.lobby = nil
 	}
 	if a.osync != nil {
+		a.finishMatchLog()
 		noteClose("leave the match", a.osync.lock.Leave())
 		a.osync = nil
 	}
@@ -199,10 +227,11 @@ func (a *outpostApp) closeOnline() {
 func (a *outpostApp) say(text string) { a.notice, a.noticeLeft = text, outpostNoticeTicks }
 
 // sessionFactory creates matches whose scene the app can reach.
-func (a *outpostApp) sessionFactory(start []byte) engine.SceneFactory {
+func (a *outpostApp) sessionFactory(start []byte, tactics bool) engine.SceneFactory {
 	first := start
 	return func() engine.Scene {
 		s := a.world.newSession(first)
+		s.tactics = tactics
 		first = nil // A restart within the recording begins from the level again.
 		a.session = s
 		return s
@@ -210,13 +239,13 @@ func (a *outpostApp) sessionFactory(start []byte) engine.SceneFactory {
 }
 
 // begin starts a recorded match, from a snapshot when start is not nil.
-func (a *outpostApp) begin(start []byte) error {
+func (a *outpostApp) begin(start []byte, tactics bool) error {
 	a.stopMatch()
-	recorder, err := replay.NewRecorder(a.world.meta, start, outpostRecordTicks)
+	recorder, err := replay.NewRecorder(a.world.soloMeta(tactics), start, outpostRecordTicks)
 	if err != nil {
 		return err
 	}
-	match, err := engine.Start(replay.Record(a.sessionFactory(start), recorder))
+	match, err := engine.Start(replay.Record(a.sessionFactory(start, tactics), recorder))
 	if err != nil {
 		return err
 	}
@@ -255,7 +284,7 @@ func (a *outpostApp) stopMatch() {
 	if err := a.match.Stop(); err != nil && a.err == nil {
 		a.err = err
 	}
-	a.match, a.session, a.player = nil, nil, nil
+	a.match, a.session, a.player, a.matchPlayer = nil, nil, nil, nil
 }
 
 // load starts a match from the saved game. A problem is a notice, not an error.
@@ -274,14 +303,15 @@ func (a *outpostApp) load() {
 		return
 	}
 	meta, snapshot, err := save.Decode(data)
+	tactics := meta == a.world.soloMeta(true)
 	if err == nil {
-		err = meta.Check(a.world.meta)
+		err = meta.Check(a.world.soloMeta(tactics))
 	}
 	if err != nil {
 		a.say("Could not load: " + err.Error())
 		return
 	}
-	if err := a.begin(snapshot); err != nil {
+	if err := a.begin(snapshot, tactics); err != nil {
 		a.say("Could not load: " + err.Error())
 		a.toTitle()
 	}
@@ -295,7 +325,7 @@ func (a *outpostApp) save() {
 	snapshot, err := a.session.Snapshot()
 	if err == nil {
 		var data []byte
-		if data, err = save.Encode(a.world.meta, snapshot); err == nil {
+		if data, err = save.Encode(a.world.soloMeta(a.session.tactics), snapshot); err == nil {
 			err = a.world.store.Put(outpostSaveKey, data)
 		}
 	}
@@ -315,7 +345,8 @@ func (a *outpostApp) watch(data []byte) {
 	recording, err := replay.Decode(data)
 	var player *replay.Player
 	if err == nil {
-		player, err = replay.Play(a.sessionFactory(nil), recording, a.world.meta)
+		tactics := recording.Meta == a.world.soloMeta(true)
+		player, err = replay.Play(a.sessionFactory(nil, tactics), recording, a.world.soloMeta(tactics))
 	}
 	var match *engine.Runtime
 	if err == nil {
@@ -365,6 +396,8 @@ func (a *outpostApp) Update(tick engine.Tick) (engine.Transition, error) {
 		err = a.updatePaused(in)
 	case stateWatching:
 		err = a.updateWatching(in)
+	case stateMatchWatch:
+		a.updateMatchWatch(in)
 	case stateLobby:
 		a.updateLobby(in)
 	case stateOnline:
@@ -372,6 +405,7 @@ func (a *outpostApp) Update(tick engine.Tick) (engine.Transition, error) {
 	case stateOnlineEnded:
 		a.updateOnlineEnded(in)
 	}
+	a.updateMusic(tick)
 	return engine.Transition{}, err
 }
 
@@ -382,14 +416,23 @@ func (a *outpostApp) updateTitle(in engine.Input) error {
 	}
 	switch choice {
 	case titleStart:
-		return a.begin(nil)
+		return a.begin(nil, a.tactics)
 	case titleLoad:
 		a.load()
 	case titleWatch:
 		a.watch(a.lastReplay())
-	case titleHost:
+	case titleGuards:
+		a.tactics = !a.tactics
+		a.menu.Items[titleGuards] = a.guardsLabel()
+	case titleWatchMatch:
+		a.watchMatch()
+	case titleHostCoop, titleHostVersus:
 		a.stopMatch()
 		a.lobby, a.state = startLobby(a.world.online, true), stateLobby
+		a.lobby.setup.tactics = a.tactics
+		if choice == titleHostVersus {
+			a.lobby.setup = matchSetup{mode: matchlog.Versus}
+		}
 	case titleJoin:
 		a.stopMatch()
 		a.lobby, a.state = startLobby(a.world.online, false), stateLobby
@@ -450,6 +493,7 @@ func (a *outpostApp) updatePaused(in engine.Input) error {
 		a.state = statePlaying
 	case pauseSound:
 		a.cycleVolume()
+		a.menu.Items[pauseSound] = a.soundLabel()
 	case pauseQuit:
 		a.toTitle()
 	}
@@ -494,7 +538,7 @@ func (a *outpostApp) Draw(canvas engine.Canvas) {
 			canvas,
 			"Arrows and Enter, a gamepad, or touch",
 			49,
-			float32(92+16*len(a.menu.Items)+10),
+			float32(a.menu.Bounds.Max.Y+10),
 			1,
 			skirmishAlarmQuiet,
 		)
@@ -526,6 +570,8 @@ func (a *outpostApp) Draw(canvas engine.Canvas) {
 		a.menuButton.Text = "Leave"
 		a.menuButton.Draw(canvas, face)
 		face.Draw(canvas, "Esc leaves the replay", 100, 169, 1, skirmishAlarmQuiet)
+	case stateMatchWatch:
+		a.drawMatchWatch(canvas)
 	}
 	if a.noticeLeft > 0 {
 		face.Draw(canvas, a.notice, 8, 160, 1, color.NRGBA{R: 255, G: 235, B: 87, A: 255})

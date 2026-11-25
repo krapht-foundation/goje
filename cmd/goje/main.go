@@ -1,10 +1,11 @@
 // Command goje builds a Goje game for the web and the host desktop and packages
-// release archives. The commands and their outputs are specified in
-// specs/build-m15.md.
+// release archives, optionally signed. The commands and their outputs are
+// specified in specs/build-m15.md and specs/update-m17.md.
 package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,7 +18,8 @@ import (
 )
 
 const usageText = `usage: goje build|package [-o DIR] [-name NAME] [-version V] [-id BUNDLE_ID]
-	[-tags TAGS] [-icon PNG] [-target web|desktop|all] [PACKAGE]
+	[-tags TAGS] [-icon PNG] [-target web|desktop|all] [-sign KEYFILE] [PACKAGE]
+       goje keygen [-o PREFIX]
 `
 
 var (
@@ -34,8 +36,8 @@ var (
 
 // options holds the parsed command line. An empty name or bundle ID is derived later.
 type options struct {
-	command, out, name, version, id, tags, icon, pkg string
-	web, desktop                                     bool
+	command, out, name, version, id, tags, icon, sign, pkg string
+	web, desktop                                           bool
 }
 
 func main() {
@@ -53,9 +55,19 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, log io.Writer) error {
+	if len(args) > 0 && args[0] == "keygen" {
+		return keygen(args[1:])
+	}
 	opts, err := parse(args, runtime.GOOS, log)
 	if err != nil {
 		return err
+	}
+	var key ed25519.PrivateKey
+	if opts.sign != "" {
+		// Read the key before building, so a bad key fails fast.
+		if key, err = readPrivateKey(opts.sign); err != nil {
+			return err
+		}
 	}
 	game, err := resolve(ctx, opts)
 	if err != nil {
@@ -72,14 +84,15 @@ func run(ctx context.Context, args []string, log io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return pack(opts.out, game.name, opts.version, game.platform, modTime)
+	return pack(opts.out, game.name, opts.version, game.platform, modTime, key)
 }
 
 // parse reads and validates the command line. goos is the host system, which
 // decides whether a desktop build is possible.
 func parse(args []string, goos string, log io.Writer) (options, error) {
 	if len(args) == 0 || (args[0] != "build" && args[0] != "package") {
-		return options{}, fmt.Errorf("%w: the first argument must be build or package", errUsage)
+		return options{}, fmt.Errorf(
+			"%w: the first argument must be build, package, or keygen", errUsage)
 	}
 	opts := options{command: args[0]}
 	set := flag.NewFlagSet("goje "+args[0], flag.ContinueOnError)
@@ -91,6 +104,7 @@ func parse(args []string, goos string, log io.Writer) (options, error) {
 	set.StringVar(&opts.tags, "tags", "", "comma-separated Go build tags")
 	set.StringVar(&opts.icon, "icon", "", "square 512 × 512 PNG icon")
 	target := set.String("target", "all", "web, desktop, or all")
+	set.StringVar(&opts.sign, "sign", "", "PEM Ed25519 private key that signs the release")
 	if err := set.Parse(args[1:]); err != nil {
 		return options{}, fmt.Errorf("%w: %w", errUsage, err)
 	}
@@ -121,6 +135,8 @@ func parse(args []string, goos string, log io.Writer) (options, error) {
 	case strings.ContainsAny(opts.tags, " \t\n"):
 		return options{}, fmt.Errorf("%w: -tags %q must be comma-separated without spaces",
 			errUsage, opts.tags)
+	case opts.sign != "" && opts.command != "package":
+		return options{}, fmt.Errorf("%w: -sign applies only to package", errUsage)
 	}
 	desktopErr := desktopSupported(goos)
 	switch *target {
@@ -147,9 +163,9 @@ func parse(args []string, goos string, log io.Writer) (options, error) {
 
 // desktopSupported reports why the host cannot build a desktop executable.
 func desktopSupported(goos string) error {
-	if goos == "darwin" || goos == "linux" {
+	if goos == "darwin" || goos == "linux" || goos == "windows" {
 		return nil
 	}
-	return fmt.Errorf("desktop builds use the cgo desktop host, which supports only darwin and "+
-		"linux, and run only for the host system, which is %s; use -target web", goos)
+	return fmt.Errorf("desktop builds use the cgo desktop host, which supports only darwin, "+
+		"linux, and windows, and run only for the host system, which is %s; use -target web", goos)
 }

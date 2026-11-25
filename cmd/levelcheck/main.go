@@ -1,4 +1,4 @@
-// Command levelcheck validates a Goje level, version 1 or 2, for the reference playground.
+// Command levelcheck validates a Goje level for the reference courtyard.
 package main
 
 import (

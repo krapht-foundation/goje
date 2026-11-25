@@ -290,7 +290,7 @@ func TestRandomVisionHistories(t *testing.T) {
 					t.Fatalf("seed %d: unit %d still attacks unit %d, dead or hidden", seed, u.ID, u.target)
 				}
 			case u.order == AttackMove:
-				if _, _, ok := first.nearest(u, weaponRange, true); !ok {
+				if _, _, ok := first.nearest(u, weaponRange, true, false); !ok {
 					t.Fatalf("seed %d: unit %d never finished its attack-move", seed, u.ID)
 				}
 			case u.Moving() && !u.chasing:

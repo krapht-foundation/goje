@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"compress/flate"
 	"compress/gzip"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -17,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/krapht-foundation/goje/update"
 )
 
 // defaultDate is the archive time when SOURCE_DATE_EPOCH is unset.
@@ -36,8 +39,8 @@ func sourceDate(epoch string) (time.Time, error) {
 
 // pack writes out/release from out/web and, if platform is set, out/desktop/platform.
 // Entries are sorted and carry only the given time and fixed modes, so equal
-// inputs give equal bytes.
-func pack(out, name, version, platform string, modTime time.Time) error {
+// inputs give equal bytes. A non-nil key also signs the release.
+func pack(out, name, version, platform string, modTime time.Time, key ed25519.PrivateKey) error {
 	release := filepath.Join(out, "release")
 	if err := fresh(release); err != nil {
 		return err
@@ -48,14 +51,18 @@ func pack(out, name, version, platform string, modTime time.Time) error {
 		return err
 	}
 	if platform != "" {
-		archive := prefix + "-" + platform + ".tar.gz"
-		err := writeArchive(archive, filepath.Join(out, "desktop", platform), modTime, writeTar)
+		// Windows has zip support built in and no tar convention.
+		archive, write := prefix+"-"+platform+".tar.gz", writeTar
+		if strings.HasPrefix(platform, "windows-") {
+			archive, write = prefix+"-"+platform+".zip", writeZip
+		}
+		err := writeArchive(archive, filepath.Join(out, "desktop", platform), modTime, write)
 		if err != nil {
 			return err
 		}
 		archives = append(archives, archive)
 	}
-	return writeChecksums(filepath.Join(release, "SHA256SUMS"), archives)
+	return writeChecksums(release, name, version, archives, key)
 }
 
 // entry is one archived path, relative and slash-separated, with a fixed mode.
@@ -176,7 +183,9 @@ func writeTar(w io.Writer, list []entry, modTime time.Time) error {
 }
 
 func copyFile(dest io.Writer, path string) (err error) {
-	file, err := os.Open(path) // #nosec G304 -- The path comes from walking the build output.
+	file, err := os.Open(
+		path,
+	) // #nosec G304 G703 -- The path comes from the developer's build output.
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
@@ -187,24 +196,38 @@ func copyFile(dest io.Writer, path string) (err error) {
 	return nil
 }
 
-// writeChecksums writes lines in the sha256sum text format, sorted by file name.
-func writeChecksums(sums string, files []string) error {
-	lines := make([]string, 0, len(files))
-	for _, file := range files {
+// writeChecksums writes SHA256SUMS in the sha256sum text format, sorted by file
+// name. A non-nil key also writes its signature, SHA256SUMS.sig, and the signed
+// update.json, which binds the name and version to the same digests.
+func writeChecksums(
+	release, name, version string, archives []string, key ed25519.PrivateKey,
+) error {
+	files := make([]update.File, 0, len(archives))
+	for _, archive := range archives {
 		hash := sha256.New()
-		if err := copyFile(hash, file); err != nil {
+		if err := copyFile(hash, archive); err != nil {
 			return err
 		}
-		lines = append(lines, hex.EncodeToString(hash.Sum(nil))+"  "+filepath.Base(file)+"\n")
+		info, err := os.Stat(archive)
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", archive, err)
+		}
+		files = append(files, update.File{
+			Name: filepath.Base(archive), Size: info.Size(), SHA256: hex.EncodeToString(hash.Sum(nil)),
+		})
 	}
-	slices.SortFunc(lines, func(a, b string) int { return strings.Compare(a[66:], b[66:]) })
-	err := os.WriteFile(
-		sums,
-		[]byte(strings.Join(lines, "")),
-		0o644,
-	) // #nosec G306 -- Public checksums.
-	if err != nil {
-		return fmt.Errorf("write %s: %w", sums, err)
+	slices.SortFunc(files, func(a, b update.File) int { return strings.Compare(a.Name, b.Name) })
+	var sums []byte
+	for _, file := range files {
+		sums = append(sums, file.SHA256+"  "+file.Name+"\n"...)
 	}
-	return nil
+	out := map[string][]byte{"SHA256SUMS": sums}
+	if key != nil {
+		manifest, err := update.Sign(update.Manifest{Name: name, Version: version, Files: files}, key)
+		if err != nil {
+			return fmt.Errorf("sign update.json: %w", err)
+		}
+		out["SHA256SUMS.sig"], out["update.json"] = ed25519.Sign(key, sums), manifest
+	}
+	return writeFiles(release, out)
 }

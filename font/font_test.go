@@ -66,8 +66,10 @@ func TestCustomSheet(t *testing.T) {
 	if _, _, _, a := face.Image().At(4, 0).RGBA(); a != 20*0x101 {
 		t.Fatalf("glyph b marker alpha = %d, want the decoded pixel", a)
 	}
-	if face.LineHeight() != 5 || face.Baseline() != 4 {
-		t.Fatalf("line height %d and baseline %d, want 5 and 4", face.LineHeight(), face.Baseline())
+	if face.LineHeight() != 5 || face.Baseline() != 4 || face.Cell() != image.Pt(4, 5) ||
+		face.First() != 'a' || face.Count() != 3 || face.Monospaced() {
+		t.Fatalf("metrics %d %d %v %d %d %t", face.LineHeight(), face.Baseline(), face.Cell(),
+			face.First(), face.Count(), face.Monospaced())
 	}
 
 	var canvas recorder
@@ -91,6 +93,10 @@ func TestCustomSheet(t *testing.T) {
 	monospace := decodeCustom(t, strings.Replace(customJSON, `,"advances":[2,3,4]`, "", 1))
 	if w, _ := monospace.Measure("abc", 1); w != 12 {
 		t.Fatalf("monospace width = %d, want 12", w)
+	}
+	full := decodeCustom(t, strings.Replace(customJSON, "[2,3,4]", "[4,4,4]", 1))
+	if !monospace.Monospaced() || !full.Monospaced() || !font.Builtin().Monospaced() {
+		t.Fatal("cell-wide advances must be monospaced")
 	}
 }
 

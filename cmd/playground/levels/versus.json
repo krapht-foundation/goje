@@ -1,0 +1,33 @@
+{
+  "version": 3,
+  "rows": [
+    "...........",
+    "...........",
+    "...#...#...",
+    "...#...#...",
+    "...........",
+    "...#...#...",
+    "...#...#...",
+    "...........",
+    "..........."
+  ],
+  "placements": [
+    {"id": 1, "kind": "scout", "x": 0, "y": 1},
+    {"id": 2, "kind": "scout", "x": 0, "y": 3},
+    {"id": 3, "kind": "scout", "x": 0, "y": 5},
+    {"id": 4, "kind": "scout", "x": 0, "y": 7},
+    {"id": 5, "kind": "scout", "x": 1, "y": 2},
+    {"id": 6, "kind": "scout", "x": 1, "y": 6},
+    {"id": 11, "kind": "guard", "x": 10, "y": 1},
+    {"id": 12, "kind": "guard", "x": 10, "y": 3},
+    {"id": 13, "kind": "guard", "x": 10, "y": 5},
+    {"id": 14, "kind": "guard", "x": 10, "y": 7},
+    {"id": 15, "kind": "guard", "x": 9, "y": 2},
+    {"id": 16, "kind": "guard", "x": 9, "y": 6}
+  ],
+  "zones": [
+    {"id": 1, "kind": "sight_block", "role": "trigger", "x": 5, "y": 1, "w": 1, "h": 2, "bottom": 0, "top": 32},
+    {"id": 2, "kind": "sight_block", "role": "trigger", "x": 5, "y": 6, "w": 1, "h": 2, "bottom": 0, "top": 32}
+  ],
+  "sight": {"radius": 4}
+}

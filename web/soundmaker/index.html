@@ -9,7 +9,7 @@
 <body>
   <main>
     <h1>Goje Sound Maker</h1>
-    <p>Shape a short sound effect, preview it, and download it as a WAV file. Sounds stay in this browser.</p>
+    <p>Shape a short sound effect, preview it, and download it as a WAV file, or write a looping music score and download it as JSON. Sounds stay in this browser.</p>
     <form id="controls" novalidate>
       <fieldset disabled>
         <legend>Effect</legend>
@@ -35,6 +35,24 @@
     <p id="status" role="status">Loading the Sound Maker…</p>
     <p>Current sound: <output id="summary" for="controls"></output></p>
     <canvas id="wave" width="640" height="160" aria-label="Waveform of the current sound"></canvas>
+    <section aria-labelledby="music-heading">
+      <h2 id="music-heading">Music</h2>
+      <p>A score is a tempo, a loop of sixteenth-note steps, and up to four channels of notes; see <code>specs/music-m17.md</code>. Games render it with <code>audio.RenderScore</code>.</p>
+      <form id="music-form" novalidate>
+        <fieldset disabled>
+          <legend>Score</legend>
+          <label for="score">Score (JSON)</label>
+          <textarea id="score" rows="18" spellcheck="false"></textarea>
+          <button id="apply-score" type="submit">Apply score</button>
+        </fieldset>
+      </form>
+      <p>
+        <button id="play-music" type="button" disabled>Play loop</button>
+        <button id="stop-music" type="button" disabled>Stop loop</button>
+        <button id="download-score" type="button" disabled>Download score</button>
+      </p>
+      <p>Current score: <output id="score-summary" for="music-form"></output></p>
+    </section>
   </main>
   <script src="wasm_exec.js"></script>
   <script type="module" src="editor.mjs"></script>

@@ -56,11 +56,16 @@ type Zone struct {
 	Bottom, Top int
 }
 
-// Board is a read-only level of version 1 or 2. A zero Board is empty.
+// SightBlockKind is the zone kind that blocks line of sight in a version 3
+// level. Such a zone must be a trigger, so it blocks sight but not movement.
+const SightBlockKind = "sight_block"
+
+// Board is a read-only level of version 1, 2, or 3. A zero Board is empty.
 type Board struct {
 	rows       []string
 	placements []Placement
 	zones      []Zone
+	sight      int // Sight radius in cells; zero means the level sets none.
 }
 
 // Size returns the ground grid width and height in cells.
@@ -86,8 +91,27 @@ func (b Board) Placements() iter.Seq[Placement] { return slices.Values(b.placeme
 // the board.
 func (b Board) Zones() iter.Seq[Zone] { return slices.Values(b.zones) }
 
-// Decode reads exactly one version 1 or 2 JSON document, including any trailing
-// whitespace. It does not close r. On error the returned board is empty.
+// Sight returns the level's sight radius in cells, from 1 to vision.MaxRadius,
+// and whether the level sets one. Only a version 3 level does.
+func (b Board) Sight() (radius int, ok bool) { return b.sight, b.sight != 0 }
+
+// SightBlocked reports whether a sight_block zone covers the cell. It is false
+// on a level without a sight object, where the kind has no meaning. It visits
+// every zone, so a game should build its mask once.
+func (b Board) SightBlocked(x, y int) bool {
+	if b.sight == 0 {
+		return false
+	}
+	for _, z := range b.zones {
+		if z.Kind == SightBlockKind && x >= z.X && y >= z.Y && x < z.X+z.W && y < z.Y+z.H {
+			return true
+		}
+	}
+	return false
+}
+
+// Decode reads exactly one version 1, 2, or 3 JSON document, including any
+// trailing whitespace. It does not close r. On error the returned board is empty.
 func Decode(r io.Reader) (Board, error) {
 	data, err := io.ReadAll(io.LimitReader(r, MaxBytes+1))
 	if err != nil {
@@ -103,18 +127,18 @@ func Decode(r io.Reader) (Board, error) {
 	d.UseNumber()
 	var b Board
 	var version uint64
-	zonesSeen := false
+	zonesSeen, sightSeen := false, false
 	if err := readObject(
 		d,
-		[]string{"version", "rows", "placements", "zones"},
+		[]string{"version", "rows", "placements", "zones", "sight"},
 		3,
 		func(field string) error {
 			var err error
 			switch field {
 			case "version":
 				version, err = readUint(d, 32)
-				if err == nil && version != 1 && version != 2 {
-					err = fmt.Errorf("unsupported level version %d (want 1 or 2)", version)
+				if err == nil && (version < 1 || version > 3) {
+					err = fmt.Errorf("unsupported level version %d (want 1, 2, or 3)", version)
 				}
 			case "rows":
 				b.rows, err = readRows(d)
@@ -123,6 +147,9 @@ func Decode(r io.Reader) (Board, error) {
 			case "zones":
 				zonesSeen = true
 				b.zones, err = readZones(d)
+			case "sight":
+				sightSeen = true
+				b.sight, err = readSight(d)
 			}
 			return err
 		},
@@ -132,8 +159,14 @@ func Decode(r io.Reader) (Board, error) {
 	if version == 1 && zonesSeen {
 		return Board{}, errors.New("level: zones need version 2")
 	}
-	if version == 2 && !zonesSeen {
+	if version >= 2 && !zonesSeen {
 		return Board{}, errors.New(`level: missing field "zones"`)
+	}
+	if version < 3 && sightSeen {
+		return Board{}, errors.New("level: sight needs version 3")
+	}
+	if version == 3 && !sightSeen {
+		return Board{}, errors.New(`level: missing field "sight"`)
 	}
 	if _, err := d.Token(); !errors.Is(err, io.EOF) {
 		if err != nil {

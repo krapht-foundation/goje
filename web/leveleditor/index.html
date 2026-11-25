@@ -33,6 +33,15 @@
   <p id="cursor" aria-live="polite">No level open.</p>
   <div class="workspace">
   <div class="panels">
+  <fieldset id="vision" class="zones" disabled>
+    <legend>Vision</legend>
+    <div class="zone-fields">
+      <label>Sight radius in cells, 0 for none <input id="sight-radius" type="number" min="0" max="181" value="0"></label>
+    </div>
+    <div class="group">
+      <button id="sight-apply" type="button">Set sight radius</button>
+    </div>
+  </fieldset>
   <fieldset id="zones" class="zones" disabled>
     <legend>Zones</legend>
     <label>Zones in this level
@@ -52,6 +61,7 @@
     </div>
     <div class="group">
       <button id="zone-add" type="button">Add zone</button>
+      <button id="zone-sight-preset" type="button">Sight block preset</button>
       <button id="zone-apply" type="button" disabled>Apply to selected zone</button>
       <button id="zone-delete" type="button" disabled>Delete selected zone</button>
     </div>

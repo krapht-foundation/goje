@@ -19,6 +19,8 @@ PIXEL_ART_WEB_DIR := $(BUILD_DIR)/pixelart-web
 PIXEL_ART_PORT ?= 8084
 SOUND_MAKER_WEB_DIR := $(BUILD_DIR)/soundmaker-web
 SOUND_MAKER_PORT ?= 8085
+FONT_EDITOR_WEB_DIR := $(BUILD_DIR)/fonteditor-web
+FONT_EDITOR_PORT ?= 8086
 PLAYWRIGHT_CACHE := $(BUILD_DIR)/playwright
 PLAYGROUND := $(BUILD_DIR)/playground$(if $(filter windows,$(shell $(GO) env GOOS)),.exe)
 BENCHMARK := $(BUILD_DIR)/playground-benchmark
@@ -51,7 +53,7 @@ test: ## Run headless Go tests
 
 test-wasm: ## Run the simulation tests as WebAssembly under Node
 	GOOS=js GOARCH=wasm $(GO) test -exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" \
-		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./font ./ui ./engine/replay ./engine/save ./engine ./engine/vision ./engine/lockstep ./netlink/... ./audio ./internal/sound ./cmd/playground
+		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./font ./ui ./engine/replay ./engine/save ./engine ./engine/vision ./engine/lockstep ./engine/matchlog ./netlink/... ./audio ./internal/sound ./internal/soundmaker ./level ./internal/leveleditor ./internal/fonteditor ./cmd/playground
 
 test-race: ## Run Go tests with the native race detector
 	$(GO) test -race ./...
@@ -111,6 +113,11 @@ smoke-level-editor: build-level-editor ## Verify editing and download in Chromiu
 smoke-placement-editor: build-level-editor ## Add, change, and delete placements in the Level Builder in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-placement-editor.mjs
 
+.PHONY: smoke-versus-editor
+smoke-versus-editor: build-level-editor ## Reauthor the versus level in Chromium and compare the exact export
+	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/versus-editor.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-versus-editor.mjs "$$tmp/versus.json"
+
 .PHONY: build-tile-maker serve-tile-maker smoke-tile-maker
 build-tile-maker: ## Build the standalone browser Tile Maker
 	mkdir -p "$(TILE_MAKER_WEB_DIR)"
@@ -147,8 +154,21 @@ build-sound-maker: ## Build the standalone browser Sound Maker
 serve-sound-maker: build-sound-maker ## Serve the Sound Maker on loopback (SOUND_MAKER_PORT=8085 by default)
 	$(NODE) scripts/sound-maker-server.mjs "$(SOUND_MAKER_PORT)"
 
-smoke-sound-maker: build-sound-maker ## Verify effect editing, preview, and WAV downloads in Chromium
+smoke-sound-maker: build-sound-maker ## Edit, preview, and export effects and music in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-sound-maker.mjs
+
+.PHONY: build-font-editor serve-font-editor smoke-font-editor
+build-font-editor: ## Build the standalone browser Font Editor
+	mkdir -p "$(FONT_EDITOR_WEB_DIR)"
+	GOOS=js GOARCH=wasm $(GO) build -o "$(FONT_EDITOR_WEB_DIR)/fonteditor.wasm" ./cmd/fonteditor
+	install -m 0644 web/fonteditor/index.html web/fonteditor/editor.mjs web/fonteditor/editor.css \
+		"$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$(FONT_EDITOR_WEB_DIR)/"
+
+serve-font-editor: build-font-editor ## Serve the Font Editor on loopback (FONT_EDITOR_PORT=8086 by default)
+	$(NODE) scripts/font-editor-server.mjs "$(FONT_EDITOR_PORT)"
+
+smoke-font-editor: build-font-editor ## Edit a glyph in Chromium and check the export with fontcheck and font.Decode
+	GO="$(GO)" PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-font-editor.mjs
 
 .PHONY: build-sprite-editor serve-sprite-editor smoke-sprite-editor smoke-sprite-roundtrip
 build-sprite-editor: ## Build the standalone browser Sprite Clip Editor
@@ -170,7 +190,7 @@ smoke-sprite-roundtrip: build-pixel-art build-sprite-editor ## Paint, animate, a
 		$(NODE) scripts/smoke-sprite-editor.mjs "$$tmp"; \
 		png="$$tmp/tomato.png"; \
 		$(GO) run ./cmd/spritecheck "$$png" "$$tmp/tomato.json"; \
-		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/courtyard/"; \
+		cp cmd/playground/*.go cmd/playground/goje.json cmd/playground/outpost_music.json "$$tmp/courtyard/"; \
 		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/courtyard/"; \
 		cp examples/beacon/*.go "$$tmp/beacon/"; \
 		cp -R examples/beacon/assets "$$tmp/beacon/"; \
@@ -193,7 +213,7 @@ smoke-level-roundtrip: build-level-editor build-tile-maker ## Play both browser 
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/level-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
 		mkdir -p "$$tmp/playground" "$$tmp/web"; \
-		cp cmd/playground/*.go "$$tmp/playground/"; \
+		cp cmd/playground/*.go cmd/playground/outpost_music.json "$$tmp/playground/"; \
 		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/playground/"; \
 		printf '%s\n' '{"version":1,"level":"levels/edited.json","ground":"art/edited.png"}' > "$$tmp/playground/goje.json"; \
 		tile="$$tmp/playground/art/edited.png"; \
@@ -214,7 +234,7 @@ smoke-zone-roundtrip: build-level-editor ## Author the yard's zones in the Level
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/zone-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
 		mkdir -p "$$tmp/playground" "$$tmp/web"; \
-		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/playground/"; \
+		cp cmd/playground/*.go cmd/playground/goje.json cmd/playground/outpost_music.json "$$tmp/playground/"; \
 		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/playground/"; \
 		level="$$tmp/playground/levels/yard.json"; \
 		rm "$$level"; \
@@ -231,7 +251,7 @@ smoke-outpost-roundtrip: build-level-editor ## Author the outpost's placements a
 	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/outpost-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
 		mkdir -p "$$tmp/playground" "$$tmp/web"; \
-		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/playground/"; \
+		cp cmd/playground/*.go cmd/playground/goje.json cmd/playground/outpost_music.json "$$tmp/playground/"; \
 		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/playground/"; \
 		level="$$tmp/playground/levels/outpost.json"; \
 		rm "$$level"; \
@@ -288,7 +308,7 @@ smoke-input: build-web ## Drive the input probe with touch and a fake gamepad in
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-input.mjs
 
 .PHONY: smoke-mixer
-smoke-mixer: ## Compare the Go mixer with the Web Audio graph on the same overlapping cues
+smoke-mixer: ## Compare overlapping cues and looping music in the Go mixer and the Web Audio graph
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-mixer.mjs
 
 .PHONY: smoke-goje-build
@@ -299,9 +319,10 @@ smoke-goje-build: build-level-editor build-tile-maker ## Build and package Beaco
 smoke-ws: ## Check the relay and the WebSocket subset against Chromium's own WebSocket
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-ws.mjs
 
-smoke-online: build-web ## Play the online outpost between a native host and Chromium, then inject a divergence
+smoke-online: build-web ## Play co-op and versus from native and Chromium hosts, verify replays, and inject a divergence
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs --fault
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs --versus
 
 benchmark-lockstep: ## Measure one lockstep tick for two players natively and as WebAssembly under Node
 	$(GO) test -run '^$$' -bench . -benchmem ./engine/lockstep
@@ -309,9 +330,9 @@ benchmark-lockstep: ## Measure one lockstep tick for two players natively and as
 		-exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" ./engine/lockstep
 
 .PHONY: benchmark-mixer
-benchmark-mixer: ## Measure mixing 16 voices into one 512-frame buffer natively and as WebAssembly under Node
-	$(GO) test -run '^$$' -bench 'MixerRender|Queue' -benchmem ./audio ./internal/sound
-	GOOS=js GOARCH=wasm $(GO) test -run '^$$' -bench 'MixerRender|Queue' -benchmem \
+benchmark-mixer: ## Measure sound and music mixing per 512-frame buffer natively and as WebAssembly under Node
+	$(GO) test -run '^$$' -bench 'MixerRender|MixerMusic|Queue' -benchmem ./audio ./internal/sound
+	GOOS=js GOARCH=wasm $(GO) test -run '^$$' -bench 'MixerRender|MixerMusic|Queue' -benchmem \
 		-exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" ./audio ./internal/sound
 
 .PHONY: smoke-sound-roundtrip
@@ -351,8 +372,9 @@ check-example: ## Build the reference playground from a separate module on deskt
 		cp cmd/playground/authored.go cmd/playground/yard.go cmd/playground/skirmish.go cmd/playground/goje.json "$$tmp/"; \
 		cp cmd/playground/outpost.go cmd/playground/outpost_app.go cmd/playground/outpost_session.go "$$tmp/"; \
 		cp cmd/playground/outpost_controls.go cmd/playground/outpost_sounds.go cmd/playground/inputprobe.go "$$tmp/"; \
-		cp cmd/playground/outpost_online.go cmd/playground/outpost_online_app.go "$$tmp/"; \
+		cp cmd/playground/outpost_online.go cmd/playground/outpost_online_app.go cmd/playground/outpost_match_watch.go "$$tmp/"; \
 		cp cmd/playground/outpost_online_config.go cmd/playground/outpost_online_config_js.go "$$tmp/"; \
+		cp cmd/playground/outpost_music.json "$$tmp/"; \
 		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \

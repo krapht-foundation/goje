@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/krapht-foundation/goje/engine/vision"
 )
 
 func readRows(d *json.Decoder) ([]string, error) {
@@ -258,10 +260,39 @@ func (b Board) checkZones() error {
 		if err := z.Check(width, height); err != nil {
 			return err
 		}
+		// The rule applies only where the kind has a meaning, so versions 1 and 2 are unchanged.
+		if b.sight != 0 && z.Kind == SightBlockKind && z.Role != RoleTrigger {
+			return fmt.Errorf(
+				"zone ID %d: a %s zone must have role %q",
+				z.ID,
+				SightBlockKind,
+				RoleTrigger,
+			)
+		}
 		if _, ok := ids[z.ID]; ok {
 			return fmt.Errorf("duplicate zone ID %d", z.ID)
 		}
 		ids[z.ID] = struct{}{}
+	}
+	return nil
+}
+
+func readSight(d *json.Decoder) (int, error) {
+	radius := 0
+	err := readObject(d, []string{"radius"}, 1, func(string) error {
+		n, err := readUint(d, 8)
+		radius = int(n) // #nosec G115 -- readUint enforced eight bits.
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return radius, checkSight(radius)
+}
+
+func checkSight(radius int) error {
+	if radius < 1 || radius > vision.MaxRadius {
+		return fmt.Errorf("sight radius %d must be 1–%d", radius, vision.MaxRadius)
 	}
 	return nil
 }

@@ -29,6 +29,10 @@ type Config struct {
 	// Sounds supplies up to 16 prepared cues, identified by zero-based index.
 	// Leave it empty to disable playback. Do not modify it during Run.
 	Sounds []audio.Clip
+	// Music supplies up to 16 looping tracks for Tick.PlayMusic, identified by
+	// zero-based index, usually from audio.RenderScore. Do not modify it during
+	// Run. Sound and music are disabled when both are empty.
+	Music []audio.Clip
 	// Logger receives lifecycle messages; nil disables logging.
 	Logger *slog.Logger
 	// Diagnostics collects counters and optionally a bounded trace. Nil disables
@@ -70,7 +74,7 @@ func Run(ctx context.Context, config Config, scene engine.SceneFactory) error {
 	if err != nil {
 		return err
 	}
-	soundQueue, err := sound.New(config.Sounds)
+	soundQueue, err := sound.New(config.Sounds, config.Music)
 	if err != nil {
 		return err
 	}

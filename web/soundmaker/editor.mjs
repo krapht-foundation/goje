@@ -1,4 +1,4 @@
-/** @file Bind the effect form, waveform view, Web Audio preview, and WAV handoff to the Go Sound Maker document. */
+/** @file Bind the effect form, waveform view, Web Audio previews, WAV handoff, and the Music panel to the Go Sound Maker documents. */
 
 /**
  * Find a static element in the Sound Maker page.
@@ -25,6 +25,13 @@ const status = element("status");
 const summary = element("summary");
 const wave = /** @type {HTMLCanvasElement} */ (element("wave"));
 const waveContext = wave.getContext("2d");
+const musicForm = /** @type {HTMLFormElement} */ (element("music-form"));
+const musicFields = /** @type {HTMLFieldSetElement} */ (musicForm.querySelector("fieldset"));
+const score = /** @type {HTMLTextAreaElement} */ (element("score"));
+const playMusic = /** @type {HTMLButtonElement} */ (element("play-music"));
+const stopMusic = /** @type {HTMLButtonElement} */ (element("stop-music"));
+const downloadScore = /** @type {HTMLButtonElement} */ (element("download-score"));
+const scoreSummary = element("score-summary");
 
 /**
  * Load Wasm and connect the page to its single effect document.
@@ -116,8 +123,76 @@ async function start() {
     message(`Downloaded sound.wav, ${bytes.length} bytes.`);
   });
 
+  /** @type {AudioContext | null} */
+  let loop = null;
+
+  /** Copy the accepted score into the editor and its summary. */
+  function showScore() {
+    const text = core.score();
+    score.value = text;
+    const { tempo, steps, channels } = JSON.parse(text);
+    const notes = channels.reduce((sum, channel) => sum + channel.notes.length, 0);
+    const seconds = (core.scorePCM().length / 2 / SAMPLE_RATE).toFixed(2);
+    scoreSummary.textContent = `${tempo} BPM, ${steps} steps, ${channels.length} channels, ${notes} notes, ${seconds} s loop`;
+  }
+
+  /** Stop the looping preview, if any. */
+  function endLoop() {
+    void loop?.close();
+    loop = null;
+  }
+
+  musicForm.addEventListener("submit", event => {
+    event.preventDefault();
+    const error = core.applyScore(score.value);
+    if (error) {
+      message(`Score not applied: ${error}`, true);
+      return;
+    }
+    endLoop();
+    showScore();
+    message(`Score applied: ${core.scorePCM().length / 2} samples per loop.`);
+  });
+
+  playMusic.addEventListener("click", () => {
+    try {
+      endLoop();
+      const context = new AudioContext({ sampleRate: SAMPLE_RATE });
+      loop = context;
+      const data = samples(core.scorePCM());
+      const buffer = context.createBuffer(1, data.length, SAMPLE_RATE);
+      buffer.copyToChannel(data, 0);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.connect(context.destination);
+      source.start();
+      message("Playing score loop.");
+    } catch (error) {
+      message(`Preview unavailable: ${error instanceof Error ? error.message : String(error)}`, true);
+    }
+  });
+
+  stopMusic.addEventListener("click", () => {
+    endLoop();
+    message("Score loop stopped.");
+  });
+
+  downloadScore.addEventListener("click", () => {
+    const text = core.score();
+    const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "score.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    message(`Downloaded score.json, ${new TextEncoder().encode(text).length} bytes.`);
+  });
+
   show();
+  showScore();
   fields.disabled = play.disabled = download.disabled = false;
+  musicFields.disabled = playMusic.disabled = stopMusic.disabled = downloadScore.disabled = false;
   message("Ready.");
 }
 
@@ -174,6 +249,7 @@ function message(text, error = false) {
 /** @param {string} text - Diagnostic describing why editing stopped. */
 function stop(text) {
   fields.disabled = play.disabled = download.disabled = true;
+  musicFields.disabled = playMusic.disabled = stopMusic.disabled = downloadScore.disabled = true;
   message(text, true);
 }
 

@@ -1,4 +1,4 @@
-/** @file Verify the Sound Maker's keyboard editing, preview, and WAV download in Chromium. */
+/** @file Verify the Sound Maker's keyboard editing, preview, WAV download, and Music panel in Chromium. */
 
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
@@ -10,9 +10,9 @@ import { serveSoundMaker } from "./sound-maker-server.mjs";
 
 const peak = 26214; // 0.8 of full scale, rounded as the synthesizer does.
 
-/** Record each preview buffer and source start without replacing real output. */
+/** Record each preview buffer, source start, and loop flag without replacing real output. */
 function tapAudio() {
-  const tap = { previews: [], starts: 0 };
+  const tap = { previews: [], starts: 0, loops: [] };
   Object.defineProperty(window, "soundMakerProbe", { value: tap });
   const copy = AudioBuffer.prototype.copyToChannel;
   const start = AudioBufferSourceNode.prototype.start;
@@ -23,6 +23,7 @@ function tapAudio() {
   AudioBufferSourceNode.prototype.start = function (...args) {
     start.apply(this, args);
     tap.starts++;
+    tap.loops.push(this.loop);
   };
 }
 
@@ -200,6 +201,59 @@ async function withoutAudio(browser, url, expected) {
   }
 }
 
+/**
+ * Edit, reject, play, and export a score in the Music panel.
+ * @param {import("playwright").Browser} browser - Managed headless Chromium.
+ * @param {string} url - Served Sound Maker.
+ * @returns {Promise<void>} Resolves when the Music panel checks pass.
+ */
+async function music(browser, url) {
+  const page = await browser.newPage({ acceptDownloads: true });
+  page.setDefaultTimeout(8_000);
+  try {
+    await page.addInitScript(tapAudio);
+    await page.goto(url);
+    await page.locator("#status", { hasText: "Ready." }).waitFor();
+    const summary = page.locator("#score-summary");
+    assert.equal(await summary.textContent(), "120 BPM, 64 steps, 2 channels, 32 notes, 8.00 s loop");
+    const editor = page.getByLabel("Score (JSON)");
+    const original = await editor.inputValue();
+
+    // At 150 BPM a step is 4800 frames, so 64 steps loop every 307,200 samples.
+    await editor.fill(original.replace('"tempo": 120', '"tempo": 150'));
+    assert.equal(await statusAfter(page, () => page.locator("#apply-score").press("Enter")), "Score applied: 307200 samples per loop.");
+    const applied = await editor.inputValue();
+    assert.equal(applied, original.replace('"tempo": 120', '"tempo": 150'), "the editor shows the canonical score");
+    assert.equal(await summary.textContent(), "150 BPM, 64 steps, 2 channels, 32 notes, 6.40 s loop");
+
+    await editor.fill(applied.replace('"pitch": 45', '"pitch": 200'));
+    assert.match(await statusAfter(page, () => page.locator("#apply-score").press("Enter")), /^Score not applied: .*pitch/);
+    assert.equal(await page.locator("#status").getAttribute("data-error"), "");
+    assert.equal(await summary.textContent(), "150 BPM, 64 steps, 2 channels, 32 notes, 6.40 s loop");
+
+    const [event] = await Promise.all([page.waitForEvent("download"), page.locator("#download-score").press("Enter")]);
+    assert.equal(event.suggestedFilename(), "score.json");
+    const exported = await readFile(await event.path(), "utf8");
+    assert.equal(exported, applied, "a rejected score keeps the exported one");
+    assert.equal(JSON.parse(exported).tempo, 150);
+
+    assert.equal(await statusAfter(page, () => page.locator("#play-music").press("Enter")), "Playing score loop.");
+    const probe = await page.evaluate(() => {
+      const { previews, loops } = window.soundMakerProbe;
+      const pcm = globalThis.gojeSoundMaker.scorePCM();
+      const view = new DataView(pcm.buffer);
+      const rendered = Array.from({ length: pcm.length / 2 }, (_, i) => view.getInt16(2 * i, true) / 32768);
+      const preview = previews.at(-1);
+      return { loops, same: preview.length === rendered.length && preview.every((v, i) => v === rendered[i]) };
+    });
+    assert.deepEqual(probe.loops, [true]);
+    assert.ok(probe.same, "the loop plays the rendered score");
+    assert.equal(await statusAfter(page, () => page.locator("#stop-music").press("Enter")), "Score loop stopped.");
+  } finally {
+    await page.close();
+  }
+}
+
 const [output, ...extra] = process.argv.slice(2);
 if (extra.length) throw new Error("Usage: node scripts/smoke-sound-maker.mjs [EXPORT_PATH]");
 
@@ -212,7 +266,8 @@ try {
     // The caller owns the path; refuse to replace a file that is already there.
     if (output) await writeFile(output, square_wav, { flag: "wx" });
     await withoutAudio(browser, url, default_wav);
-    console.log(`Sound Maker smoke passed: keyboard apply ${timings.apply_ms} ms, download ${timings.download_ms} ms, preview ${timings.play_ms} ms; rejection, determinism, and no-Web-Audio fallback`);
+    await music(browser, url);
+    console.log(`Sound Maker smoke passed: keyboard apply ${timings.apply_ms} ms, download ${timings.download_ms} ms, preview ${timings.play_ms} ms; rejection, determinism, no-Web-Audio fallback, and a score edited, rejected, exported, and looped`);
     console.log(JSON.stringify({ benchmark: "goje-sound-maker", chromium_version: browser.version(), timings }));
   } finally {
     await browser.close();

@@ -191,4 +191,19 @@ func BenchmarkMixerRender(b *testing.B) {
 	}
 }
 
+// BenchmarkMixerMusic measures the extra voice in a 512-frame stereo block.
+func BenchmarkMixerMusic(b *testing.B) {
+	pcm := make([]int16, SampleRate)
+	for i := range pcm {
+		pcm[i] = int16(i*37%65536 - 32768)
+	}
+	dst := make([]float32, 2*512)
+	var m Mixer
+	m.PlayMusic(Clip{pcm: samples(pcm...)}, 0.35, 500)
+	b.ReportAllocs()
+	for b.Loop() {
+		m.Render(dst)
+	}
+}
+
 func near(a, b float32) bool { return math.Abs(float64(a-b)) < 1e-6 }
