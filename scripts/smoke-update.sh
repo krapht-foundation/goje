@@ -25,7 +25,7 @@ name=${NAME:-goje-beacon}
 platform=${PLATFORM:-linux-amd64}
 ext=.tar.gz
 [[ $platform == windows-* ]] && ext=.zip
-channel=$github/beacon-staging/update.json
+channel=https://raw.githubusercontent.com/${REPO:-krapht-foundation/goje}/refs/heads/beacon-staging-channel/update.json
 artifacts="$github/beacon-staging-v{version}/{file}"
 export GOWORK=off
 
@@ -37,7 +37,7 @@ goje=$tmp/goje
 "$goje" keygen -o "$tmp/wrong"
 
 check() { "$goje" update -name "$name" -artifacts "$artifacts" "$@"; }
-# refuse runs a command that must fail with a message containing $1.
+# refuse runs a command whose failure must match the regular expression $1.
 refuse() {
   local want=$1 out
   shift
@@ -45,7 +45,7 @@ refuse() {
     echo "update smoke: accepted, want failure \"$want\": $*" >&2
     exit 1
   fi
-  if [[ $out != *"$want"* ]]; then
+  if [[ ! $out =~ $want ]]; then
     echo "update smoke: failed with \"$out\", want \"$want\"" >&2
     exit 1
   fi
@@ -89,6 +89,13 @@ if [[ -n $previous ]]; then
     echo "update smoke: $previous and $version have the same archive" >&2
     exit 1
   fi
+  # Serve different bytes over HTTPS without modifying either immutable release.
+  wrong_artifacts="$github/beacon-staging-v$previous/$old_file?version={version}&file={file}"
+  mkdir "$tmp/wrong-archive"
+  refuse ': ([0-9]+ bytes, (want|more than) [0-9]+|more than [0-9]+ bytes|SHA-256 digest does not match)$' \
+    check -manifest "$channel" -key "$pub" -current "$previous" \
+    -artifacts "$wrong_artifacts" -file "$file" -o "$tmp/wrong-archive"
+  empty "$tmp/wrong-archive"
   refuse "not newer" check -manifest "$old" -key "$pub" -current "$version"
 fi
 echo "update smoke: $name $version verified on $channel"

@@ -5,7 +5,7 @@ on:
     inputs:
       stage_version:
         description: >-
-          To sign and publish Beacon on the staging channel, run on tag vVERSION and enter VERSION.
+          To sign and publish Beacon on the staging channel, run on tag beacon-staging-vVERSION and enter VERSION.
           Leave empty to only build.
         required: false
         default: ''
@@ -61,10 +61,13 @@ jobs:
           fi
       - name: Build and package the playground and Beacon
         run: |
-          # A tag v1.2.3 releases version 1.2.3; a manual run is a development build.
+          # Branches build development packages. Release and staging tags supply their own version.
           version=0.0.0-dev
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-            version=${GITHUB_REF_NAME#v}
+            case "$GITHUB_REF_NAME" in
+              beacon-staging-v*) version=${GITHUB_REF_NAME#beacon-staging-v} ;;
+              v*) version=${GITHUB_REF_NAME#v} ;;
+            esac
           fi
           mkdir -p .build
           goje=.build/goje$(go env GOEXE)
@@ -124,7 +127,7 @@ jobs:
   # only when a maintainer starts the workflow by hand on a tag and enters that tag's
   # version, and only after the beacon-staging environment's reviewers approve it.
   stage:
-    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && inputs.stage_version != ''
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && startsWith(github.ref_name, 'beacon-staging-v') && inputs.stage_version != ''
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -151,7 +154,7 @@ jobs:
           SIGNING_KEY: ${{ secrets.BEACON_STAGING_KEY }}
           PUBLIC_KEY: ${{ vars.BEACON_STAGING_PUB }}
         run: |
-          if [[ "$STAGE_VERSION" != "${GITHUB_REF_NAME#v}" ]]; then
+          if [[ "$STAGE_VERSION" != "${GITHUB_REF_NAME#beacon-staging-v}" ]]; then
             echo "stage_version $STAGE_VERSION does not match the tag $GITHUB_REF_NAME" >&2
             exit 1
           fi
@@ -182,16 +185,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           STAGE_VERSION: ${{ inputs.stage_version }}
         run: |
-          # The versioned release must be new, so an artifact URL never changes its bytes.
-          gh release create "beacon-staging-v$STAGE_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" --prerelease --title "Beacon staging $STAGE_VERSION" \
+          # An immutable release cannot hold a moving manifest. Advance the
+          # channel branch only after the versioned release and assets are live.
+          repo="repos/$GITHUB_REPOSITORY"
+          branch=beacon-staging-channel
+          sha=$(gh api "$repo/git/trees/$branch" --jq '.tree[] | select(.path == "update.json") | .sha')
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --prerelease --title "Beacon staging $STAGE_VERSION" \
             --notes "Beacon $STAGE_VERSION on the staging update channel." -- stage/*
-          if ! gh release view beacon-staging --repo "$GITHUB_REPOSITORY" > /dev/null; then
-            gh release create beacon-staging --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --prerelease --title "Beacon staging channel" \
-              --notes "update.json names the current Beacon staging version."
+          args=()
+          if [[ -n $sha ]]; then
+            args+=(-f "sha=$sha")
           fi
-          gh release upload beacon-staging --repo "$GITHUB_REPOSITORY" --clobber -- stage/update.json
+          gh api --method PUT "$repo/contents/update.json" -f "branch=$branch" \
+            -f "message=Publish Beacon staging $STAGE_VERSION" \
+            -f "content=$(base64 -w0 stage/update.json)" "${args[@]}" --jq .commit.sha
 
   # Checks the published channel over HTTPS with no access to the signing key.
   verify-stage:

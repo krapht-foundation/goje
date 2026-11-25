@@ -1,6 +1,6 @@
 # RFC 0019: M18 — Live matches and distribution
 
-**Status:** Accepted. Implementation is available for local verification; native mobile and hosted staging checks are open.
+**Status:** Accepted. Hosted Android and iOS simulator checks passed. Offline iOS play, an iOS distribution export, and hosted staging verification remain open.
 
 ## Problem and goal
 
@@ -63,7 +63,7 @@ The wrapper/toolchain and decoder feasibility checks can run in parallel with sp
 
 - **Outpost:** A native host and Chromium guest resumed at tick zero after an early cut. A second Chromium page caught up, switched fog, and verified shared hashes after later cuts to each player. Both match logs replayed. Co-op and the injected-desync check also passed. A native relay test verified that a live spectator received the natural final tick before the room ended.
 - **Beacon and FLAC:** Desktop and Chromium passed win, timeout, and restart; Chromium also passed the touch path. The installed web build opened with its server and network down. The decoder reproduced the authored PCM exactly and the asset is 44.7% of the equivalent WAV. The [decoder specification](../specs/music-flac-m18.md#measurements) records the timing and heap growth.
-- **Mobile:** Generated and resynced both Capacitor projects locally. The bundled web assets matched, native edits survived, and both native version fields updated. A disposable Java signing fixture passed strict verification. This did not build or sign an Android AAB, launch a native emulator or simulator, or verify an iOS distribution export. The [mobile verification guide](../specs/mobile-m18.md#verification) describes the remaining native checks.
+- **Mobile:** Generated and resynced both Capacitor projects locally. The bundled web assets matched, native edits survived, and both native version fields updated. [Hosted Android CI](https://github.com/krapht-foundation/goje/actions/runs/45668408851/job/139396737221) verified the disposable-key-signed AAB, installed an APK derived from it, and won and restarted by touch with networking disabled. [Hosted iOS CI](https://github.com/krapht-foundation/goje/actions/runs/45668408851/job/139396736699) built an unsigned Release simulator app, verified its packaged assets, and won and restarted by touch with networking available. The [mobile verification guide](../specs/mobile-m18.md#verification) covers the remaining iOS checks. Neither store received a build.
 - **Hosted updates:** The CLI signed and checked manifests and verified downloads against local HTTPS fixtures, including the rejection cases. No staging channel has been published. The [staging guide](../specs/update-m18.md#release-workflow) lists the protected environment and authorization needed for the remote checks.
 
 ## Out of scope
