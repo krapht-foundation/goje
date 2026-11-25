@@ -1,6 +1,6 @@
 # RFC 0019: M18 — Live matches and distribution
 
-**Status:** Accepted. Hosted Android and iOS simulator checks passed. Offline iOS play, an iOS distribution export, and hosted staging verification remain open.
+**Status:** Accepted. Hosted Android, iOS simulator, and Beacon staging checks passed. Offline iOS play and an iOS distribution export remain open.
 
 ## Problem and goal
 
@@ -64,7 +64,7 @@ The wrapper/toolchain and decoder feasibility checks can run in parallel with sp
 - **Outpost:** A native host and Chromium guest resumed at tick zero after an early cut. A second Chromium page caught up, switched fog, and verified shared hashes after later cuts to each player. Both match logs replayed. Co-op and the injected-desync check also passed. A native relay test verified that a live spectator received the natural final tick before the room ended.
 - **Beacon and FLAC:** Desktop and Chromium passed win, timeout, and restart; Chromium also passed the touch path. The installed web build opened with its server and network down. The decoder reproduced the authored PCM exactly and the asset is 44.7% of the equivalent WAV. The [decoder specification](../specs/music-flac-m18.md#measurements) records the timing and heap growth.
 - **Mobile:** Generated and resynced both Capacitor projects locally. The bundled web assets matched, native edits survived, and both native version fields updated. [Hosted Android CI](https://github.com/krapht-foundation/goje/actions/runs/45668408851/job/139396737221) verified the disposable-key-signed AAB, installed an APK derived from it, and won and restarted by touch with networking disabled. [Hosted iOS CI](https://github.com/krapht-foundation/goje/actions/runs/45668408851/job/139396736699) built an unsigned Release simulator app, verified its packaged assets, and won and restarted by touch with networking available. The [mobile verification guide](../specs/mobile-m18.md#verification) covers the remaining iOS checks. Neither store received a build.
-- **Hosted updates:** The CLI signed and checked manifests and verified downloads against local HTTPS fixtures, including the rejection cases. No staging channel has been published. The [staging guide](../specs/update-m18.md#release-workflow) lists the protected environment and authorization needed for the remote checks.
+- **Hosted updates:** The protected release job published immutable Beacon prereleases [0.0.1-m18.1](https://github.com/krapht-foundation/goje/releases/tag/beacon-staging-v0.0.1-m18.1) and [0.0.1-m18.2](https://github.com/krapht-foundation/goje/releases/tag/beacon-staging-v0.0.1-m18.2). The corrected [staging smoke](../specs/update-m18.md#verification) passed from a local checkout against the live HTTPS channel. It verified the second signed manifest and Linux archive, verified the first manifest and archive at their original URLs, and rejected rollback, a wrong key, and substituted archive bytes without leaving an unverified file. The first release's manifest and Linux archive digests matched those recorded before the second publication. No production channel is enabled.
 
 ## Out of scope
 

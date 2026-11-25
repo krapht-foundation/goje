@@ -17,6 +17,7 @@ fi
 pub=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 version=$2
 previous=${3:-}
+current=${previous:-0.0.0}
 repo=$(cd "$(dirname "$0")/.." && pwd)
 cd "$repo"
 go=${GO:-go}
@@ -58,7 +59,7 @@ empty() {
   fi
 }
 
-out=$(check -manifest "$channel" -key "$pub" -current 0.0.0 2>&1)
+out=$(check -manifest "$channel" -key "$pub" -current "$current" 2>&1)
 echo "$out"
 if [[ $out != *"verified $name $version"* ]]; then
   echo "update smoke: the channel does not name $name $version" >&2
@@ -66,18 +67,27 @@ if [[ $out != *"verified $name $version"* ]]; then
 fi
 file=$name-$version-$platform$ext
 mkdir "$tmp/new"
-check -manifest "$channel" -key "$pub" -current 0.0.0 -file "$file" -o "$tmp/new"
+check -manifest "$channel" -key "$pub" -current "$current" -file "$file" -o "$tmp/new"
 test -f "$tmp/new/$file"
-refuse "already exists" check -manifest "$channel" -key "$pub" -current 0.0.0 -file "$file" -o "$tmp/new"
+refuse "already exists" check -manifest "$channel" -key "$pub" -current "$current" -file "$file" -o "$tmp/new"
 refuse "not newer" check -manifest "$channel" -key "$pub" -current "$version"
 mkdir "$tmp/wrong-key"
 refuse "signature does not match" \
-  check -manifest "$channel" -key "$tmp/wrong.pub" -current 0.0.0 -file "$file" -o "$tmp/wrong-key"
+  check -manifest "$channel" -key "$tmp/wrong.pub" -current "$current" -file "$file" -o "$tmp/wrong-key"
 empty "$tmp/wrong-key"
 mkdir "$tmp/missing"
-refuse "has no file" check -manifest "$channel" -key "$pub" -current 0.0.0 \
+refuse "has no file" check -manifest "$channel" -key "$pub" -current "$current" \
   -file "$name-$version-plan9-amd64.tar.gz" -o "$tmp/missing"
 empty "$tmp/missing"
+
+# Reproducible native archives can match across versions. Serve the web ZIP
+# instead to exercise rejection without modifying any published asset.
+wrong_artifacts="$github/beacon-staging-v{version}/$name-$version-web.zip?file={file}"
+mkdir "$tmp/wrong-archive"
+refuse ': ([0-9]+ bytes, (want|more than) [0-9]+|more than [0-9]+ bytes|SHA-256 digest does not match)$' \
+  check -manifest "$channel" -key "$pub" -current "$current" \
+  -artifacts "$wrong_artifacts" -file "$file" -o "$tmp/wrong-archive"
+empty "$tmp/wrong-archive"
 
 if [[ -n $previous ]]; then
   # The previous version's own manifest and archive URLs must still name its bytes.
@@ -85,17 +95,8 @@ if [[ -n $previous ]]; then
   old_file=$name-$previous-$platform$ext
   mkdir "$tmp/old"
   check -manifest "$old" -key "$pub" -current 0.0.0 -file "$old_file" -o "$tmp/old"
-  if cmp -s "$tmp/old/$old_file" "$tmp/new/$file"; then
-    echo "update smoke: $previous and $version have the same archive" >&2
-    exit 1
-  fi
-  # Serve different bytes over HTTPS without modifying either immutable release.
-  wrong_artifacts="$github/beacon-staging-v$previous/$old_file?version={version}&file={file}"
-  mkdir "$tmp/wrong-archive"
-  refuse ': ([0-9]+ bytes, (want|more than) [0-9]+|more than [0-9]+ bytes|SHA-256 digest does not match)$' \
-    check -manifest "$channel" -key "$pub" -current "$previous" \
-    -artifacts "$wrong_artifacts" -file "$file" -o "$tmp/wrong-archive"
-  empty "$tmp/wrong-archive"
-  refuse "not newer" check -manifest "$old" -key "$pub" -current "$version"
+  mkdir "$tmp/rollback"
+  refuse "not newer" check -manifest "$old" -key "$pub" -current "$version" -file "$old_file" -o "$tmp/rollback"
+  empty "$tmp/rollback"
 fi
 echo "update smoke: $name $version verified on $channel"
