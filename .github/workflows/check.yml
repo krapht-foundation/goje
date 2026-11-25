@@ -107,8 +107,6 @@ jobs:
       - name: Author the versus level in the Level Builder
         run: xvfb-run -a make smoke-versus-editor
 
-  # Provisional, as RFC 0018 records: if this job cannot pass, the Windows
-  # target is reverted and documented as unsupported.
   windows:
     runs-on: windows-latest
     timeout-minutes: 30

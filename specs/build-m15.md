@@ -80,7 +80,7 @@ Terminal=false
 
 `-target web` builds on any system that runs Go. `-target desktop` builds only for the host system, because the desktop host uses cgo for GLFW, OpenGL, and miniaudio, and only on macOS, Linux, and Windows, which the desktop host supports. Windows needs a cgo C compiler such as MinGW-w64 `gcc` on `PATH`. On another host it is an error. If `GOOS` or `GOARCH`, from the environment or `go env -w`, differs from the host's `GOHOSTOS` or `GOHOSTARCH`, a desktop build is an error that says so. `-target all` builds both, or only the web on a host without a desktop build, and says so on standard error.
 
-Windows support is provisional: it is verified by the `windows-latest` job of the check workflow, which tests the build and package logic, packages Beacon twice, checks the archives and the GUI subsystem of the executable, and runs the extracted game for 15 seconds on Mesa's software OpenGL. If that job cannot be made to pass, Windows is removed again, as RFC 0018 records.
+The Windows x64 job in the [check workflow](../.github/workflows/check.yml) tests the build and package logic, packages Beacon twice, checks the archives and the GUI subsystem of the executable, then requires the extracted game to open a visible window with Mesa software OpenGL.
 
 ## Packages
 

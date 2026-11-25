@@ -1,6 +1,6 @@
 # RFC 0018: M17 - Versus, tactics, online replays, music, authored vision, a font editor, and reach
 
-**Status:** Approved for implementation, with Windows verified on CI and reverted if it cannot pass, the mobile item delivered as an installable web app, and flanking included in the guards' tactics.
+**Status:** Implemented. Windows passed its CI gate. Mobile reach is delivered as an installable web app, and Tactical guards include flanking.
 
 ## Problem and goal
 
@@ -109,7 +109,7 @@ Each change is stated in the document it affects, not applied silently.
 - Native and WebAssembly tests cover the Classic and Tactical traces, old snapshots, versus ownership and per-team fog, final-tick confirmation, and saving and watching a match after a win, leave, or desync. The standalone viewer reports a changed checkpoint by tick.
 - The native/Chromium relay smoke matched 15 co-op hashes. An injected hash mismatch stopped both peers. Versus matched 12 checkpoints, and both replays verified all 723 recorded ticks; Tab switched the spectator fog in Chromium. A separate versus test ends in a win and checks opposite results.
 - Chromium authored the shipped versus level byte for byte, exported a font that passed `fontcheck` and rendered through `font.Decode`, and played and exported a score. Score, level, match log, and manifest decoders were fuzzed.
-- Signed Beacon packages reproduced on macOS. Chromium reloaded the packaged game after the server stopped and the browser went offline. The mobile deliverable is this installable web app; it was not tested on a phone. Windows remains provisional until the CI runner builds, packages, and runs Beacon.
+- Signed Beacon packages reproduced on macOS and on [Windows x64 CI](https://github.com/krapht-foundation/goje/actions/runs/45620813766/job/139228145141). The Windows job opened a visible Beacon window from the extracted archive with Mesa software OpenGL. Chromium reloaded the packaged game with the server stopped and network disabled. The web app was not tested on a phone.
 
 Measurements on Apple M4 Pro and Go 1.27.4, medians of three runs with `-benchmem`. The WebAssembly measurements use Node, not browser timing. All four benchmarks reported zero allocations per operation.
 

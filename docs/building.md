@@ -34,7 +34,7 @@ To publish to Google Play or the App Store, wrap the web app with a tool such as
 
 `dist/desktop/linux-amd64/` on Linux holds the executable `NAME`, a launcher `NAME.desktop`, and the icon `NAME.png`. Players can run `./NAME` directly. To add it to the desktop's application menu, they copy the executable into a directory on their `PATH`, such as `~/.local/bin`, the launcher into `~/.local/share/applications`, and the icon into `~/.local/share/icons/hicolor/512x512/apps`. The executable needs OpenGL 3.3 and the X11 libraries that GLFW uses.
 
-`dist/desktop/windows-amd64/NAME.exe` on Windows is the whole game. It is a GUI program, so no console window opens beside it, and it has no icon of its own. Building it needs a C compiler for cgo, such as MinGW-w64 `gcc` on `PATH`. Players need a graphics driver with OpenGL 3.3. Because it is not Authenticode-signed, Windows SmartScreen warns on first start; players choose **More info → Run anyway**. Windows support is provisional and verified only on GitHub's `windows-latest` runner.
+`dist/desktop/windows-amd64/NAME.exe` on Windows is the whole game. It is a GUI program, so no console window opens beside it, and it has no icon of its own. Building it needs a C compiler for cgo, such as MinGW-w64 `gcc` on `PATH`. Players need a graphics driver with OpenGL 3.3. An executable that is not Authenticode-signed may trigger SmartScreen on first start. Windows x64 was verified on the GitHub-hosted runner with Mesa software OpenGL, not on a physical Windows machine.
 
 ## Package
 
