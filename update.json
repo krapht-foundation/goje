@@ -1,0 +1,28 @@
+{
+  "format": "goje-update-v1",
+  "name": "goje-beacon",
+  "version": "0.0.1-m18.1",
+  "files": [
+    {
+      "name": "goje-beacon-0.0.1-m18.1-darwin-arm64.tar.gz",
+      "size": 2423418,
+      "sha256": "695449d1126b67a968f1e45359f03e6157e5c2a3b58d7a1d88893de064fff087"
+    },
+    {
+      "name": "goje-beacon-0.0.1-m18.1-linux-amd64.tar.gz",
+      "size": 2562145,
+      "sha256": "09b27a775d86b4a5e814421d852be3e31c2498c36604a7c5e7525e14f11f0425"
+    },
+    {
+      "name": "goje-beacon-0.0.1-m18.1-web.zip",
+      "size": 2356515,
+      "sha256": "c59a2ac638579316a5e79fb5f71977eaa81142f84d8cb0012188fdbe3bd072fe"
+    },
+    {
+      "name": "goje-beacon-0.0.1-m18.1-windows-amd64.zip",
+      "size": 2584065,
+      "sha256": "28493b18e1c2f2a64a12a7bc3751b5fb6384f5a20fdbe198b8e463131abb5746"
+    }
+  ],
+  "signature": "Os0jEu2R846tlTmHWk/sXm53W6b/xsVpLCS/qmmlq/6QrCb+T1ra0WT14Wn4QAo99PXHQZGjqhNN7rWHZI43Dg=="
+}
