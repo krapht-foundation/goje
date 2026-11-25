@@ -119,6 +119,7 @@ type Conn struct {
 
 	wmu  sync.Mutex
 	wbuf []byte
+	key  [4]byte // The mask key of the frame being written, kept here so that it is not allocated.
 
 	closeOnce sync.Once
 	closeErr  error
@@ -305,14 +306,15 @@ func (c *Conn) writeFrameLocked(op byte, p []byte, timeout time.Duration) error 
 	}
 	start := len(b)
 	if c.client {
-		var key [4]byte
-		if _, err := rand.Read(key[:]); err != nil {
+		// The key lives in the connection because a local array that crypto/rand reads
+		// into is moved to the heap on Linux, one allocation for every frame.
+		if _, err := rand.Read(c.key[:]); err != nil {
 			return fmt.Errorf("ws: mask key: %w", err)
 		}
-		b = append(b, key[:]...)
+		b = append(b, c.key[:]...)
 		start += 4
 		b = append(b, p...)
-		mask(b[start:], key)
+		mask(b[start:], c.key)
 	} else {
 		b = append(b, p...)
 	}
