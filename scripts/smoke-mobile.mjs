@@ -141,7 +141,11 @@ try {
   const toScreen = await findBoard();
   const ready = [[timer, timerFull], [banner, background], ...beacons.map(b => [b, unlit])];
   await expectColors(toScreen, ready, "ready");
-  for (const beacon of beacons) tap(...toScreen(...beacon));
+  // The host buffers one press per tick, so wait for each tap to reach the game.
+  for (const [i, beacon] of beacons.entries()) {
+    tap(...toScreen(...beacon));
+    await expectColors(toScreen, [[beacon, lit]], `beacon ${i + 1} lit by touch`);
+  }
   await expectColors(toScreen, [[banner, lit], ...beacons.map(b => [b, lit])], "win");
   tap(...toScreen(80, 100));
   await expectColors(toScreen, ready, "restart");

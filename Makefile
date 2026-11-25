@@ -373,6 +373,7 @@ check-example: ## Build the reference playground from a separate module on deskt
 		cp cmd/playground/outpost.go cmd/playground/outpost_app.go cmd/playground/outpost_session.go "$$tmp/"; \
 		cp cmd/playground/outpost_controls.go cmd/playground/outpost_sounds.go cmd/playground/inputprobe.go "$$tmp/"; \
 		cp cmd/playground/outpost_online.go cmd/playground/outpost_online_app.go cmd/playground/outpost_match_watch.go "$$tmp/"; \
+		cp cmd/playground/outpost_live_watch.go cmd/playground/outpost_online_proof.go cmd/playground/outpost_rejoin.go "$$tmp/"; \
 		cp cmd/playground/outpost_online_config.go cmd/playground/outpost_online_config_js.go "$$tmp/"; \
 		cp cmd/playground/outpost_music.json "$$tmp/"; \
 		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/"; \
