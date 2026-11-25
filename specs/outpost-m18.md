@@ -27,6 +27,8 @@ A lost player transport pauses both players. A paused scene draws its last state
 
 The relay holds the room for 30 seconds after a transport loss. The disconnected client retries during that time without logging the resume credential. Rebuild work is bounded per update, and a full or inconsistent history, absent proof, expired reservation, or explicit leave ends the match rather than applying unchecked state. With intact recent local checkpoints, at most a short log suffix is replayed. Outpost allows up to two minutes for the rebuild phase, separate from the transport reservation. After rejoin the game shows that later orders did not carry over.
 
+If the room ends with messages from its last live epoch still queued, the game checks them before reporting the disconnect. A pending checkpoint mismatch is reported as a divergence rather than as a player leaving. An epoch pause or change still discards stale messages.
+
 ## Live history
 
 The host sends a standalone match-log segment from zero, then segments of at most 60 ticks appended in order. A segment can end only at a mutually verified checkpoint or the separately proven final tick. The host starts each segment with `0x60`, the absolute start tick as a four-byte little-endian integer, and a four-byte little-endian encoded byte size. One or more `0x61` messages then carry the exact bytes in order, up to 2047 encoded bytes per message. A nonregular ending tick is terminal. Later segments use the same content header and begin exactly at the prior end. They contain only the range of ticks and hashes since that end. The receiver decodes and validates the complete segment, then checks its game, content, ownership, and checkpoint hashes as for an offline replay.

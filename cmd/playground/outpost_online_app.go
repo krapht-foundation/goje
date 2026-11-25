@@ -93,16 +93,12 @@ func (a *outpostApp) updateOnline(in engine.Input) error {
 		a.updateRecovery(in)
 		return nil
 	}
-	if o := a.osync; o.link != nil && a.session.outcome == outcomePlaying {
-		err := a.conn.Err()
-		if err != nil {
-			a.failOnline(err)
-			return nil
-		}
-		if a.conn.Epoch() != o.link.epoch {
-			a.beginRecovery()
-			return nil
-		}
+	if o := a.osync; o.link != nil && a.session.outcome == outcomePlaying &&
+		a.conn.Epoch() != o.link.epoch {
+		// A room end can arrive with a checkpoint hash still queued. Poll it
+		// before treating the end as a disconnect; RecvEpoch rejects stale data.
+		a.failOnline(o.lock.Poll())
+		return nil
 	}
 	if a.session.outcome != outcomePlaying {
 		a.confirmOnlineResult()
