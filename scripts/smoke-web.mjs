@@ -387,6 +387,57 @@ async function smokeSkirmish(browser, url) {
     await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
     await until("the spawn after the paused clock started", atSpawn);
 
+    // The crossing: scout 1 walks one tile down the column and stops on the route that scout 2 is
+    // ordered along next, so scout 2 waits touching it and then goes around on the far side.
+    /** @param {number} x - Ground column. @param {number} y - Ground row. @returns {Promise<void>} Resolves after the click. */
+    const select = async (x, y) => {
+      const [sx, sy] = screen(x, y);
+      await canvas.click({ position: { x: sx * 2, y: (sy - 7) * 2 } });
+    };
+    /** @param {number} x - Ground column. @param {number} y - Ground row. @returns {Promise<void>} Resolves after the click. */
+    const order = async (x, y) => {
+      const [sx, sy] = screen(x, y);
+      await canvas.click({ position: { x: sx * 2, y: sy * 2 }, button: "right" });
+    };
+    /**
+     * A scout's rectangle is 10 logical pixels wide; check that its left edge (dx -5) or right
+     * edge (dx 4) falls exactly on the expected pixel, so the body is drawn at that spot.
+     * @param {PNG} frame - Decoded screenshot.
+     * @param {[number, number]} feet - Logical pixel of the scout's feet.
+     * @param {number} dx - Edge offset from the feet.
+     * @returns {boolean} Whether the last scout pixel on that side is at the offset.
+     */
+    const edge = (frame, [x, y], dx) => is(frame, [x + dx, y - 7], scout) &&
+      !is(frame, [x + dx + Math.sign(dx), y - 7], scout);
+    const rear = screen(1.5, 3.875), front = screen(1.5, 3.5), goal = screen(1.5, 2.5), around = screen(2.5, 3.5);
+    const feet1 = screen(1.5, 2.5), feet2 = screen(1.5, 5.5);
+    await select(1.5, 2.5);
+    await until("the selection marker over scout 1", frame => is(frame, [feet1[0], feet1[1] - 21], selection));
+    await order(1.5, 3.5);
+    await until("the destination marker at 1, 3", frame => is(frame, front, destination));
+    await select(1.5, 5.5);
+    await until("the selection marker over scout 2", frame => is(frame, [feet2[0], feet2[1] - 21], selection));
+    await order(1.5, 2.5);
+    // Scout 1 is already walking down the column, so look at the marker's right side.
+    await until("the destination marker at 1, 2", frame => is(frame, [goal[0] + 3, goal[1]], destination));
+    // Scout 2 stops exactly one body length behind scout 1 and stays there: the two rectangles are
+    // drawn offset by 6 pixels, so scout 2's left edge and scout 1's right edge show them apart.
+    const held = frame => edge(frame, rear, -5) && edge(frame, front, 4);
+    await until("scout 2 held behind scout 1", held);
+    for (let i = 0; i < 12; i++) assert.ok(held(await step()), "Scout 2 moved while it was blocked");
+    await until("scout 2 passing on the far side of scout 1", frame => is(frame, [around[0], around[1] - 7], scout));
+    const settled = frame => edge(frame, front, 4) && edge(frame, goal, 4) && edge(frame, goal, -5) &&
+      is(frame, [goal[0], goal[1] - 21], selection) && !is(frame, [around[0], around[1] - 7], scout);
+    await until("both scouts standing at their cells", settled);
+    for (let i = 0; i < 5; i++) assert.ok(settled(await step()), "A scout moved after the crossing ended");
+    const crossed = await shoot();
+    assert.equal(count(crossed, loud), 0, "The crossing rang the alarm");
+    assert.equal(count(crossed, backing), 0, "The crossing hurt a unit");
+    assert.equal(count(crossed, bolt), 0, "The crossing fired a bolt");
+    await canvas.focus();
+    await page.keyboard.press("r");
+    await until("the spawn after the crossing", atSpawn);
+
     // Left click on scout 1 selects it; the marker appears over its health bar.
     const [feetX, feetY] = screen(1.5, 2.5);
     await canvas.click({ position: { x: feetX * 2, y: (feetY - 7) * 2 } });

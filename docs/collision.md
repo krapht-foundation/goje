@@ -74,7 +74,7 @@ for i := range units {
 - The mover ignores its own entry. A body that starts overlapping another body returns `ErrEmbedded`, so place bodies apart.
 - Bodies that move earlier in the order win contested space. That is a deliberate bias, not a fairness rule; if your game needs another one, it is game code.
 - `bodies.Overlaps` finds the bodies near a point, in ascending ID order, for targeting and area checks. `Remove` takes a body out.
-- Aim with `Vec2.WithLength`, which scales a vector to a length with integer arithmetic: a bolt can fly toward a target on a line that is not one of the compass directions, and still replay exactly.
+- Aim with `Vec2.WithLength`, which scales a vector to a length with integer arithmetic and rounds each component to the nearest unit: a bolt can fly toward a target on a line that is not one of the compass directions, and still replay exactly.
 
 Goje does not decide what happens when units jam. The [skirmish](../specs/skirmish-m13.md) shows one policy in game code: wait, ask for a new route around the other units, and give up after three tries.
 

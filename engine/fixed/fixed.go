@@ -7,7 +7,10 @@
 // boundary, and simulation never converts back.
 package fixed
 
-import "math"
+import (
+	"math"
+	"math/bits"
+)
 
 // Frac is the number of fractional bits in a Num.
 const Frac = 8
@@ -140,37 +143,52 @@ func (v Vec2) Add(w Vec2) Vec2 { return Vec2{v.X.Add(w.X), v.Y.Add(w.Y)} }
 func (v Vec2) Sub(w Vec2) Vec2 { return Vec2{v.X.Sub(w.X), v.Y.Sub(w.Y)} }
 
 // WithLength returns the vector with the direction of v and length n, so a
-// caller can aim at a target without a floating-point square root. A zero
-// vector stays zero, and a negative n points the other way. Each component is
-// within one unit of the exact value. A vector with a component beyond 2^24
-// units is first scaled down, which does not change its direction visibly.
+// caller can aim at a target without a floating-point square root. Each
+// component is the exact value x·n/√(x²+y²) rounded to the nearest unit, with
+// ties away from zero, and saturated at the ends of the range. A zero vector
+// stays zero, and a negative n points the other way. It uses only integer
+// arithmetic and no approximation of the square root, for every vector.
 func (v Vec2) WithLength(n Num) Vec2 {
 	x, y := int64(v.X), int64(v.Y)
-	for abs(x) >= 1<<24 || abs(y) >= 1<<24 {
-		x, y = x/2, y/2
-	}
-	if x == 0 && y == 0 {
+	if (x == 0 && y == 0) || n == 0 {
 		return Vec2{}
 	}
-	sq := x*x + y*y
-	// Compute the length with h extra fractional bits, as many as keep both the
-	// squared length and the products below in 63 bits, so short vectors stay
-	// accurate.
-	h := min((62-bitLen(sq))/2, 31-bitLen(max(abs(x), abs(y))))
-	length := isqrt(sq << (2 * h))
+	sq := uint64(x*x + y*y)    // #nosec G115 -- the sum is non-negative and at most 2^63.
+	m := uint64(abs(int64(n))) // #nosec G115 -- the absolute value is non-negative.
 	return Vec2{
-		X: saturate(roundDiv(x*int64(n)<<h, length)),
-		Y: saturate(roundDiv(y*int64(n)<<h, length)),
+		X: scaledComponent(x, m, sq, n < 0),
+		Y: scaledComponent(y, m, sq, n < 0),
 	}
 }
 
-// bitLen returns the number of bits needed to represent v ≥ 0.
-func bitLen(v int64) int {
-	n := 0
-	for ; v != 0; v >>= 1 {
-		n++
+// scaledComponent returns c·m/√sq rounded to the nearest integer, ties away
+// from zero, with the sign of c, negated if negate is set. The magnitude r is
+// the largest integer whose lower rounding boundary r−½ does not exceed the
+// exact value q = |c|·m/√sq. Comparing squares keeps that test exact:
+// (2r−1)²·sq ≤ 4·(|c|·m)². Both sides fit in 128 bits.
+func scaledComponent(c int64, m, sq uint64, negate bool) Num {
+	a := uint64(
+		abs(c),
+	) * m // #nosec G115 -- the absolute value is non-negative; the product is at most 2^62.
+	rhsHi, rhsLo := bits.Mul64(a, a)
+	rhsHi, rhsLo = rhsHi<<2|rhsLo>>62, rhsLo<<2
+	// q never exceeds m, because |c| ≤ √sq, so the answer lies in [0, m].
+	lo, hi := uint64(0), m
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		odd := 2*mid - 1 // At most 2^32 − 1, so its square fits in 64 bits.
+		lhsHi, lhsLo := bits.Mul64(odd*odd, sq)
+		if lhsHi < rhsHi || (lhsHi == rhsHi && lhsLo <= rhsLo) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
 	}
-	return n
+	r := int64(lo) // #nosec G115 -- lo ≤ m ≤ 2^31.
+	if (c < 0) != negate {
+		r = -r
+	}
+	return saturate(r)
 }
 
 func abs(v int64) int64 {
@@ -178,34 +196,6 @@ func abs(v int64) int64 {
 		return -v
 	}
 	return v
-}
-
-// roundDiv returns a÷b rounded to the nearest integer, with ties away from
-// zero. The divisor must be positive.
-func roundDiv(a, b int64) int64 {
-	if a < 0 {
-		return -((-a + b/2) / b)
-	}
-	return (a + b/2) / b
-}
-
-// isqrt returns the largest r with r×r ≤ n for n ≥ 0, using only integer
-// arithmetic.
-func isqrt(n int64) int64 {
-	var r int64
-	bit := int64(1) << 62
-	for bit > n {
-		bit >>= 2
-	}
-	for ; bit != 0; bit >>= 2 {
-		if n >= r+bit {
-			n -= r + bit
-			r = r>>1 + bit
-		} else {
-			r >>= 1
-		}
-	}
-	return r
 }
 
 // Rect is the half-open rectangle [Min.X, Max.X) × [Min.Y, Max.Y). A rectangle

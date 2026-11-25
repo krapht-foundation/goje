@@ -75,7 +75,9 @@ run-desktop: build-desktop ## Open the native playground window
 smoke-desktop: ## Check all playground fixtures in native windows
 	mkdir -p "$(BUILD_DIR)"
 	$(GO) build -tags goje_smoke -o "$(BUILD_DIR)/playground-smoke" ./cmd/playground
-	$(PYTHON) -c 'import subprocess, sys; subprocess.run([sys.argv[1]], check=True, timeout=60)' "$(BUILD_DIR)/playground-smoke"
+	for scenario in --pickup --courtyard --authored --yard --skirmish; do \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$(BUILD_DIR)/playground-smoke" $$scenario || exit 1; \
+	done
 
 build-web: ## Build the playground Wasm and browser files
 	mkdir -p "$(WEB_DIR)"

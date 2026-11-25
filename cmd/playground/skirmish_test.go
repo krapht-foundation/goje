@@ -107,6 +107,89 @@ func TestSkirmishFightHasTheRecordedOutcome(t *testing.T) {
 	}
 }
 
+// The recorded crossing: scout 1 is sent one tile down the column, then scout 2
+// is sent up the same column to the cell scout 1 left. Scout 1 stops on scout
+// 2's route, so scout 2 waits touching it, then goes around on the far side and
+// stands at its goal. Nobody is hurt and the guards never stir. The trace pins
+// the history, so it must be identical natively and as WebAssembly.
+func TestSkirmishScoutBlockedByAScoutGoesAround(t *testing.T) {
+	const wantTrace uint64 = 10874216385429227677
+	s := newSkirmishScene(t)
+	press := func(selectX, selectY, goalX, goalY float64) engine.Input {
+		px, py := s.logical(selectX, selectY, 7)
+		gx, gy := s.logical(goalX, goalY, 0)
+		return engine.Input{
+			PrimaryPress:   engine.MousePress{X: px, Y: py, Valid: true},
+			SecondaryPress: engine.MousePress{X: gx, Y: gy, Valid: true},
+		}
+	}
+	s.update(t, press(1.5, 2.5, 1.5, 3.5))
+	s.update(t, press(1.5, 5.5, 1.5, 2.5))
+	blocker, _ := s.sim.Unit(1)
+	walker, _ := s.sim.Unit(2)
+	if goal, ok := s.sim.Goal(walker); !ok || goal != (grid.Cell{X: 1, Y: 2}) {
+		t.Fatalf("scout 2 goal = %v, %v; want 1, 2", goal, ok)
+	}
+	held, longestHold, widest := 0, 0, 0.0
+	for range 400 {
+		at := walker.Center()
+		s.update(t, engine.Input{})
+		if walker.Moving() && walker.Center() == at {
+			held++
+			// Held means touching the stopped scout 1, one body length behind it in the column.
+			if front := blocker.Center(); blocker.Moving() || at.X != front.X || at.Y.Sub(front.Y) != 96 {
+				t.Fatalf(
+					"scout 2 stopped at %v while scout 1 is at %v, moving %v",
+					at,
+					front,
+					blocker.Moving(),
+				)
+			}
+		} else {
+			held = 0
+		}
+		longestHold = max(longestHold, held)
+		widest = max(widest, walker.Center().X.Float64())
+		if !blocker.Moving() && !walker.Moving() {
+			break
+		}
+	}
+	if longestHold < 30 || widest != 2.5 {
+		t.Errorf(
+			"scout 2 was held %d ticks and reached column %v; want at least 30 ticks and column 2.5",
+			longestHold,
+			widest,
+		)
+	}
+	for _, want := range []struct {
+		id   uint64
+		cell grid.Cell
+	}{{1, grid.Cell{X: 1, Y: 3}}, {2, grid.Cell{X: 1, Y: 2}}} {
+		u, _ := s.sim.Unit(want.id)
+		c := u.Center()
+		if cell, _ := s.sim.CellAt(c.X.Float64(), c.Y.Float64()); cell != want.cell || u.Moving() {
+			t.Errorf(
+				"scout %d at cell %v, moving %v; want %v, still",
+				want.id,
+				cell,
+				u.Moving(),
+				want.cell,
+			)
+		}
+	}
+	for _, u := range s.sim.Units() {
+		if !u.Alive || u.HP != u.MaxHP {
+			t.Errorf("unit %d: alive %v health %d of %d", u.ID, u.Alive, u.HP, u.MaxHP)
+		}
+	}
+	if s.sim.Alarm() || len(s.sim.Bolts()) != 0 {
+		t.Error("the crossing rang the alarm or fired a bolt")
+	}
+	if got := s.sim.Trace(); got != wantTrace {
+		t.Errorf("trace = %d, want %d", got, wantTrace)
+	}
+}
+
 func TestSkirmishRestartRestoresTheOpening(t *testing.T) {
 	t.Parallel()
 

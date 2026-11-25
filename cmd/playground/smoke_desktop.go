@@ -43,57 +43,72 @@ type smokeScene struct {
 	smoke *nativeSmoke
 }
 
+// smokeCase is one self-contained native scenario. Each runs in its own
+// process when named by its flag, so every scenario gets its own time budget
+// in make smoke-desktop; running with no flag runs them all in order.
+type smokeCase struct {
+	flag   string
+	run    func() error
+	passed string
+}
+
+func smokeCases() []smokeCase {
+	return []smokeCase{
+		{"--pickup", runSmoke, "rendered movement, pickup, and reset"},
+		{
+			"--courtyard",
+			runCourtyardSmoke,
+			"courtyard overlap, selection, pan, zoom, resize, and reset",
+		},
+		{
+			"--authored", func() error { return runAuthoredSmoke(false) },
+			"authored courtyard selection, wall detour, arrival, and reset",
+		},
+		{
+			"--yard",
+			runYardSmoke,
+			"yard slide along a wall, doorway lamp, walk beneath a raised deck, and reset",
+		},
+		{
+			"--skirmish",
+			runSkirmishSmoke,
+			"skirmish selection, order, alarm, bolts, damage, defeat, and reset",
+		},
+	}
+}
+
+// extraSmokeCases are only run by name: the exported-asset scenarios need
+// files that the plain playground build does not contain.
+func extraSmokeCases() []smokeCase {
+	return []smokeCase{
+		{"--sprite", runSpriteSmoke, "exported scout clip airborne with its painted cyan stripe " +
+			"on motion ticks 13 and 16, planted on tick 17, and reset"},
+		{
+			"--shortcut", func() error { return runAuthoredSmoke(true) },
+			"custom tile, moved lookout, shortcut crossing, arrival, and reset",
+		},
+	}
+}
+
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "--sprite" {
-		if err := runSpriteSmoke(); err != nil {
+	cases := smokeCases()
+	if len(os.Args) == 2 {
+		cases = nil
+		for _, c := range append(smokeCases(), extraSmokeCases()...) {
+			if c.flag == os.Args[1] {
+				cases = []smokeCase{c}
+			}
+		}
+		if cases == nil {
+			log.Fatal("unknown smoke scenario flag; see smokeCases and extraSmokeCases")
+		}
+	}
+	for _, c := range cases {
+		if err := c.run(); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("Desktop smoke passed: exported scout clip airborne with its painted cyan stripe " +
-			"on motion ticks 13 and 16, planted on tick 17, and reset")
-		return
+		fmt.Println("Desktop smoke passed: " + c.passed)
 	}
-	if len(os.Args) == 2 && os.Args[1] == "--yard" {
-		if err := runYardSmoke(); err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(
-			"Desktop smoke passed: yard zones from the Level Builder drove the slide, doorway lamp, and deck",
-		)
-		return
-	}
-	if len(os.Args) == 2 && os.Args[1] == "--shortcut" {
-		if err := runAuthoredSmoke(true); err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(
-			"Desktop smoke passed: custom tile, moved lookout, shortcut crossing, arrival, and reset",
-		)
-		return
-	}
-	if err := runSmoke(); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Desktop smoke passed: rendered movement, pickup, and reset")
-	if err := runCourtyardSmoke(); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Desktop smoke passed: courtyard overlap, selection, pan, zoom, resize, and reset")
-	if err := runAuthoredSmoke(false); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Desktop smoke passed: authored courtyard selection, wall detour, arrival, and reset")
-	if err := runYardSmoke(); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(
-		"Desktop smoke passed: yard slide along a wall, doorway lamp, walk beneath a raised deck, and reset",
-	)
-	if err := runSkirmishSmoke(); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(
-		"Desktop smoke passed: skirmish selection, order, alarm, bolts, damage, defeat, and reset",
-	)
 }
 
 func runSmoke() error {

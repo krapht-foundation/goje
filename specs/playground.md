@@ -17,8 +17,8 @@ This specification covers the in-repository reference command and its use of the
 ## Verification
 
 - A headless Go test covers ground axes and elevation independently.
-- `make smoke-desktop` scripts simulation input snapshots and checks native OpenGL back buffers for the pickup, patrol, courtyard, yard, and skirmish fixtures. The scripted framebuffer probe is independent of OS window focus and does not synthesize OS input events.
-- `make smoke-web` drives real key and mouse events in Chromium and checks the same fixtures in canvas screenshots, including the authored wall detour, arrival, and reset, the yard's slide, doorway, and deck, and the skirmish's selection, order, alarm, bolts, damage, defeat, and reset.
+- `make smoke-desktop` scripts simulation input snapshots and checks native OpenGL back buffers for the pickup, patrol, courtyard, yard, and skirmish fixtures, each in its own process with its own 20-second limit. The scripted framebuffer probe is independent of OS window focus and does not synthesize OS input events.
+- `make smoke-web` drives real key and mouse events in Chromium and checks the same fixtures in canvas screenshots, including the authored wall detour, arrival, and reset, the yard's slide, doorway, and deck, and the skirmish's crossing of two scouts and its selection, order, alarm, bolts, damage, defeat, and reset.
 - `make check-example` copies the reference command into a separate Go module with workspace mode disabled and builds it natively and for WebAssembly. It uses a local module replacement to select the revision under test, not an import into Goje's internal packages.
 
 Editors, asset formats, general-purpose engine APIs, and support claims for untested platforms are outside this slice.

@@ -48,8 +48,8 @@ In the recorded history, scout 1 is selected and sent to cell `(6, 2)`. It cross
 ## Verification
 
 - Headless tests cover command rules, route following, a refused command that keeps the old order, routes around idle units, head-on units in open ground and in a corridor, orders that always end, solid zones by height, randomized histories from fixed seeds with no overlapping footprints and an identical trace on replay, zero allocations per tick, the weapon and cooldown, wall and deck behavior, friendly fire, target ties, guard waking by sight and alarm, standing down, and removal.
-- A recorded fight in the playground scene and a recorded 128 against 128 battle have pinned traces that `make test-wasm` reproduces under WebAssembly.
-- `make smoke-desktop` and `make smoke-web` select, order, and watch the recorded fight with real input and check rendered pixels in OpenGL and Chromium WebGL, then restart.
+- A recorded fight and a recorded crossing in the playground scene, and a recorded 128 against 128 battle, have pinned traces that `make test-wasm` reproduces under WebAssembly. In the crossing, one scout stops on the route of another, which waits touching it for at least 30 ticks and then goes around, and nobody is hurt.
+- `make smoke-desktop` and `make smoke-web` play the crossing and then the recorded fight with real input and check rendered pixels in OpenGL and Chromium WebGL, restarting after each. In the crossing they see the second scout held exactly one body length behind the first, with the two bodies drawn side by side and not overlapping, then passing on the far side and standing at its goal.
 - `make benchmark-skirmish` measures 128 scouts against 128 guards on a 64 × 64 board on native, Node WebAssembly, and Chromium. See the [measurements](../docs/collision-performance.md#measure-a-crowd-and-a-fight).
 
 ## References
