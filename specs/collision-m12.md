@@ -42,6 +42,7 @@ Goje owns exact arithmetic, shape overlap, movement against static solids and ag
 
 - `World.Overlaps` appends the solids and then the triggers that overlap a rectangle and vertical extent, each group in ascending ID order. A query may extend past the board.
 - A `Tracker` remembers which body and trigger pairs overlapped at its previous `Update`. `Update` appends enter and exit events ordered by trigger ID and then body ID. The first call reports only entries, a body omitted from a later call exits what it overlapped, and a repeated body ID is treated as one body. A tracker belongs to one scene and is replaced when the scene restarts.
+- (M14) `Tracker.AppendOverlaps` appends the pairs the tracker remembers, as `collide.Overlap` values ordered by trigger ID and then body ID. `Tracker.Restore` replaces them, so that a tracker built for a loaded game reports no entry for a body that was already inside a trigger. It requires pairs in strictly ascending order that name triggers of the tracker's world, does not check that the bodies still overlap them, and on error, which wraps `ErrInvalid`, leaves the tracker unchanged. A pair that no longer holds exits at the next `Update`.
 - After construction, `Move`, `Overlaps`, and `Update` allocate nothing once the caller's output buffers and the tracker's internal buffers have grown to fit.
 
 ### Yard fixture
@@ -61,6 +62,7 @@ Construction errors wrap `ErrInvalid`. `ErrOutside` and `ErrEmbedded` identify t
 - `make smoke-desktop` and `make smoke-web` drive the yard with scripted and real key input and check rendered pixels in OpenGL and Chromium WebGL.
 - `make benchmark-collide` measures 2,048 bodies on both targets. See the [collision measurements](../docs/collision-performance.md).
 - M13 tests compare `MoveAmong` against a one-unit-at-a-time reference, cover ties between solids and bodies, an embedded start, board edges, removal, and vertical extents between bodies, and compare `WithLength` with a floating-point reference, which only the test uses. The authored yard reproduces the same 385-tick position hash as the version that wrote its deck and door in Go. `make smoke-zone-roundtrip` authors the yard's zones in the Level Builder and plays them on desktop and web.
+- M14 tests check that a restored tracker reports the same events as the original and no entry for bodies already inside, and that a restore with an unknown trigger or pairs out of order is refused and changes nothing.
 
 ## References
 

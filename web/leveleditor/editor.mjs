@@ -26,7 +26,7 @@
  * @property {number} width - Board columns.
  * @property {number} height - Board rows.
  * @property {string} terrain - Row-major cells, "." for floor and "#" for wall.
- * @property {Placement[]} placements - Placements in file order.
+ * @property {Placement[]} placements - Placements in row-major cell order.
  * @property {Zone[]} zones - Zones in file order.
  * @property {boolean} dirty - Whether edits have not been exported.
  * @property {boolean} canUndo - Whether undo has an action.
@@ -44,6 +44,9 @@
  * @property {(kind: string, role: string, x: number, y: number, w: number, h: number, bottom: number, top: number) => string} addZone - Append a zone.
  * @property {(id: number, kind: string, role: string, x: number, y: number, w: number, h: number, bottom: number, top: number) => string} editZone - Replace a zone.
  * @property {(id: number) => string} deleteZone - Remove a zone.
+ * @property {(kind: string, x: number, y: number, id: number) => string} addPlacement - Add a placement; ID 0 means the next free ID.
+ * @property {(id: number, kind: string) => string} setPlacementKind - Change a placement's kind.
+ * @property {(id: number) => string} deletePlacement - Remove a placement.
  * @property {() => string} undo - Undo one action.
  * @property {() => string} redo - Redo one action.
  * @property {() => EditorState} state - Snapshot the document.
@@ -64,6 +67,7 @@ const toolButtons = {
   floor: /** @type {HTMLButtonElement} */ (document.querySelector("#floor")),
   wall: /** @type {HTMLButtonElement} */ (document.querySelector("#wall")),
   placement: /** @type {HTMLButtonElement} */ (document.querySelector("#placement")),
+  add: /** @type {HTMLButtonElement} */ (document.querySelector("#add-placement")),
   zone: /** @type {HTMLButtonElement} */ (document.querySelector("#zone")),
 };
 const undoButton = /** @type {HTMLButtonElement} */ (document.querySelector("#undo"));
@@ -79,19 +83,28 @@ const zoneNumbers = ["x", "y", "w", "h", "bottom", "top"].map(
 const zoneAdd = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-add"));
 const zoneApply = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-apply"));
 const zoneDelete = /** @type {HTMLButtonElement} */ (document.querySelector("#zone-delete"));
+const placementPanel = /** @type {HTMLFieldSetElement} */ (document.querySelector("#placements"));
+const placementSelect = /** @type {HTMLSelectElement} */ (document.querySelector("#placement-select"));
+const placementKind = /** @type {HTMLInputElement} */ (document.querySelector("#placement-kind"));
+const placementId = /** @type {HTMLInputElement} */ (document.querySelector("#placement-id"));
+const placementX = /** @type {HTMLInputElement} */ (document.querySelector("#placement-x"));
+const placementY = /** @type {HTMLInputElement} */ (document.querySelector("#placement-y"));
+const placementAdd = /** @type {HTMLButtonElement} */ (document.querySelector("#placement-add"));
+const placementApply = /** @type {HTMLButtonElement} */ (document.querySelector("#placement-apply"));
+const placementDelete = /** @type {HTMLButtonElement} */ (document.querySelector("#placement-delete"));
 const ctx = /** @type {CanvasRenderingContext2D} */ (board.getContext("2d"));
 
 /** @type {Bridge} */
 let bridge;
 /**
  * Mirror of the Go document used for drawing; refreshed after each change.
- * @type {{width: number, height: number, terrain: Uint8Array, byIndex: Map<number, Placement>, byId: Map<number, Placement>, zones: Zone[], dirty: boolean, canUndo: boolean, canRedo: boolean} | null}
+ * @type {{width: number, height: number, terrain: Uint8Array, placements: Placement[], byIndex: Map<number, Placement>, byId: Map<number, Placement>, zones: Zone[], dirty: boolean, canUndo: boolean, canRedo: boolean} | null}
  */
 let doc = null;
-/** @type {"floor" | "wall" | "placement" | "zone"} */
+/** @type {"floor" | "wall" | "placement" | "add" | "zone"} */
 let tool = "floor";
 const cursor = { x: 0, y: 0 };
-/** @type {number | null} ID of the placement chosen for a move. */
+/** @type {number | null} ID of the selected placement: the one chosen for a move, or in the Placements panel. */
 let selectedId = null;
 /**
  * Active terrain stroke. pointerId is null for keyboard strokes.
@@ -142,13 +155,18 @@ function refresh(replaced = false) {
     byIndex.set(i, p);
     byId.set(p.id, p);
     const old = full ? undefined : doc.byId.get(p.id);
-    if (old && (old.x !== p.x || old.y !== p.y)) {
-      changed.add(old.y * s.width + old.x);
+    if (!old || old.x !== p.x || old.y !== p.y || old.kind !== p.kind) {
+      if (old) changed.add(old.y * s.width + old.x);
       changed.add(i);
     }
   }
+  if (!full) {
+    for (const old of doc.placements) if (!byId.has(old.id)) changed.add(old.y * s.width + old.x);
+  }
+  const placementsChanged = full || s.placements.length !== doc.placements.length ||
+    s.placements.some((p, n) => { const q = doc.placements[n]; return p.id !== q.id || p.kind !== q.kind || p.x !== q.x || p.y !== q.y; });
   const zonesChanged = full || JSON.stringify(s.zones) !== JSON.stringify(doc.zones);
-  doc = { width: s.width, height: s.height, terrain, byIndex, byId, zones: s.zones, dirty: s.dirty, canUndo: s.canUndo, canRedo: s.canRedo };
+  doc = { width: s.width, height: s.height, terrain, placements: s.placements, byIndex, byId, zones: s.zones, dirty: s.dirty, canUndo: s.canUndo, canRedo: s.canRedo };
   if (selectedId !== null && !byId.has(selectedId)) selectedId = null;
   if (selectedZoneId !== null && !s.zones.some(z => z.id === selectedZoneId)) selectedZoneId = null;
   if (full) resizeBoard();
@@ -159,6 +177,7 @@ function refresh(replaced = false) {
   } else {
     for (const i of changed) drawCell(i % doc.width, Math.floor(i / doc.width));
   }
+  if (placementsChanged) updatePlacementList();
   updateControls();
   describeCursor();
 }
@@ -254,6 +273,9 @@ function updateControls() {
   redoButton.disabled = !open || !doc.canRedo;
   exportButton.disabled = !open;
   zonePanel.disabled = !open;
+  placementPanel.disabled = !open;
+  placementApply.disabled = !open || selectedId === null;
+  placementDelete.disabled = !open || selectedId === null;
   zoneApply.disabled = !open || selectedZoneId === null;
   zoneDelete.disabled = !open || selectedZoneId === null;
   document.title = open && doc.dirty ? "• Goje Level Editor" : "Goje Level Editor";
@@ -269,7 +291,8 @@ function describeCursor() {
   const zones = doc.zones.filter(z => zoneCovers(z, cursor.x, cursor.y));
   if (zones.length) text += `, inside ${zones.map(z => `${z.role} zone #${z.id} ${z.kind}`).join(" and ")}`;
   const chosen = selectedId === null ? undefined : doc.byId.get(selectedId);
-  if (chosen) text += `. Moving ${chosen.kind} #${chosen.id} from ${chosen.x}, ${chosen.y}`;
+  if (chosen && tool === "placement") text += `. Moving ${chosen.kind} #${chosen.id} from ${chosen.x}, ${chosen.y}`;
+  else if (chosen) text += `. Selected ${chosen.kind} #${chosen.id} at ${chosen.x}, ${chosen.y}`;
   if (zoneAnchor) text += `. Drawing a zone from ${zoneAnchor.x}, ${zoneAnchor.y}`;
   cursorLine.textContent = `${text}.`;
 }
@@ -467,7 +490,85 @@ function setSelection(id) {
   if (old) drawCell(old.x, old.y);
   const next = id === null ? undefined : doc.byId.get(id);
   if (next) drawCell(next.x, next.y);
+  updatePlacementList();
+  updateControls();
   describeCursor();
+}
+
+/** Rebuild the placement list from the mirror, as text, keeping the selection. */
+function updatePlacementList() {
+  placementSelect.replaceChildren(...doc.placements.map(p => {
+    const option = document.createElement("option");
+    option.value = String(p.id);
+    option.textContent = `#${p.id} ${p.kind} at ${p.x}, ${p.y}`;
+    option.selected = p.id === selectedId;
+    return option;
+  }));
+}
+
+/**
+ * Add a placement of the panel's kind and ID at a cell as one action, and select it.
+ * @param {number} x - Column.
+ * @param {number} y - Row.
+ */
+function addPlacementAt(x, y) {
+  const typed = placementId.value.trim();
+  const id = typed === "" ? 0 : Number(typed);
+  if (!Number.isInteger(id) || id < 0 || id > 4294967295 || (typed !== "" && id === 0)) {
+    setStatus("Placement ID must be a whole number from 1 to 4294967295, or blank for the next free ID.", true);
+    return;
+  }
+  const err = bridge.addPlacement(placementKind.value.trim(), x, y, id);
+  if (err) {
+    setStatus(err, true);
+    return;
+  }
+  // An authored ID can be used only once, so the next addition defaults to the next free ID.
+  placementId.value = "";
+  refresh();
+  const added = doc.byIndex.get(y * doc.width + x);
+  setSelection(added.id);
+  setStatus(`Added ${added.kind} #${added.id} at ${x}, ${y}.`);
+}
+
+/** Add a placement at the panel's typed cell. */
+function addPlacementFromForm() {
+  if (!doc) return;
+  const x = placementX.valueAsNumber;
+  const y = placementY.valueAsNumber;
+  if (!Number.isInteger(x) || !Number.isInteger(y)) {
+    setStatus("Placement X and Y must be whole numbers.", true);
+    return;
+  }
+  addPlacementAt(x, y);
+}
+
+/** Change the selected placement's kind to the panel's kind as one action. */
+function applyPlacementKind() {
+  if (!doc || selectedId === null) return;
+  const id = selectedId;
+  const err = bridge.setPlacementKind(id, placementKind.value.trim());
+  if (err) {
+    setStatus(err, true);
+    return;
+  }
+  refresh();
+  const p = doc.byId.get(id);
+  setStatus(`Placement #${id} is now ${p.kind}.`);
+}
+
+/** Delete the selected placement as one action. */
+function deleteSelectedPlacement() {
+  if (!doc || selectedId === null || stroke) return;
+  const id = selectedId;
+  const err = bridge.deletePlacement(id);
+  if (err) {
+    setStatus(err, true);
+    return;
+  }
+  selectedId = null;
+  refresh();
+  setStatus(`Deleted placement #${id}.`);
 }
 
 /**
@@ -693,6 +794,10 @@ function applyAtCursor() {
     choosePlacementCell(cursor.x, cursor.y);
     return;
   }
+  if (tool === "add") {
+    addPlacementAt(cursor.x, cursor.y);
+    return;
+  }
   if (tool === "zone") {
     chooseZoneCell(cursor.x, cursor.y);
     return;
@@ -720,7 +825,7 @@ function history(action) {
 
 /**
  * Select an editing tool, clearing any pending placement move or zone corner.
- * @param {"floor" | "wall" | "placement" | "zone"} name - Tool to select.
+ * @param {"floor" | "wall" | "placement" | "add" | "zone"} name - Tool to select.
  */
 function selectTool(name) {
   if (stroke) finishStroke(false);
@@ -735,6 +840,7 @@ function selectTool(name) {
   updateControls();
   const messages = {
     placement: "Move placement: choose a placement, then a floor cell.",
+    add: "Add placement: choose a free floor cell. Kind and ID come from the Placements panel.",
     zone: "Draw zone: choose one corner, then the opposite corner. Kind, role, and heights come from the Zones panel.",
     floor: "Floor brush selected.",
     wall: "Wall brush selected.",
@@ -833,6 +939,9 @@ function onKeyDown(event) {
   } else if (event.key === "Escape") {
     event.preventDefault();
     cancelGesture();
+  } else if (event.key === "Delete" && !stroke) {
+    event.preventDefault();
+    deleteSelectedPlacement();
   } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z") {
     event.preventDefault();
     history(event.shiftKey ? "redo" : "undo");
@@ -853,6 +962,10 @@ function onPointerDown(event) {
   const { x, y } = cellAt(event);
   if (!inBounds(x, y)) return;
   moveCursor(x, y);
+  if (tool === "add") {
+    addPlacementAt(x, y);
+    return;
+  }
   if (tool === "placement") {
     if (choosePlacementCell(x, y)) {
       drag = { pointerId: event.pointerId, x, y };
@@ -951,7 +1064,7 @@ async function start() {
     if (file) openFile(file).catch(error => setStatus(error.message, true));
   });
   for (const [name, button] of Object.entries(toolButtons)) {
-    button.addEventListener("click", () => selectTool(/** @type {"floor" | "wall" | "placement" | "zone"} */ (name)));
+    button.addEventListener("click", () => selectTool(/** @type {"floor" | "wall" | "placement" | "add" | "zone"} */ (name)));
   }
   undoButton.addEventListener("click", () => history("undo"));
   redoButton.addEventListener("click", () => history("redo"));
@@ -965,6 +1078,21 @@ async function start() {
     if (!z) return;
     selectZone(id);
     moveCursor(z.x, z.y);
+  });
+  placementAdd.addEventListener("click", addPlacementFromForm);
+  placementApply.addEventListener("click", applyPlacementKind);
+  placementDelete.addEventListener("click", deleteSelectedPlacement);
+  placementSelect.addEventListener("change", () => {
+    const p = doc?.byId.get(Number(placementSelect.value));
+    if (!p) return;
+    placementKind.value = p.kind;
+    setSelection(p.id);
+    moveCursor(p.x, p.y);
+  });
+  placementSelect.addEventListener("keydown", event => {
+    if (event.key !== "Delete") return;
+    event.preventDefault();
+    deleteSelectedPlacement();
   });
   board.addEventListener("keydown", onKeyDown);
   board.addEventListener("pointerdown", onPointerDown);

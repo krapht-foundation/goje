@@ -5,7 +5,8 @@
 // this package decides what a unit is and what an order means. It draws nothing
 // and reads no clock, so one input history gives one result on every target.
 //
-// A Sim is for one goroutine. Call Command between ticks and Step once per tick.
+// A Sim is for one goroutine. Call Command, Order, and SetHold between ticks
+// and Step once per tick.
 package skirmish
 
 import (
@@ -71,13 +72,23 @@ type Unit struct {
 	repaths          int // New routes asked for during the current order.
 	cooldown         int // Ticks until the weapon is ready.
 	chasing, alarmed bool
+
+	// The player's order: Move with no target for an ordinary route or none,
+	// Attack with the target's ID, or AttackMove. hold is the hold-fire stance.
+	order  OrderKind
+	target uint64
+	hold   bool
 }
 
 // Center returns the middle of the unit's footprint in ground tiles.
 func (u *Unit) Center() fixed.Vec2 { return center(u.Body.Footprint) }
 
-// Moving reports whether the unit has an order.
+// Moving reports whether the unit has a route to walk. A unit attacking a
+// target within range has an order but no route.
 func (u *Unit) Moving() bool { return u.next < len(u.route) }
+
+// Hold reports whether the unit holds its fire.
+func (u *Unit) Hold() bool { return u.hold }
 
 // Sim is the whole simulation. Create it with New.
 type Sim struct {
@@ -105,6 +116,13 @@ type Sim struct {
 	shapes []collide.Shape
 	events []collide.Event
 	hits   []collide.Hit
+
+	// Buffers for group orders, sized in New so that they never allocate.
+	queue    []uint16 // Cells in breadth-first order.
+	seen     []bool   // Cells the search has reached.
+	group    []member
+	grouped  []bool // Units already in group, by index.
+	assigned []Assignment
 }
 
 // Goal returns the cell the unit's current order ends at.
@@ -141,6 +159,11 @@ func New(board level.Board) (*Sim, error) {
 		shapes:     make([]collide.Shape, 0, MaxUnits),
 		events:     make([]collide.Event, 0, MaxUnits),
 		hits:       make([]collide.Hit, 0, 16),
+		queue:      make([]uint16, 0, w*h),
+		seen:       make([]bool, w*h),
+		group:      make([]member, 0, MaxUnits),
+		grouped:    make([]bool, MaxUnits),
+		assigned:   make([]Assignment, 0, MaxUnits),
 		trace:      fnvOffset,
 	}
 	s.walk = func(x, y int) bool { c := y*s.width + x; return !s.solid[c] && !s.occ[c] }
@@ -240,16 +263,20 @@ func (s *Sim) CellAt(x, y float64) (grid.Cell, bool) { return s.router.CellAt(x,
 // differing step on any target changes it.
 func (s *Sim) Trace() uint64 { return s.trace }
 
-// Command orders a unit to walk to goal. It reports whether the order was
-// accepted. An unknown or dead unit, a goal outside the board or inside a solid,
-// a goal held by a unit that has no order, and an unreachable goal leave the unit's
-// current order alone. Cells held by units that have no order block the route;
-// cells held by walking units do not, because those units will move on. A unit
-// between cell centers finishes its current edge first. Commanding a stationary
-// unit to its own cell does nothing.
+// Command orders a unit to walk to goal. It is Order with a Move order. It
+// reports whether the order was accepted. An unknown or dead unit, a goal
+// outside the board or inside a solid, a goal held by a unit that has no order,
+// and an unreachable goal leave the unit's current order alone. Cells held by
+// units that have no order block the route; cells held by walking units do not,
+// because those units will move on. A unit between cell centers finishes its
+// current edge first. Commanding a stationary unit to its own cell does nothing.
 func (s *Sim) Command(id uint64, goal grid.Cell) bool {
-	u, ok := s.Unit(id)
-	if !ok || !u.Alive || goal.X < 0 || goal.Y < 0 || goal.X >= s.width || goal.Y >= s.height {
+	return s.Order(id, Order{Kind: Move, Goal: goal})
+}
+
+// routeTo gives u a route to goal under the Command rules.
+func (s *Sim) routeTo(u *Unit, goal grid.Cell) bool {
+	if goal.X < 0 || goal.Y < 0 || goal.X >= s.width || goal.Y >= s.height {
 		return false
 	}
 	g := goal.Y*s.width + goal.X
@@ -319,13 +346,14 @@ func (s *Sim) unmark() {
 	s.marked = s.marked[:0]
 }
 
-// Step advances the simulation one tick: guards decide, units move in ascending
-// ID order, triggers report, weapons fire, bolts fly, and the dead are removed.
-// An error means a rule was broken, such as two bodies overlapping, and the
-// simulation must be discarded.
+// Step advances the simulation one tick: guards decide, attack orders pursue
+// their targets, units move in ascending ID order, triggers report, weapons
+// fire, bolts fly, and the dead are removed. An error means a rule was broken,
+// such as two bodies overlapping, and the simulation must be discarded.
 func (s *Sim) Step() error {
 	s.tick++
 	s.decide()
+	s.pursue()
 	for i := range s.units {
 		if u := &s.units[i]; u.Alive {
 			if err := s.walkUnit(u); err != nil {
@@ -354,8 +382,15 @@ func (s *Sim) walkUnit(u *Unit) error {
 		u.cell, u.next = int(u.route[u.next]), u.next+1
 	}
 	if !u.Moving() {
-		s.finish(u)
+		s.arrive(u)
 		return nil
+	}
+	if u.order == AttackMove && !u.hold {
+		// An attack-move stops to fight while an enemy is in range.
+		if _, _, ok := s.nearest(u, weaponRange); ok {
+			u.blocked = 0
+			return nil
+		}
 	}
 	u.heading = int(u.route[u.next])
 	target := s.centerOf(u.heading)
@@ -384,7 +419,7 @@ func (s *Sim) walkUnit(u *Unit) error {
 	if u.Center() == target {
 		u.cell, u.next = u.heading, u.next+1
 		if !u.Moving() {
-			s.finish(u)
+			s.arrive(u)
 		}
 	}
 	return nil
@@ -399,16 +434,32 @@ func (s *Sim) repath(u *Unit) {
 	ok := repaths <= maxRepaths && s.order(u, u.goal, true)
 	s.unmark()
 	if !ok {
-		s.finish(u)
+		s.stand(u)
 		return
 	}
 	u.repaths = repaths
 }
 
-// finish ends the unit's order, on arrival or when it gives up.
+// finish ends the unit's route, on arrival or when it gives up.
 func (s *Sim) finish(u *Unit) {
 	u.route, u.next = u.route[:0], 0
 	u.goal, u.blocked, u.repaths = -1, 0, 0
+}
+
+// stand ends the unit's route and its order, so it stands idle.
+func (s *Sim) stand(u *Unit) {
+	s.finish(u)
+	u.order, u.target = Move, 0
+}
+
+// arrive ends a route that reached its goal. Move and attack-move orders end
+// with it; an attack goes on and routes again toward its target next tick.
+func (s *Sim) arrive(u *Unit) {
+	if u.order == Attack {
+		s.finish(u)
+		return
+	}
+	s.stand(u)
 }
 
 func (s *Sim) offCenter(u *Unit) bool { return u.Center() != s.centerOf(u.cell) }

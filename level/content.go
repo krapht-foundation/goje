@@ -112,19 +112,29 @@ func validKind(kind string) bool {
 	return true
 }
 
+// Check reports whether the placement is valid on a board of width × height
+// cells: a positive ID, a valid kind, and a cell inside the board. It does not
+// check that the cell is walkable or free, or that the ID is unique.
+func (p Placement) Check(width, height int) error {
+	if p.ID == 0 {
+		return errors.New("placement ID must be positive")
+	}
+	if !validKind(p.Kind) {
+		return fmt.Errorf("placement ID %d: invalid kind identifier", p.ID)
+	}
+	if p.X < 0 || p.Y < 0 || p.X >= width || p.Y >= height {
+		return fmt.Errorf("placement ID %d: cell (%d, %d) is outside the board", p.ID, p.X, p.Y)
+	}
+	return nil
+}
+
 func (b Board) checkPlacements() error {
 	width, height := b.Size()
 	ids := make(map[uint32]struct{}, len(b.placements))
 	occupied := make(map[int]struct{}, len(b.placements))
 	for _, p := range b.placements {
-		if p.ID == 0 {
-			return errors.New("placement ID must be positive")
-		}
-		if !validKind(p.Kind) {
-			return fmt.Errorf("placement ID %d: invalid kind identifier", p.ID)
-		}
-		if p.X < 0 || p.Y < 0 || p.X >= width || p.Y >= height {
-			return fmt.Errorf("placement ID %d: cell (%d, %d) is outside the board", p.ID, p.X, p.Y)
+		if err := p.Check(width, height); err != nil {
+			return err
 		}
 		if !b.Walkable(p.X, p.Y) {
 			return fmt.Errorf("placement ID %d: cell (%d, %d) is blocked", p.ID, p.X, p.Y)

@@ -19,8 +19,8 @@ type placed struct {
 }
 
 // build decodes a level made of terrain rows, units, and optional zone lines.
-func build(t *testing.T, rows []string, units []placed, zones ...string) *Sim {
-	t.Helper()
+func build(tb testing.TB, rows []string, units []placed, zones ...string) *Sim {
+	tb.Helper()
 	var b strings.Builder
 	version := 1
 	if len(zones) > 0 {
@@ -47,20 +47,20 @@ func build(t *testing.T, rows []string, units []placed, zones ...string) *Sim {
 	b.WriteString("}")
 	board, err := level.Decode(strings.NewReader(b.String()))
 	if err != nil {
-		t.Fatalf("decode level: %v\n%s", err, b.String())
+		tb.Fatalf("decode level: %v\n%s", err, b.String())
 	}
 	s, err := New(board)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		tb.Fatalf("New: %v", err)
 	}
 	return s
 }
 
-func step(t *testing.T, s *Sim, n int) {
-	t.Helper()
+func step(tb testing.TB, s *Sim, n int) {
+	tb.Helper()
 	for range n {
 		if err := s.Step(); err != nil {
-			t.Fatalf("tick %d: %v", s.Ticks(), err)
+			tb.Fatalf("tick %d: %v", s.Ticks(), err)
 		}
 	}
 }
@@ -82,13 +82,13 @@ func cellOfUnit(s *Sim, u *Unit) grid.Cell {
 func atCenter(s *Sim, u *Unit) bool { return !s.offCenter(u) }
 
 // noOverlap fails if two living bodies overlap at any height.
-func noOverlap(t *testing.T, s *Sim) {
-	t.Helper()
+func noOverlap(tb testing.TB, s *Sim) {
+	tb.Helper()
 	us := s.Units()
 	for i := range us {
 		for j := i + 1; j < len(us); j++ {
 			if us[i].Alive && us[j].Alive && us[i].Body.Footprint.Overlaps(us[j].Body.Footprint) {
-				t.Fatalf("tick %d: units %d and %d overlap", s.Ticks(), us[i].ID, us[j].ID)
+				tb.Fatalf("tick %d: units %d and %d overlap", s.Ticks(), us[i].ID, us[j].ID)
 			}
 		}
 	}

@@ -28,6 +28,9 @@ type Loop struct {
 	last      time.Duration
 	remainder time.Duration
 	input     engine.Input
+	// at is the last position the pointer had inside the viewport. Release
+	// edges report it, because a drag can end outside the viewport.
+	at        engine.MousePress
 	started   bool
 	suspended bool
 }
@@ -84,28 +87,81 @@ func (l *Loop) KeyDown(key engine.Keys, repeat bool) {
 // KeyUp releases a key without clearing any buffered press edge.
 func (l *Loop) KeyUp(key engine.Keys) { l.input.Held &^= key }
 
-// PressPrimary buffers an in-viewport left mouse press until the next tick.
-// Later presses cannot replace the coordinates of an unconsumed press.
+// MovePointer records the pointer position for the next tick. Inside is false
+// when the pointer is outside the viewport, and x and y are then ignored.
+func (l *Loop) MovePointer(x, y float64, inside bool) {
+	if l.suspended {
+		return
+	}
+	if !inside {
+		l.input.Pointer = engine.Pointer{}
+		return
+	}
+	l.at = engine.MousePress{X: x, Y: y, Valid: true}
+	l.input.Pointer = engine.Pointer{X: x, Y: y, Inside: true}
+}
+
+// PressPrimary buffers an in-viewport left mouse press until the next tick and
+// marks the button held. Later presses cannot replace the coordinates of an
+// unconsumed press.
 func (l *Loop) PressPrimary(x, y float64) {
-	if !l.suspended && !l.input.PrimaryPress.Valid {
+	if l.suspended {
+		return
+	}
+	l.MovePointer(x, y, true)
+	l.input.PrimaryHeld = true
+	if !l.input.PrimaryPress.Valid {
 		l.input.PrimaryPress = engine.MousePress{X: x, Y: y, Valid: true}
 	}
 }
 
-// PressSecondary buffers an in-viewport right mouse press until the next tick.
-// Later presses cannot replace the coordinates of an unconsumed press.
+// PressSecondary buffers an in-viewport right mouse press until the next tick
+// and marks the button held. Later presses cannot replace the coordinates of an
+// unconsumed press.
 func (l *Loop) PressSecondary(x, y float64) {
-	if !l.suspended && !l.input.SecondaryPress.Valid {
+	if l.suspended {
+		return
+	}
+	l.MovePointer(x, y, true)
+	l.input.SecondaryHeld = true
+	if !l.input.SecondaryPress.Valid {
 		l.input.SecondaryPress = engine.MousePress{X: x, Y: y, Valid: true}
 	}
 }
 
-// NextInput consumes the buffered press edges and returns the current snapshot.
-// The host calls it once per update, not once per presentation.
+// ReleasePrimary ends a left button press that PressPrimary accepted. It
+// buffers a release edge at the last position inside the viewport and is
+// ignored when the button is not held, for example when the press began
+// outside the viewport or focus was lost since.
+func (l *Loop) ReleasePrimary() {
+	if l.suspended || !l.input.PrimaryHeld {
+		return
+	}
+	l.input.PrimaryHeld = false
+	if !l.input.PrimaryRelease.Valid {
+		l.input.PrimaryRelease = l.at
+	}
+}
+
+// ReleaseSecondary is ReleasePrimary for the right button.
+func (l *Loop) ReleaseSecondary() {
+	if l.suspended || !l.input.SecondaryHeld {
+		return
+	}
+	l.input.SecondaryHeld = false
+	if !l.input.SecondaryRelease.Valid {
+		l.input.SecondaryRelease = l.at
+	}
+}
+
+// NextInput consumes the buffered press and release edges and returns the
+// current snapshot. The host calls it once per update, not once per presentation.
 func (l *Loop) NextInput() engine.Input {
 	input := l.input
 	l.input.Pressed = 0
 	l.input.PrimaryPress = engine.MousePress{}
 	l.input.SecondaryPress = engine.MousePress{}
+	l.input.PrimaryRelease = engine.MousePress{}
+	l.input.SecondaryRelease = engine.MousePress{}
 	return input
 }

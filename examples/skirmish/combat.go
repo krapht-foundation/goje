@@ -80,12 +80,13 @@ func (s *Sim) nearest(u *Unit, radius fixed.Num) (*Unit, int64, bool) {
 // decide runs the guard AI: a guard at its post wakes when a scout comes within
 // sight or the alarm rings, then walks toward the nearest scout until that
 // scout is in weapon range, and goes back to its post when none is within the
-// leash.
+// leash. A guard carrying an attack or attack-move order follows the order
+// instead and returns to the AI when the order ends.
 func (s *Sim) decide() {
 	whole := fixed.FromInt(max(s.width, s.height))
 	for i := range s.units {
 		u := &s.units[i]
-		if !u.Alive || u.Team != Guards {
+		if !u.Alive || u.Team != Guards || u.order != Move {
 			continue
 		}
 		radius := sight
@@ -141,7 +142,9 @@ func (s *Sim) reportTriggers() {
 	}
 }
 
-// fire lets every ready unit shoot at its nearest enemy in range, in ascending ID order.
+// fire lets every ready unit shoot, in ascending ID order: a unit attacking a
+// target shoots only that target, every other unit its nearest enemy in range,
+// and a unit that holds its fire does not shoot. A held weapon still cools down.
 func (s *Sim) fire() {
 	for i := range s.units {
 		u := &s.units[i]
@@ -152,14 +155,24 @@ func (s *Sim) fire() {
 			u.cooldown--
 			continue
 		}
-		if len(s.bolts) == MaxBolts {
+		if len(s.bolts) == MaxBolts || u.hold {
 			continue
 		}
-		if target, _, ok := s.nearest(u, weaponRange); ok {
+		if target, ok := s.weaponTarget(u); ok {
 			s.spawn(u, target)
 			u.cooldown = weaponCooldown
 		}
 	}
+}
+
+// weaponTarget picks whom u shoots at this tick.
+func (s *Sim) weaponTarget(u *Unit) (*Unit, bool) {
+	if u.order != Attack {
+		t, _, ok := s.nearest(u, weaponRange)
+		return t, ok
+	}
+	t := &s.units[s.index[u.target]]
+	return t, t.Alive && t.HP > 0 && inRange(u, t)
 }
 
 // spawn fires a bolt from u toward target. A bolt that starts on a wall or unit
@@ -257,6 +270,7 @@ func (s *Sim) reap() {
 		u.Alive = false
 		s.bodies.Remove(u.ID)
 		u.route, u.next = u.route[:0], 0
+		u.order, u.target = Move, 0
 	}
 }
 
@@ -282,6 +296,17 @@ func (s *Sim) fold() {
 		h = mixInt(h, int64(u.goal))
 		h = mixInt(h, int64(u.cooldown))
 		h = mixInt(h, flags)
+		// Order state joins the trace only when it differs from the default,
+		// so histories without the player's orders keep their M13 traces.
+		if u.order != Move || u.target != 0 || u.hold {
+			hold := int64(0)
+			if u.hold {
+				hold = 1
+			}
+			h = mixInt(h, int64(u.order))
+			h = mix(h, u.target)
+			h = mixInt(h, hold)
+		}
 	}
 	for i := range s.bolts {
 		b := &s.bolts[i]

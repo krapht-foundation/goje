@@ -17,4 +17,7 @@ type Canvas interface {
 	// Source coordinates are relative to the upper-left texel, with exclusive
 	// maximum edges. Missing images and empty or out-of-bounds regions do not draw.
 	Image(source image.Rectangle, x, y, width, height float32)
+	// ImageTinted is Image with every texel multiplied by the tint, so one white
+	// glyph sheet can be drawn in any color. Opaque white draws the texels unchanged.
+	ImageTinted(source image.Rectangle, x, y, width, height float32, tint color.NRGBA)
 }

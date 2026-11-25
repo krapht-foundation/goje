@@ -6,10 +6,12 @@ Run `make serve-level-editor` with Go and Node installed, then open `http://127.
 
 1. Choose **Open level** and select the [authored courtyard](../cmd/playground/levels/courtyard.json).
 2. Select **Floor** and paint cell `(4, 2)` to cut a hole in the wall. Click or drag to paint. To edit with the keyboard, focus the grid, move with the arrow keys, and press **Enter** or **Space**.
-3. To move the lookout, select the placement tool, then activate `(7, 4)` and a free floor such as `(7, 5)`. Use **Undo** or **Redo** to step through completed edits. Press **Escape** to cancel a stroke or placement selection in progress.
+3. To move the lookout, select **Move placement**, then activate `(7, 4)` and a free floor such as `(7, 5)`. Use **Undo** or **Redo** to step through completed edits. Press **Escape** to cancel a stroke or placement selection in progress.
 4. Choose **Export** to download a validated copy. The editor does not overwrite the open file. You can reopen the download or pass it to `go run ./cmd/levelcheck` before playing it.
 
 Run `make setup-web` once to install the test browser, then `make smoke-level-editor` to exercise local file selection, editing, and export in Chromium.
+
+The smoke test reports edit and export timings separately for a 128 × 128 level with 1,024 placements. One run on an Apple M4 Pro with Go 1.27.4 and Chromium 159 measured 59 ms for a 41-cell stroke and 33 ms from clicking **Export** to the download event. The stroke timing includes Playwright input and two animation frames. These are browser workflow measurements, not Go CPU timings or performance thresholds.
 
 ## Draw zones
 
@@ -21,13 +23,25 @@ A zone is a tile-aligned rectangle with a game-defined kind, a role, and a verti
 4. Choose a zone in the list to see its outline and values. Change the fields and choose **Apply to selected zone** to replace it, or **Delete selected zone** to remove it. Every add, apply, and delete is one action that **Undo** and **Redo** step through. A zone that leaves the board, has no cells, or has an empty height range is rejected with a message, and nothing changes.
 5. Solids appear hatched with an `S` and the zone's ID, and triggers appear with a dotted border and a `T`, so the role does not depend on color.
 
-Placements stay move-only in the editor. A game that wants more units than the courtyard's two lists them in the level file by hand, as the [skirmish level](../cmd/playground/levels/skirmish.json) does. The decoder checks only that a kind is well formed, so a game must reject the kinds it does not support.
-
 To use zones in a game, call `collide.FromLevel` or `collide.LevelShapes`, then read `board.Zones()` to give each zone ID a meaning. See [Move and collide in your game](collision.md#build-a-world-from-a-level).
 
 Run `make smoke-zone-roundtrip` to author the yard's deck and doorway in Chromium, export them, reopen the download, check it with `levelcheck`, and play it in scratch builds on desktop and web. It needs a working native graphics session; on headless Linux, use `xvfb-run -a make smoke-zone-roundtrip`.
 
-The smoke test reports edit and export timings separately for a 128 × 128 level with 1,024 placements. One run on an Apple M4 Pro with Go 1.27.4 and Chromium 159 measured 59 ms for a 41-cell stroke and 33 ms from clicking **Export** to the download event. The stroke timing includes Playwright input and two animation frames. These are browser workflow measurements, not Go CPU timings or performance thresholds.
+Run `make smoke-placement-editor` to exercise adding, rejecting, changing, deleting, undoing, and exporting placements in Chromium. Run `make smoke-outpost-roundtrip` to strip the outpost level down to its terrain, add its twelve placements and two zones through the Level Builder's forms, export the result, and play it on desktop and web. It needs the same graphics session as the zone round trip.
+
+## Add and remove placements
+
+A placement is a game-defined object, such as a unit, on one floor cell. Each has an ID that is unique in the level and a kind, such as `scout` or `guard`. A kind starts with a lowercase letter, continues with lowercase letters, digits, or underscores, and has at most 32 characters. The decoder checks only that a kind is well formed, so a game must reject the kinds it does not support.
+
+1. Open a level, then set the kind in the **Placements** panel. Leave **ID** blank to use one more than the largest ID in the level, or type an unused ID from 1 to 4,294,967,295.
+2. Select **Add placement** and click a free floor cell. With the keyboard, move the cursor and press **Enter** or **Space**. You can also type the column and row in **X** and **Y** and choose **Add at X, Y**. A typed ID applies to one addition only.
+3. Choose a placement in the list to select it. Type a new kind and choose **Change kind of selected placement** to change it; its ID and cell stay the same. Choose **Delete selected placement**, or press **Delete** in the list or on the grid, to remove it.
+
+Every addition, change of kind, and deletion is one action that **Undo** and **Redo** step through. A level holds at most 1,024 placements and one placement per cell. A wall cell, an occupied cell, a cell outside the board, a duplicate ID, or a malformed kind is rejected with a message, and nothing changes.
+
+The courtyard still needs exactly one `scout` and one `lookout`, and `levelcheck` still checks that rule, so it rejects a courtyard with added units. Other games, such as the [skirmish](../cmd/playground/levels/skirmish.json), list as many scouts and guards as they need.
+
+After `make setup-web`, run `make build-level-editor` and then `PLAYWRIGHT_BROWSERS_PATH=.build/playwright node scripts/smoke-placement-editor.mjs` to add scouts and guards with the pointer, the keyboard, and typed cells in Chromium, change a kind, delete a placement, undo and redo, and export and reopen the level.
 
 ## Validate a level from the command line
 

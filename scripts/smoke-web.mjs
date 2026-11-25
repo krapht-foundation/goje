@@ -471,6 +471,241 @@ async function smokeSkirmish(browser, url) {
 }
 
 /**
+ * Play the outpost with real Chromium mouse and keyboard input: title menu, drag and shift selection,
+ * control groups, orders, the pause menu, saving and loading through real localStorage, and a replay.
+ * @param {import("playwright").Browser} browser - Running Chromium instance.
+ * @param {string} url - Loopback playground URL.
+ * @returns {Promise<void>} Resolves once the replay has ended and no page error was raised.
+ */
+async function smokeOutpost(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 2 });
+  try {
+    const errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.clock.install();
+    await page.goto(url, { timeout: 15_000 });
+    // The page's control hint is white text over the canvas; hide it so every white pixel is the game's.
+    await page.addStyleTag({ content: "#controls { display: none; }" });
+    const canvas = page.locator("#goje");
+    const scout = [80, 160, 255], guard = [232, 84, 84], bolt = [255, 255, 190];
+    const healthy = [96, 220, 96], loud = [255, 96, 200];
+    const selection = [255, 235, 87], destination = [116, 246, 144];
+    const text = [255, 255, 255], recording = [255, 96, 96];
+    const scale = 4;
+    /** @returns {Promise<PNG>} The presented frame. */
+    const shoot = async () => PNG.sync.read(await canvas.screenshot({ timeout: 3_000 }));
+    /**
+     * @param {number} x - Ground column in tiles.
+     * @param {number} y - Ground row in tiles.
+     * @param {number} [height=0] - Height in projected pixels.
+     * @returns {[number, number]} Logical pixel; the 11 × 9 board is centered in the 320 × 200 viewport.
+     */
+    const screen = (x, y, height = 0) => [Math.floor(16 * (x - y) + 144), Math.floor(8 * (x + y) + 20 - height)];
+    /**
+     * @param {PNG} frame - Decoded screenshot.
+     * @param {[number, number]} point - Logical pixel.
+     * @param {number[]} color - Expected RGB.
+     * @returns {boolean} Whether the logical pixel's center has the color.
+     */
+    const is = (frame, [x, y], color) => pixelIs(frame, x * scale + scale / 2, y * scale + scale / 2, color);
+    /**
+     * @param {PNG} frame - Decoded screenshot.
+     * @param {number[]} color - RGB to count.
+     * @returns {number} Device pixels within two levels of the color on every channel.
+     */
+    const count = ({ data }, color) => {
+      let total = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] === 255 && Math.abs(data[i] - color[0]) <= 2 &&
+            Math.abs(data[i + 1] - color[1]) <= 2 && Math.abs(data[i + 2] - color[2]) <= 2) total++;
+      }
+      return total;
+    };
+    const scouts = [[0.5, 1.5], [0.5, 3.5], [0.5, 5.5], [0.5, 7.5], [1.5, 2.5], [1.5, 6.5]];
+    const guards = [[9.5, 1.5], [9.5, 3.5], [9.5, 5.5], [9.5, 7.5], [10.5, 2.5], [10.5, 6.5]];
+    /** @param {PNG} frame - Decoded screenshot. @returns {boolean} Whether all twelve units are drawn at full health. */
+    const atSpawn = frame => [[scouts, scout], [guards, guard]].every(([list, color]) => list.every(([x, y]) => {
+      const [sx, sy] = screen(x, y);
+      return is(frame, [sx, sy - 7], color) && is(frame, [sx - 5, sy - 17], healthy);
+    })) && count(frame, loud) === 0;
+    /** @param {PNG} frame - Decoded screenshot. @param {number[][]} list - Ground positions. @returns {number} Markers over them. */
+    const marked = (frame, list) => list.filter(([x, y]) => {
+      const [sx, sy] = screen(x, y);
+      return is(frame, [sx, sy - 21], selection);
+    }).length;
+    /**
+     * Advance one browser frame and read it.
+     * @returns {Promise<PNG>} The presented frame.
+     */
+    const step = async () => {
+      await page.clock.runFor(17);
+      return shoot();
+    };
+    /**
+     * Let the game see an input before the next one arrives. The host runs about 0.96 ticks per 16 ms
+     * frame, so one frame can pass without a tick; two frames always include one. Inputs that share a
+     * tick are read together, which is not what a player's separate actions do.
+     * @returns {Promise<void>} Resolves after two frames.
+     */
+    const settle = () => page.clock.runFor(34);
+    /**
+     * Step until a frame satisfies a condition.
+     * @param {string} description - Expected state for the failure message.
+     * @param {(frame: PNG) => boolean} matches - Frame predicate.
+     * @param {number} [limit=300] - Maximum steps.
+     * @returns {Promise<PNG>} The matching frame.
+     */
+    const until = async (description, matches, limit = 300) => {
+      for (let i = 0; i < limit; i++) {
+        const frame = await step();
+        if (matches(frame)) return frame;
+      }
+      return assert.fail(`The outpost never showed ${description}`);
+    };
+    /** @param {number} ticks - Frames to advance. @returns {Promise<PNG>} The last frame. */
+    const run = async ticks => {
+      let frame = await shoot();
+      for (let i = 0; i < ticks; i++) frame = await step();
+      return frame;
+    };
+    /**
+     * @param {number} x - Logical x. @param {number} y - Logical y.
+     * @returns {Promise<[number, number]>} Page position of a logical pixel.
+     */
+    const at = async (x, y) => {
+      const box = await canvas.boundingBox();
+      assert.ok(box !== null, "The canvas is not on the page");
+      return [box.x + x * 2, box.y + y * 2];
+    };
+    /** @param {number} x - Logical x. @param {number} y - Logical y. @param {object} [options] - Mouse click options. @returns {Promise<void>} Resolves after the click. */
+    const click = async (x, y, options = {}) => {
+      const [px, py] = await at(x, y);
+      await page.mouse.click(px, py, options);
+      await settle();
+    };
+    /** @param {string} key - Key to press. @returns {Promise<void>} Resolves after the tick that saw the press. */
+    const press = async key => {
+      await page.keyboard.press(key);
+      await settle();
+    };
+    /** @returns {Promise<void>} Resolves once the pointer rests over bare ground, away from every menu. */
+    const park = async () => {
+      const [px, py] = await at(3, 190);
+      await page.mouse.move(px, py);
+    };
+    /** @returns {Promise<string[]>} The localStorage keys the game wrote. */
+    const stored = () => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("goje/outpost/")).sort());
+
+    // The title shows text; a real click on Start begins the match.
+    const deadline = Date.now() + 8_000;
+    while (count(await shoot(), text) < 100) assert.ok(Date.now() < deadline, "The outpost never showed its title");
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    await until("the title after the paused clock started", frame => count(frame, text) >= 100);
+    assert.deepEqual(await stored(), [], "A fresh browser must have nothing saved");
+    await click(160, 100);
+    await until("the spawn after Start", frame => atSpawn(frame) && count(frame, selection) === 0);
+
+    // A drag selects every scout in the box, and the box is drawn while the button is down.
+    const [dragFromX, dragFromY] = await at(1, 13), [dragToX, dragToY] = await at(318, 178);
+    await page.mouse.move(dragFromX, dragFromY);
+    await page.mouse.down();
+    await page.mouse.move(dragToX, dragToY, { steps: 4 });
+    await until("the drag box", frame => is(frame, [160, 13], selection));
+    await page.mouse.up();
+    await until("all six scouts marked", frame => marked(frame, scouts) === 6 && count(frame, selection) > 0);
+    assert.equal(marked(await shoot(), guards), 0, "A guard was selected");
+
+    // Shift-click toggles one scout out, and a control group brings the set back.
+    const [firstX, firstY] = screen(...scouts[0]);
+    // Modifiers are held state, so the click settles before Shift goes up again.
+    await page.keyboard.down("Shift");
+    await click(firstX, firstY - 7);
+    await page.keyboard.up("Shift");
+    await until("scout 1 deselected", frame => marked(frame, scouts) === 5 && marked(frame, [scouts[0]]) === 0);
+    await page.keyboard.down("Control");
+    await page.keyboard.down("2");
+    await settle();
+    await page.keyboard.up("2");
+    await page.keyboard.up("Control");
+    await click(160, 100); // Bare ground clears the selection.
+    await until("an empty selection", frame => marked(frame, scouts) === 0);
+    await press("2");
+    await until("group 2 recalled", frame => marked(frame, scouts) === 5 && marked(frame, [scouts[0]]) === 0);
+
+    // A drag over the whole set and hold fire; then pause and save while every unit is still.
+    await page.mouse.move(dragFromX, dragFromY);
+    await page.mouse.down();
+    await page.mouse.move(dragToX, dragToY, { steps: 4 });
+    await page.mouse.up();
+    await until("all six scouts marked again", frame => marked(frame, scouts) === 6);
+    const plain = count(await shoot(), text);
+    await press("h");
+    const held = await until("the hold count in the selection text", frame => count(frame, text) > plain);
+    const holding = count(held, text);
+    await press("Escape");
+    await park();
+    const paused = await until("the pause menu", frame => count(frame, text) > holding);
+    assert.deepEqual((await run(10)).data, paused.data, "The match moved while paused");
+    await click(160, 75); // Save.
+    await until("the saved notice", frame => count(frame, selection) > count(paused, selection));
+    assert.deepEqual(await stored(), ["goje/outpost/save"], "Saving must write one key");
+    await park();
+    await run(200); // Let the notice expire.
+    await press("Escape"); // Resume.
+    await press("h");
+    await until("the hold count gone", frame => count(frame, text) === plain);
+
+    // Attack-move with A and a click, then focus fire with F every second, until bolts have flown.
+    await press("a");
+    await click(...screen(3.5, 4.5));
+    await until("destination markers", frame => count(frame, destination) > 0);
+    const seen = { alarm: false, bolt: false };
+    for (let i = 0; i < 900 && !(seen.alarm && seen.bolt); i++) {
+      if (i % 60 === 59) await page.keyboard.press("f");
+      const frame = await step();
+      seen.alarm ||= count(frame, loud) > 0;
+      seen.bolt ||= count(frame, bolt) >= 16;
+    }
+    assert.deepEqual(seen, { alarm: true, bolt: true }, "The fight did not show the alarm and a bolt");
+
+    // Loading from the pause menu brings back the saved opening: every unit at spawn, six scouts
+    // marked, and the hold count in the text.
+    await press("Escape");
+    await click(160, 89); // Load.
+    const loaded = await until("the saved opening", frame => atSpawn(frame) && marked(frame, scouts) === 6);
+    assert.equal(count(loaded, text), holding, "The loaded match lost the hold order");
+
+    // Play on from the load, quit to the title, and watch the recording of that run.
+    await press("h");
+    await press("a");
+    await click(...screen(3.5, 4.5));
+    const lastFrame = await run(100);
+    assert.ok(!atSpawn(lastFrame), "The scouts did not move after the load");
+    await press("Escape");
+    await park();
+    await until("the pause menu", frame => count(frame, text) > 0);
+    await click(160, 131); // Quit to title.
+    await until("the title again", frame => count(frame, text) >= 100 && count(frame, guard) === 0);
+    assert.deepEqual(await stored(), ["goje/outpost/last", "goje/outpost/save"], "Quitting must keep the recording");
+    await click(160, 132); // Watch last replay.
+    await until("the replay label", frame => count(frame, recording) > 0);
+    let previous = null, unchanged = 0, final = null;
+    for (let i = 0; i < 600 && unchanged < 20; i++) {
+      final = await step();
+      unchanged = previous !== null && Buffer.compare(final.data, previous.data) === 0 ? unchanged + 1 : 0;
+      previous = final;
+    }
+    assert.ok(unchanged >= 20 && final !== null, "The replay never ended");
+    for (const color of [scout, guard, selection, bolt]) {
+      assert.equal(count(final, color), count(lastFrame, color), `The replay ended with a different count of ${color}`);
+    }
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+}
+
+/**
  * Select the scout, command it across the authored courtyard, then reset.
  * @param {import("playwright").Browser} browser - Running Chromium instance.
  * @param {string} url - Loopback playground URL.
@@ -671,17 +906,21 @@ async function smokeAuthored(browser, url, shortcut, sprite = false) {
   }
 }
 
-const mode = ["--sprite", "--yard"].find(flag => flag === process.argv[2]);
+const mode = ["--sprite", "--yard", "--outpost"].find(flag => flag === process.argv[2]);
 const sprite = mode === "--sprite";
 const editedDirectory = process.argv[mode ? 3 : 2];
 if (process.argv.length > (mode ? 4 : 3) || (mode && editedDirectory === undefined)) {
-  throw new Error("Usage: node scripts/smoke-web.mjs [EDITED_WEB_DIR | --sprite SPRITE_WEB_DIR | --yard YARD_WEB_DIR]");
+  throw new Error("Usage: node scripts/smoke-web.mjs [EDITED_WEB_DIR | --sprite SPRITE_WEB_DIR | --yard YARD_WEB_DIR | --outpost OUTPOST_WEB_DIR]");
 }
 const server = await servePlayground(0, editedDirectory);
 try {
   const browser = await chromium.launch({ timeout: 15_000 });
   try {
-    if (mode === "--yard") {
+    if (mode === "--outpost") {
+      await smokeOutpost(browser, `http://127.0.0.1:${server.address().port}/?fixture=outpost`);
+      console.log("Browser smoke passed: the Level Builder's outpost level played with drag selection, groups, " +
+        "orders, hold, pause, save, load, and replay");
+    } else if (mode === "--yard") {
       await smokeYard(browser, `http://127.0.0.1:${server.address().port}/?fixture=yard`);
       console.log("Browser smoke passed: Level Builder zones drove the yard's slide along a wall, doorway lamp, " +
         "walk beneath a raised deck, reset, and focus loss");
@@ -747,6 +986,8 @@ try {
           "reset, and focus loss");
         await smokeSkirmish(browser, `http://127.0.0.1:${server.address().port}/?fixture=skirmish`);
         console.log("Browser smoke passed: skirmish selection, order, alarm, bolts, damage, defeat, and reset");
+        await smokeOutpost(browser, `http://127.0.0.1:${server.address().port}/?fixture=outpost`);
+        console.log("Browser smoke passed: outpost drag selection, groups, orders, hold, pause, save, load, and replay");
       }
     }
   } finally {

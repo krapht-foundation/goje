@@ -33,7 +33,7 @@ Goje's encoder writes the root fields in `version`, `rows`, `placements`, `zones
 
 ## Editing
 
-The [Level Builder](../docs/levels.md#draw-zones) opens both versions, keeps zones it does not touch, and adds, edits, and deletes zones as undoable actions. Placements stay move-only.
+The [Level Builder](../docs/levels.md#draw-zones) opens both versions, keeps zones it does not touch, and adds, edits, and deletes zones as undoable actions. Since M14 it also [adds and deletes placements and changes their kind](../docs/levels.md#add-and-remove-placements) as undoable actions, under the placement rules of [version 1](level-v1.md); the format does not change.
 
 ## Verification
 

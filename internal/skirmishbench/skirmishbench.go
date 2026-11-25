@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/krapht-foundation/goje/engine/fixed"
 	"github.com/krapht-foundation/goje/engine/grid"
 	"github.com/krapht-foundation/goje/examples/skirmish"
 	"github.com/krapht-foundation/goje/level"
@@ -29,9 +30,18 @@ const (
 	rallyColumn = 24
 )
 
-// Scene is a battle. Create it with New and advance it with Step.
+// Squads and OrderInterval describe the orders mode: the scouts split into
+// Squads groups, and every OrderInterval ticks each group gets a new group order.
+const (
+	Squads        = 6
+	OrderInterval = 120
+)
+
+// Scene is a battle. Create it with New or NewOrders and advance it with Step.
 type Scene struct {
 	*skirmish.Sim
+	squads [][]uint64 // The scouts of each squad; nil outside the orders mode.
+	ticks  int
 }
 
 // New builds the battle from a fixed seed and orders every scout toward the
@@ -53,7 +63,81 @@ func New() (*Scene, error) {
 			return nil, fmt.Errorf("scout %d cannot reach %v", u.ID, goal)
 		}
 	}
-	return &Scene{sim}, nil
+	return &Scene{Sim: sim}, nil
+}
+
+// NewOrders builds the same battle but gives no scout a standing order. Instead,
+// the scouts form six squads that receive a group order every OrderInterval
+// ticks: an attack-move to a cell that sweeps across the board, a move, or an
+// attack on the nearest guard. It measures the cost of the commands a player
+// issues, on top of the crowd's own movement and fighting.
+func NewOrders() (*Scene, error) {
+	sim, err := build()
+	if err != nil {
+		return nil, err
+	}
+	squads := make([][]uint64, Squads)
+	for i := range squads {
+		squads[i] = make([]uint64, 0, PerSide/Squads+1)
+	}
+	n := 0
+	for _, u := range sim.Units() {
+		if u.Team == skirmish.Scouts {
+			squads[n%Squads] = append(squads[n%Squads], u.ID)
+			n++
+		}
+	}
+	return &Scene{Sim: sim, squads: squads}, nil
+}
+
+// issue gives every squad its next order. The cells sweep through the open
+// bands and the pillared middle, so some orders are refused or only partly assigned.
+func (s *Scene) issue() {
+	round := s.ticks / OrderInterval
+	for i, ids := range s.squads {
+		switch (round + i) % 3 {
+		case 0, 1:
+			kind := skirmish.AttackMove
+			if (round+i)%3 == 1 {
+				kind = skirmish.Move
+			}
+			goal := grid.Cell{X: 12 + (round*7+i*9)%40, Y: (i*11 + round*13) % Side}
+			s.OrderGroup(ids, skirmish.Order{Kind: kind, Goal: goal})
+		default:
+			if target, ok := s.nearestGuard(ids); ok {
+				s.OrderGroup(ids, skirmish.Order{Kind: skirmish.Attack, Target: target})
+			}
+		}
+	}
+}
+
+// nearestGuard returns the living guard nearest to the first living scout of ids.
+func (s *Scene) nearestGuard(ids []uint64) (uint64, bool) {
+	var from fixed.Vec2
+	found := false
+	for _, id := range ids {
+		if u, ok := s.Unit(id); ok && u.Alive {
+			from, found = u.Center(), true
+			break
+		}
+	}
+	if !found {
+		return 0, false
+	}
+	var best uint64
+	var bestDistance int64 = -1
+	for i := range s.Units() {
+		u := &s.Units()[i]
+		if !u.Alive || u.Team != skirmish.Guards {
+			continue
+		}
+		c := u.Center()
+		dx, dy := int64(c.X.Sub(from.X)), int64(c.Y.Sub(from.Y))
+		if d := dx*dx + dy*dy; bestDistance < 0 || d < bestDistance {
+			best, bestDistance = u.ID, d
+		}
+	}
+	return best, best != 0
 }
 
 // build creates the battle's simulation without giving any orders.
@@ -109,6 +193,10 @@ func build() (*skirmish.Sim, error) {
 // Step advances the battle one tick and returns the time it took.
 func (s *Scene) Step() (time.Duration, error) {
 	start := time.Now()
+	if s.squads != nil && s.ticks%OrderInterval == 0 {
+		s.issue()
+	}
+	s.ticks++
 	err := s.Sim.Step()
 	return time.Since(start), err
 }
@@ -116,8 +204,10 @@ func (s *Scene) Step() (time.Duration, error) {
 // Stats holds sorted-sample percentiles in microseconds.
 type Stats struct{ Median, P95, P99, Max float64 }
 
-// Report is the result of Run.
+// Report is the result of Run or RunOrders.
 type Report struct {
+	// Mode is "battle" for Run and "orders" for RunOrders.
+	Mode         string
 	Units, Ticks int
 	// Tick is the per-tick cost of Step.
 	Tick Stats
@@ -136,6 +226,19 @@ func Run(warmup, ticks int) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	return measure("battle", scene, warmup, ticks)
+}
+
+// RunOrders is Run for the orders mode of NewOrders.
+func RunOrders(warmup, ticks int) (Report, error) {
+	scene, err := NewOrders()
+	if err != nil {
+		return Report{}, err
+	}
+	return measure("orders", scene, warmup, ticks)
+}
+
+func measure(mode string, scene *Scene, warmup, ticks int) (Report, error) {
 	for range warmup {
 		if _, err := scene.Step(); err != nil {
 			return Report{}, err
@@ -153,7 +256,7 @@ func Run(warmup, ticks int) (Report, error) {
 	}
 	runtime.ReadMemStats(&after)
 	report := Report{
-		Units: len(scene.Units()), Ticks: ticks, Tick: percentiles(samples),
+		Mode: mode, Units: len(scene.Units()), Ticks: ticks, Tick: percentiles(samples),
 		Mallocs: after.Mallocs - before.Mallocs, Trace: scene.Trace(),
 	}
 	for _, u := range scene.Units() {

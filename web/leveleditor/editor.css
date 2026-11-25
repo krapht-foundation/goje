@@ -102,6 +102,23 @@ button:focus-visible, .group:has(#open:focus-visible) .button, #board:focus-visi
   border: 1px solid #2c3850;
 }
 
+/* The panels sit beside the board, so adding a panel never takes height from the grid. */
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.panels {
+  flex: 0 1 26rem;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 #board {
   display: block;
   flex: none;

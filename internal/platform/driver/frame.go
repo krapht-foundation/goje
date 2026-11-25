@@ -44,6 +44,10 @@ func (f *Frame) Line(x1, y1, x2, y2, width float32, tint color.NRGBA) {
 }
 
 func (f *Frame) Image(source image.Rectangle, x, y, w, h float32) {
+	f.ImageTinted(source, x, y, w, h, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+}
+
+func (f *Frame) ImageTinted(source image.Rectangle, x, y, w, h float32, tint color.NRGBA) {
 	if !(w > 0 && h > 0) || source.Empty() || !source.In(image.Rectangle{Max: f.imageSize}) {
 		return
 	}
@@ -52,8 +56,7 @@ func (f *Frame) Image(source image.Rectangle, x, y, w, h float32) {
 		left: float32(source.Min.X) / iw, right: float32(source.Max.X) / iw,
 		top: float32(source.Min.Y) / ih, bottom: float32(source.Max.Y) / ih,
 	}
-	white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	f.quad(point{x, y}, point{x + w, y}, point{x + w, y + h}, point{x, y + h}, white, uv)
+	f.quad(point{x, y}, point{x + w, y}, point{x + w, y + h}, point{x, y + h}, tint, uv)
 }
 
 type point struct{ x, y float32 }

@@ -63,6 +63,9 @@ type skirmishScene struct {
 	ground       []point
 	deck, alarm  []grid.Cell
 	selected     uint64 // The selected scout's ID, or zero.
+	// marked reports further units that draw the selection marker, for scenes that
+	// select several. It is nil in the skirmish.
+	marked func(id uint64) bool
 }
 
 func (s *skirmishScene) Enter() error {
@@ -176,7 +179,10 @@ func (s *skirmishScene) refresh() {
 	engine.SortWorldItems(s.items)
 }
 
-func (s *skirmishScene) Draw(canvas engine.Canvas) {
+func (s *skirmishScene) Draw(canvas engine.Canvas) { s.drawWorld(canvas) }
+
+// drawWorld paints the board, the units, and the bolts, without any interface.
+func (s *skirmishScene) drawWorld(canvas engine.Canvas) {
 	zoom := float32(s.camera.Zoom)
 	canvas.Clear(color.NRGBA{R: 20, G: 28, B: 41, A: 255})
 	for _, tile := range s.ground {
@@ -243,7 +249,7 @@ func (s *skirmishScene) drawUnit(canvas engine.Canvas, item engine.WorldItem, zo
 		2*zoom,
 		skirmishHealthColor,
 	)
-	if u.ID == s.selected {
+	if u.ID == s.selected || (s.marked != nil && s.marked(u.ID)) {
 		canvas.Rect(fx-4*zoom, barTop-4*zoom, 8*zoom, 3*zoom, selectionColor)
 	}
 }

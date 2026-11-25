@@ -50,3 +50,15 @@ Measured on the same machine as above, with five runs on native and Chromium and
 Every run, on every target, ended with 109 scouts and 84 guards alive and the trace `1130702823205054636`, so the three targets simulated the same 900 ticks. At 60 ticks per second the fixed step is 16.7 ms. The 256-unit battle spends about 7% of that natively and about 22% in Chromium, and the worst tick in any run is about a quarter of a frame, under the half-frame line the RFC set for revisiting the repath spacing. Chromium's clock advances in steps of about 100 µs, so its values are rounded.
 
 This is one scenario on one machine. The battle's units jam and repath, but the board is open enough that few orders give up, and it does not measure a worst-case board, such as a long maze in which many units ask for routes at once. It does not measure Linux or other browsers, and it does not include drawing 256 units. The first ticks, before every tile a unit visits has been used, can allocate while collision buckets and the trigger tracker grow to fit; the measurement starts after 300 ticks, and `Step` allocates nothing once they have.
+
+### Group orders
+
+`make benchmark-skirmish` also prints a second report for the same battle in which no scout has a standing order. The scouts form six squads, and every 120 ticks each squad receives a group order: an attack-move to a cell that sweeps across the board, a move, or an attack on the guard nearest to it. This measures what a player's commands add to the crowd, including the route searches that `Sim.OrderGroup` starts for every ordered unit at once. The three targets again produced the same trace, `13621971378015380758`, and ended with 98 scouts and 59 guards alive.
+
+| Target | Tick median / p95 / p99 (µs) | Worst tick (µs) | Allocations |
+| --- | ---: | ---: | ---: |
+| Native arm64 | 948 / 1,412 / 1,565 | 3,006 | 48 |
+| Node WebAssembly | 2,888 / 4,190 / 5,301 | 8,279 | 48 |
+| Chromium WebAssembly | 2,800 / 4,200 / 4,800 | 8,600 | 48 |
+
+Issuing a round of orders allocates nothing, as a test checks; the 48 allocations come from collision buckets growing as the units reach tiles they had not visited by the end of the 300-tick warm-up. The median tick is lower than in the battle without orders because the scouts spread out and fight fewer guards at once. The worst tick is the one that issues the orders, when about 128 units search for routes together. Natively it takes about 18% of a 60 Hz frame, within the half-frame line that RFC 0015 set. In Chromium it takes 8.1 to 8.6 milliseconds, about 49% to 52% of a frame, so it touches that line in this stress case, in which six squads of about 21 units each are re-ordered in one tick. A game that orders fewer units at once, or that spreads route searches over several ticks, is well inside it. This is one run set of three Chromium and three native runs on one machine.

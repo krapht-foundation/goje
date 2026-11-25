@@ -18,7 +18,9 @@ const (
 	// MaxBytes is the maximum document size of any version, including whitespace.
 	MaxBytes = 256 << 10
 
-	maxSide       = 128
+	maxSide = 128
+	// MaxPlacements is the largest number of placements in a level.
+	MaxPlacements = maxPlacements
 	maxPlacements = 1024
 	// MaxZones is the largest number of zones in a level.
 	MaxZones  = maxZones

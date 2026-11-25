@@ -1,5 +1,5 @@
 /**
- * @file Run a Goje benchmark program in Chromium and print one JSON report per run.
+ * @file Run a Goje benchmark program in Chromium and print its JSON reports, one or two per run.
  *
  * Usage: node scripts/benchmark-collide.mjs WEB_DIR [repetitions] [collidebench | skirmishbench]
  * The program's WebAssembly build must be in WEB_DIR as PROGRAM.wasm next to wasm_exec.js.
@@ -51,16 +51,24 @@ try {
       const tab = await browser.newPage();
       try {
         await tab.bringToFront();
-        const [message] = await Promise.all([
-          tab.waitForEvent("console", {
-            predicate: m => m.text().startsWith('{"target"') || m.type() === "error",
-            timeout: 60_000,
-          }),
-          tab.goto(origin, { timeout: 15_000 }),
-        ]);
-        const line = message.text();
-        if (!line.startsWith('{"target"')) throw new Error(line);
-        console.log(JSON.stringify({ ...JSON.parse(line), repetition, chromium_version: browser.version() }));
+        // The skirmish program prints two reports, the battle and then the same battle with group orders.
+        const expected = program === "skirmishbench" ? 2 : 1;
+        const lines = [];
+        const reports = new Promise((resolve, reject) => {
+          tab.on("console", message => {
+            if (message.text().startsWith('{"target"')) {
+              lines.push(message.text());
+              if (lines.length === expected) resolve();
+            } else if (message.type() === "error") {
+              reject(new Error(message.text()));
+            }
+          });
+          setTimeout(() => reject(new Error(`Only ${lines.length} of ${expected} reports arrived`)), 60_000).unref();
+        });
+        await Promise.all([reports, tab.goto(origin, { timeout: 15_000 })]);
+        for (const line of lines) {
+          console.log(JSON.stringify({ ...JSON.parse(line), repetition, chromium_version: browser.version() }));
+        }
       } finally {
         await tab.close();
       }

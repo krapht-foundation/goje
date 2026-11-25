@@ -46,6 +46,9 @@
       } else if (query.get("fixture") === "skirmish") {
         go.env.GOJE_PLAYGROUND = "skirmish";
         controls.textContent = "Click to select · Right click to move · Arrows to pan · W/S to zoom · R to reset";
+      } else if (query.get("fixture") === "outpost") {
+        go.env.GOJE_PLAYGROUND = "outpost";
+        controls.textContent = "Drag to select · Right click to order · Esc for the menu";
       }
       if (diagnosticRun) go.env.GOJE_DIAGNOSTICS = "1";
       if (benchmark === "off" || benchmark === "on") {

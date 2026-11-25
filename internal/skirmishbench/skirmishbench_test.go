@@ -69,3 +69,27 @@ func TestBattleTraceIsPinned(t *testing.T) {
 		)
 	}
 }
+
+// wantOrdersTrace is the trace after the 900 ticks the benchmark program runs in
+// the orders mode. It changes only when the rules or the squad orders do.
+const wantOrdersTrace uint64 = 13621971378015380758
+
+func TestOrdersBattleIsDeterministicAndPinned(t *testing.T) {
+	t.Parallel()
+
+	report, err := skirmishbench.RunOrders(300, 600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Trace != wantOrdersTrace {
+		t.Errorf("trace = %d, want %d", report.Trace, wantOrdersTrace)
+	}
+	if report.Scouts == 0 || report.Guards == 0 || report.Scouts+report.Guards >= report.Units {
+		t.Errorf(
+			"the battle should leave both sides standing with casualties: %d scouts, %d guards of %d",
+			report.Scouts,
+			report.Guards,
+			report.Units,
+		)
+	}
+}

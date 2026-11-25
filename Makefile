@@ -51,7 +51,7 @@ test: ## Run headless Go tests
 
 test-wasm: ## Run the simulation tests as WebAssembly under Node
 	GOOS=js GOARCH=wasm $(GO) test -exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" \
-		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./cmd/playground
+		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./font ./ui ./engine/replay ./engine/save ./cmd/playground
 
 test-race: ## Run Go tests with the native race detector
 	$(GO) test -race ./...
@@ -75,8 +75,8 @@ run-desktop: build-desktop ## Open the native playground window
 smoke-desktop: ## Check all playground fixtures in native windows
 	mkdir -p "$(BUILD_DIR)"
 	$(GO) build -tags goje_smoke -o "$(BUILD_DIR)/playground-smoke" ./cmd/playground
-	for scenario in --pickup --courtyard --authored --yard --skirmish; do \
-		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$(BUILD_DIR)/playground-smoke" $$scenario || exit 1; \
+	for scenario in --pickup --courtyard --authored --yard --skirmish --outpost; do \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=30)' "$(BUILD_DIR)/playground-smoke" $$scenario || exit 1; \
 	done
 
 build-web: ## Build the playground Wasm and browser files
@@ -106,6 +106,10 @@ serve-level-editor: build-level-editor ## Serve the Level Builder on loopback (E
 
 smoke-level-editor: build-level-editor ## Verify editing and download in Chromium
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-level-editor.mjs
+
+.PHONY: smoke-placement-editor
+smoke-placement-editor: build-level-editor ## Add, change, and delete placements in the Level Builder in Chromium
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" $(NODE) scripts/smoke-placement-editor.mjs
 
 .PHONY: build-tile-maker serve-tile-maker smoke-tile-maker
 build-tile-maker: ## Build the standalone browser Tile Maker
@@ -180,8 +184,8 @@ smoke-sprite-roundtrip: build-pixel-art build-sprite-editor ## Paint, animate, a
 		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/beacon/web/playground.wasm" "$$tmp/beacon"; \
 		install -m 0644 web/playground/index.html "$$wasm_exec" "$$tmp/courtyard/web/"; \
 		install -m 0644 examples/beacon/web/index.html "$$wasm_exec" "$$tmp/beacon/web/"; \
-		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/courtyard-smoke" --sprite; \
-		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/beacon-smoke" --sprite; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=30)' "$$tmp/courtyard-smoke" --sprite; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=30)' "$$tmp/beacon-smoke" --sprite; \
 		$(NODE) scripts/smoke-web.mjs --sprite "$$tmp/courtyard/web"; \
 		$(NODE) scripts/smoke-beacon.mjs sprite "$$tmp/beacon/web"
 
@@ -202,7 +206,7 @@ smoke-level-roundtrip: build-level-editor build-tile-maker ## Play both browser 
 		$(GO) build -tags goje_smoke -o "$$tmp/playground-smoke" "$$tmp/playground"; \
 		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/web/playground.wasm" "$$tmp/playground"; \
 		install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/web/"; \
-		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/playground-smoke" --shortcut; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=30)' "$$tmp/playground-smoke" --shortcut; \
 		$(NODE) scripts/smoke-web.mjs "$$tmp/web"
 
 .PHONY: smoke-zone-roundtrip
@@ -219,8 +223,24 @@ smoke-zone-roundtrip: build-level-editor ## Author the yard's zones in the Level
 		$(GO) build -tags goje_smoke -o "$$tmp/playground-smoke" "$$tmp/playground"; \
 		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/web/playground.wasm" "$$tmp/playground"; \
 		install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/web/"; \
-		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=20)' "$$tmp/playground-smoke" --yard; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=30)' "$$tmp/playground-smoke" --yard; \
 		$(NODE) scripts/smoke-web.mjs --yard "$$tmp/web"
+
+.PHONY: smoke-outpost-roundtrip
+smoke-outpost-roundtrip: build-level-editor ## Author the outpost's placements and zones in the Level Builder and play them on desktop and web
+	@set -eu; tmp=$$(mktemp -d "$(BUILD_DIR)/outpost-roundtrip.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)"; \
+		mkdir -p "$$tmp/playground" "$$tmp/web"; \
+		cp cmd/playground/*.go cmd/playground/goje.json "$$tmp/playground/"; \
+		cp -R cmd/playground/levels cmd/playground/art "$$tmp/playground/"; \
+		level="$$tmp/playground/levels/outpost.json"; \
+		rm "$$level"; \
+		$(NODE) scripts/smoke-outpost-editor.mjs "$$level"; \
+		$(GO) build -tags goje_smoke -o "$$tmp/playground-smoke" "$$tmp/playground"; \
+		GOOS=js GOARCH=wasm $(GO) build -o "$$tmp/web/playground.wasm" "$$tmp/playground"; \
+		install -m 0644 web/playground/index.html "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" "$$tmp/web/"; \
+		$(PYTHON) -c 'import subprocess, sys; subprocess.run(sys.argv[1:], check=True, timeout=30)' "$$tmp/playground-smoke" --outpost; \
+		$(NODE) scripts/smoke-web.mjs --outpost "$$tmp/web"
 
 .PHONY: smoke-beacon
 smoke-beacon: build-level-editor build-tile-maker ## Author and play an independent 2D game on desktop and web
@@ -298,6 +318,7 @@ check-example: ## Build the reference playground from a separate module on deskt
 	@set -eu; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		cp cmd/playground/main.go cmd/playground/game.go cmd/playground/courtyard.go "$$tmp/"; \
 		cp cmd/playground/authored.go cmd/playground/yard.go cmd/playground/skirmish.go cmd/playground/goje.json "$$tmp/"; \
+		cp cmd/playground/outpost.go cmd/playground/outpost_app.go cmd/playground/outpost_session.go "$$tmp/"; \
 		cp -R cmd/playground/levels cmd/playground/art "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \

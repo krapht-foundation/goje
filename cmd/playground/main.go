@@ -55,6 +55,22 @@ func runPlayground() error {
 		}
 		config, factory = loaded.config(), loaded.skirmishFactory(board)
 		config.Title = "Goje Skirmish · Left click: select · Right click: move · Arrows: pan · W/S: zoom · R: reset"
+	case "outpost":
+		loaded, err := loadAuthored(authoredFiles)
+		if err != nil {
+			return err
+		}
+		// A host without storage, such as a browser that blocks site data, plays without saving.
+		store, storeErr := platform.NewStore(outpostGame)
+		if storeErr != nil {
+			log.Printf("outpost: saving is unavailable: %v", storeErr)
+			store = nil
+		}
+		world, outpostConfig, err := newOutpost(authoredFiles, loaded, store)
+		if err != nil {
+			return err
+		}
+		config, factory = outpostConfig, world.factory()
 	default:
 		loaded, err := loadAuthored(authoredFiles)
 		if err != nil {

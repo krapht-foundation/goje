@@ -49,7 +49,7 @@ func main() {
 			return diagnostic(err)
 		}),
 		"editZone": callback(func(args []js.Value) any {
-			id, ok := zoneID(args[0])
+			id, ok := objectID(args[0])
 			if !ok {
 				return "zone ID is out of range"
 			}
@@ -58,11 +58,38 @@ func main() {
 			return diagnostic(doc.EditZone(z))
 		}),
 		"deleteZone": callback(func(args []js.Value) any {
-			id, ok := zoneID(args[0])
+			id, ok := objectID(args[0])
 			if !ok {
 				return "zone ID is out of range"
 			}
 			return diagnostic(doc.DeleteZone(id))
+		}),
+		// addPlacement takes kind, x, y, and an ID, where 0 asks the document for the next ID.
+		"addPlacement": callback(func(args []js.Value) any {
+			p := level.Placement{Kind: args[0].String(), X: args[1].Int(), Y: args[2].Int()}
+			if args[3].Int() != 0 {
+				id, ok := objectID(args[3])
+				if !ok {
+					return "placement ID must be 1 to 4294967295"
+				}
+				p.ID = id
+			}
+			_, err := doc.AddPlacement(p)
+			return diagnostic(err)
+		}),
+		"setPlacementKind": callback(func(args []js.Value) any {
+			id, ok := objectID(args[0])
+			if !ok {
+				return "placement ID is out of range"
+			}
+			return diagnostic(doc.SetPlacementKind(id, args[1].String()))
+		}),
+		"deletePlacement": callback(func(args []js.Value) any {
+			id, ok := objectID(args[0])
+			if !ok {
+				return "placement ID is out of range"
+			}
+			return diagnostic(doc.DeletePlacement(id))
 		}),
 		"undo":         callback(func(_ []js.Value) any { doc.Undo(); return "" }),
 		"redo":         callback(func(_ []js.Value) any { doc.Redo(); return "" }),
@@ -104,7 +131,7 @@ func zoneFromArgs(first int, args []js.Value) level.Zone {
 	}
 }
 
-func zoneID(v js.Value) (uint32, bool) {
+func objectID(v js.Value) (uint32, bool) {
 	id := v.Int()
 	if id < 1 || id > math.MaxUint32 {
 		return 0, false

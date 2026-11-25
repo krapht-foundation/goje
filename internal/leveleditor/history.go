@@ -13,13 +13,14 @@ const (
 
 // A stroke stores each changed cell once, since the old terrain must be the
 // other brush value. A placement move needs only its source and destination,
-// and a zone edit its index and the zone before and after.
+// and a zone or placement edit its index and the value before and after.
 type transaction struct {
 	cells         []int
 	from, to      int
 	before, after uint64
 	tile          byte
 	zone          *zoneEdit
+	placement     *placementEdit
 }
 
 // zoneEdit is nil-free for a replacement. Before is nil for an addition and
@@ -27,6 +28,13 @@ type transaction struct {
 type zoneEdit struct {
 	index         int
 	before, after *level.Zone
+}
+
+// placementEdit follows the zoneEdit rules for a placement's addition,
+// deletion, or change of kind.
+type placementEdit struct {
+	index         int
+	before, after *level.Placement
 }
 
 func (tx transaction) changes() int { return max(1, len(tx.cells)) }
@@ -85,6 +93,10 @@ func (d *Document) record(tx transaction) {
 }
 
 func (d *Document) apply(tx transaction, forward bool) {
+	if tx.placement != nil {
+		d.applyPlacement(tx.placement, forward)
+		return
+	}
 	if tx.zone != nil {
 		from, to := tx.zone.before, tx.zone.after
 		if !forward {

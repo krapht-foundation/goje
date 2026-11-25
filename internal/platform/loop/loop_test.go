@@ -62,18 +62,22 @@ func TestInputAcrossPresentationAndSuspension(t *testing.T) {
 	// Only the first catch-up tick sees the two independent edges.
 	host.PressPrimary(70, 25)
 	host.PressSecondary(75, 46)
-	want := engine.Input{
-		Held:           engine.KeyD,
-		Pressed:        engine.KeyR | engine.KeyD,
-		PrimaryPress:   engine.MousePress{Valid: true},
-		SecondaryPress: engine.MousePress{X: 50.5, Y: 33.25, Valid: true},
+	held := engine.Input{
+		Held:          engine.KeyD,
+		Pointer:       engine.Pointer{X: 75, Y: 46, Inside: true},
+		PrimaryHeld:   true,
+		SecondaryHeld: true,
 	}
+	want := held
+	want.Pressed = engine.KeyR | engine.KeyD
+	want.PrimaryPress = engine.MousePress{Valid: true}
+	want.SecondaryPress = engine.MousePress{X: 50.5, Y: 33.25, Valid: true}
 	if got := host.NextInput(); got != want {
 		t.Fatalf("first step input = %+v; want %+v", got, want)
 	}
 	for range 2 {
 		host.KeyDown(engine.KeyD, true)
-		if got := host.NextInput(); got != (engine.Input{Held: engine.KeyD}) {
+		if got := host.NextInput(); got != held {
 			t.Fatalf("catch-up step input = %+v; want held D with no edge", got)
 		}
 	}
@@ -112,9 +116,92 @@ func TestSecondaryPressCanBeBufferedAgainAfterConsumption(t *testing.T) {
 		{X: 20, Y: 15, Valid: true},
 	} {
 		host.PressSecondary(point.X, point.Y)
-		want := engine.Input{SecondaryPress: point}
+		want := engine.Input{
+			Pointer:        engine.Pointer{X: point.X, Y: point.Y, Inside: true},
+			SecondaryPress: point,
+			SecondaryHeld:  true,
+		}
 		if got := host.NextInput(); got != want {
 			t.Fatalf("input = %+v; want %+v", got, want)
 		}
+		host.ReleaseSecondary()
+		host.NextInput()
+	}
+}
+
+func TestPointerFollowsMotionAndLeavesTheViewport(t *testing.T) {
+	var host loop.Loop
+	host.MovePointer(30.5, 40.25, true)
+	host.MovePointer(31, 41, true)
+	if got := host.NextInput(); got.Pointer != (engine.Pointer{X: 31, Y: 41, Inside: true}) {
+		t.Fatalf("pointer = %+v; want the latest position", got.Pointer)
+	}
+	// The position persists across ticks, because it is state rather than an edge.
+	if got := host.NextInput(); got.Pointer != (engine.Pointer{X: 31, Y: 41, Inside: true}) {
+		t.Fatalf("pointer on the next tick = %+v", got.Pointer)
+	}
+	host.MovePointer(500, 500, false)
+	if got := host.NextInput(); got.Pointer != (engine.Pointer{}) {
+		t.Fatalf("pointer outside the viewport = %+v; want the zero value", got.Pointer)
+	}
+}
+
+func TestReleaseEdgeReportsTheLastPositionInsideTheViewport(t *testing.T) {
+	var host loop.Loop
+	host.PressPrimary(10, 20)
+	host.MovePointer(60, 70, true)
+	host.MovePointer(0, 0, false) // The drag leaves the viewport.
+	host.ReleasePrimary()
+	got := host.NextInput()
+	if want := (engine.MousePress{X: 60, Y: 70, Valid: true}); got.PrimaryRelease != want {
+		t.Errorf("release = %+v; want %+v", got.PrimaryRelease, want)
+	}
+	if !got.PrimaryPress.Valid || got.PrimaryHeld {
+		t.Errorf(
+			"a press and release in one tick gave press %+v, held %v",
+			got.PrimaryPress,
+			got.PrimaryHeld,
+		)
+	}
+	if again := host.NextInput(); again.PrimaryRelease.Valid {
+		t.Error("the release edge was delivered twice")
+	}
+}
+
+func TestReleaseWithoutAnAcceptedPressIsIgnored(t *testing.T) {
+	var host loop.Loop
+	host.ReleasePrimary()
+	host.ReleaseSecondary()
+	if got := host.NextInput(); got != (engine.Input{}) {
+		t.Fatalf("release with no press = %+v; want no input", got)
+	}
+}
+
+func TestEachPressGetsOneReleaseEdge(t *testing.T) {
+	var host loop.Loop
+	host.PressPrimary(5, 6)
+	host.ReleasePrimary()
+	host.PressPrimary(7, 8)
+	host.ReleasePrimary()
+	got := host.NextInput()
+	// Edges buffer independently, so a second click in one tick keeps the first
+	// press and the first release, the way the existing press edges do.
+	if got.PrimaryPress != (engine.MousePress{X: 5, Y: 6, Valid: true}) ||
+		got.PrimaryRelease != (engine.MousePress{X: 5, Y: 6, Valid: true}) {
+		t.Fatalf("input = %+v", got)
+	}
+	if got.PrimaryHeld {
+		t.Error("the button is still held after both releases")
+	}
+}
+
+func TestFocusLossClearsHeldButtonsAndEmitsNoRelease(t *testing.T) {
+	var host loop.Loop
+	host.PressPrimary(5, 6)
+	host.SetActive(false)
+	host.SetActive(true)
+	host.ReleasePrimary() // The late release of a cancelled drag.
+	if got := host.NextInput(); got != (engine.Input{}) {
+		t.Fatalf("input after focus loss = %+v; want none", got)
 	}
 }

@@ -74,6 +74,11 @@ func smokeCases() []smokeCase {
 			runSkirmishSmoke,
 			"skirmish selection, order, alarm, bolts, damage, defeat, and reset",
 		},
+		{
+			"--outpost",
+			runOutpostSmoke,
+			"outpost text, drag selection, orders, hold, pause, save, load, victory, and replay",
+		},
 	}
 }
 

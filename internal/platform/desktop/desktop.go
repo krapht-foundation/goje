@@ -131,7 +131,7 @@ func runWindow(
 	})
 	window.SetRefreshCallback(func(_ *glfw.Window) { needsDraw = true })
 	window.SetKeyCallback(func(
-		_ *glfw.Window,
+		w *glfw.Window,
 		key glfw.Key,
 		_ int,
 		action glfw.Action,
@@ -139,6 +139,14 @@ func runWindow(
 	) {
 		mapped := engineKey(key)
 		if mapped == 0 {
+			return
+		}
+		if down, isModifier := modifierDown(w, mapped); isModifier {
+			if down {
+				session.Loop.KeyDown(mapped, false)
+			} else {
+				session.Loop.KeyUp(mapped)
+			}
 			return
 		}
 		switch action {
@@ -152,8 +160,20 @@ func runWindow(
 	// button callback can see movement newer than the queued button event.
 	cursorX, cursorY := window.GetCursorPos()
 	windowX, windowY := window.GetPos()
-	window.SetCursorPosCallback(func(_ *glfw.Window, x, y float64) {
+	logicalCursor := func(w *glfw.Window) (x, y float64, ok bool) {
+		windowW, windowH := w.GetSize()
+		return driver.LogicalPointer(cursorX, cursorY, float64(windowW), float64(windowH),
+			image.Pt(width, height), image.Pt(config.Width, config.Height), viewport)
+	}
+	window.SetCursorPosCallback(func(w *glfw.Window, x, y float64) {
 		cursorX, cursorY = x, y
+		px, py, ok := logicalCursor(w)
+		session.Loop.MovePointer(px, py, ok)
+	})
+	window.SetCursorEnterCallback(func(_ *glfw.Window, entered bool) {
+		if !entered {
+			session.Loop.MovePointer(0, 0, false)
+		}
 	})
 	window.SetPosCallback(func(_ *glfw.Window, x, y int) {
 		cursorX += float64(windowX - x)
@@ -162,15 +182,19 @@ func runWindow(
 	})
 	window.SetMouseButtonCallback(
 		func(w *glfw.Window, button glfw.MouseButton, action glfw.Action, _ glfw.ModifierKey) {
-			supported := button == glfw.MouseButtonLeft || button == glfw.MouseButtonRight
-			if action != glfw.Press || !supported {
+			if button != glfw.MouseButtonLeft && button != glfw.MouseButtonRight {
 				return
 			}
-			x, y := cursorX, cursorY
-			windowW, windowH := w.GetSize()
-			x, y, ok := driver.LogicalPointer(x, y, float64(windowW), float64(windowH),
-				image.Pt(width, height), image.Pt(config.Width, config.Height), viewport)
-			if !ok {
+			if action == glfw.Release {
+				if button == glfw.MouseButtonLeft {
+					session.Loop.ReleasePrimary()
+				} else {
+					session.Loop.ReleaseSecondary()
+				}
+				return
+			}
+			x, y, ok := logicalCursor(w)
+			if action != glfw.Press || !ok {
 				return
 			}
 			if button == glfw.MouseButtonLeft {
@@ -256,7 +280,38 @@ func engineKey(key glfw.Key) engine.Keys {
 		return engine.KeyR
 	case glfw.KeySpace:
 		return engine.KeySpace
+	case glfw.KeyLeftShift, glfw.KeyRightShift:
+		return engine.KeyShift
+	case glfw.KeyLeftControl, glfw.KeyRightControl:
+		return engine.KeyControl
+	case glfw.KeyEscape:
+		return engine.KeyEscape
+	case glfw.KeyEnter, glfw.KeyKPEnter:
+		return engine.KeyEnter
+	case glfw.KeyH:
+		return engine.KeyH
+	case glfw.KeyF:
+		return engine.KeyF
+	case glfw.Key1, glfw.Key2, glfw.Key3, glfw.Key4, glfw.Key5,
+		glfw.Key6, glfw.Key7, glfw.Key8, glfw.Key9:
+		return engine.Key1 << (key - glfw.Key1)
 	default:
 		return 0
+	}
+}
+
+// modifierDown reports whether either physical key of a modifier is down.
+// Either one holds the logical key, so a release counts only when the other is
+// up too. It reports isModifier false for every other key.
+func modifierDown(w *glfw.Window, key engine.Keys) (down, isModifier bool) {
+	switch key {
+	case engine.KeyShift:
+		return w.GetKey(glfw.KeyLeftShift) == glfw.Press ||
+			w.GetKey(glfw.KeyRightShift) == glfw.Press, true
+	case engine.KeyControl:
+		return w.GetKey(glfw.KeyLeftControl) == glfw.Press ||
+			w.GetKey(glfw.KeyRightControl) == glfw.Press, true
+	default:
+		return false, false
 	}
 }

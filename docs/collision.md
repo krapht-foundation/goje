@@ -45,6 +45,7 @@ events = tracker.Update(events[:0], []collide.Shape{scout})
 - Keep per-tick speed in your game. Convert to drawing positions with `Num.Float64` at the end of the tick; never feed floats back into the simulation.
 - Reuse the `events` and result buffers between ticks. After they have grown, a tick allocates nothing.
 - Build a new `World` and `Tracker` when a scene restarts or its walls change.
+- To save a game, store `tracker.AppendOverlaps(nil)` with the rest of its state. After loading, build the new tracker and call `Restore` with those pairs, so bodies that were already inside a trigger report no entry again.
 
 ## Block other bodies
 

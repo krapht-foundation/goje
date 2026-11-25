@@ -103,9 +103,22 @@ func runLoop(
 			}
 			if key := gameKey(e.Get("code").String()); key != 0 {
 				e.Call("preventDefault")
-				if kind == "keydown" {
+				switch {
+				case key == engine.KeyShift || key == engine.KeyControl:
+					// Either physical key holds the logical key, which the event's
+					// modifier flag already reports.
+					flag := "shiftKey"
+					if key == engine.KeyControl {
+						flag = "ctrlKey"
+					}
+					if e.Get(flag).Bool() {
+						session.Loop.KeyDown(key, false)
+					} else {
+						session.Loop.KeyUp(key)
+					}
+				case kind == "keydown":
 					session.Loop.KeyDown(key, e.Get("repeat").Bool())
-				} else {
+				default:
 					session.Loop.KeyUp(key)
 				}
 			}
@@ -135,10 +148,32 @@ func runLoop(
 				canvas.Call("focus", map[string]any{"preventScroll": true})
 				updateActive()
 			}
+			if kind == "pointerdown" {
+				// Capture so the release and the drag's motion arrive even when the
+				// pointer leaves the canvas.
+				capturePointer(canvas, e)
+			}
 			if button == 0 {
 				session.Loop.PressPrimary(x, y)
 			} else {
 				session.Loop.PressSecondary(x, y)
+			}
+		case "pointermove":
+			if e.Get("pointerType").String() == "mouse" {
+				x, y, ok := graphics.logicalPointer(window, canvas, e)
+				session.Loop.MovePointer(x, y, ok)
+			}
+		case "pointerleave":
+			if e.Get("pointerType").String() == "mouse" &&
+				!canvas.Call("hasPointerCapture", e.Get("pointerId")).Bool() {
+				session.Loop.MovePointer(0, 0, false)
+			}
+		case "mouseup":
+			switch e.Get("button").Int() {
+			case 0:
+				session.Loop.ReleasePrimary()
+			case 2:
+				session.Loop.ReleaseSecondary()
 			}
 		case "pointerup":
 			// Touch and pen activation is granted on release, not on press.
@@ -164,6 +199,9 @@ func runLoop(
 		{canvas, "pointerdown"},
 		{canvas, "pointerup"},
 		{canvas, "mousedown"},
+		{canvas, "mouseup"},
+		{canvas, "pointermove"},
+		{canvas, "pointerleave"},
 		{canvas, "contextmenu"},
 		{canvas, "focus"},
 		{canvas, "blur"},
@@ -310,7 +348,34 @@ func gameKey(code string) engine.Keys {
 		return engine.KeyR
 	case "Space":
 		return engine.KeySpace
+	case "ShiftLeft", "ShiftRight":
+		return engine.KeyShift
+	case "ControlLeft", "ControlRight":
+		return engine.KeyControl
+	case "Escape":
+		return engine.KeyEscape
+	case "Enter", "NumpadEnter":
+		return engine.KeyEnter
+	case "KeyH":
+		return engine.KeyH
+	case "KeyF":
+		return engine.KeyF
+	case "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9":
+		return engine.Key1 << (code[len("Digit")] - '1')
 	default:
 		return 0
 	}
+}
+
+// capturePointer routes the rest of a mouse drag to the canvas. A synthetic or
+// expired pointer ID makes the call throw, and the game plays on without capture.
+func capturePointer(canvas, e js.Value) {
+	defer func() {
+		if failure := recover(); failure != nil {
+			if _, ok := failure.(js.Error); !ok {
+				panic(failure) //nolint:forbidigo // Only a JavaScript exception is expected here.
+			}
+		}
+	}()
+	canvas.Call("setPointerCapture", e.Get("pointerId"))
 }

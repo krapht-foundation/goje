@@ -82,6 +82,10 @@ jobs:
         run: xvfb-run -a make smoke-level-roundtrip
       - name: Play Level Builder zones on desktop and web
         run: xvfb-run -a make smoke-zone-roundtrip
+      - name: Verify Level Builder placement editing
+        run: make smoke-placement-editor
+      - name: Play the outpost authored in the Level Builder on desktop and web
+        run: xvfb-run -a make smoke-outpost-roundtrip
       - name: Play the independent 2D game on desktop and web
         run: xvfb-run -a make smoke-beacon
       - name: Verify Beacon audio on desktop and in Chromium
