@@ -17,9 +17,9 @@ import { servePlayground } from "./playground-server.mjs";
 function tapAudio(rate) {
   const tap = {
     context: null, analyser: null, recorder: null, starts: 0, stops: 0, requested: 0, rate: 0, samples: [], pending: [],
+    music: [], musicGain: null, ramps: [],
   };
   Object.defineProperty(window, "beaconAudioProbe", { value: tap });
-  const create = BaseAudioContext.prototype.createBufferSource;
   const connect = AudioNode.prototype.connect;
   const start = AudioBufferSourceNode.prototype.start;
   const stop = AudioBufferSourceNode.prototype.stop;
@@ -55,20 +55,32 @@ function tapAudio(rate) {
       });
     }
   };
-  BaseAudioContext.prototype.createBufferSource = function () {
-    const source = create.call(this);
-    connect.call(source, tap.analyser);
-    if (tap.recorder) connect.call(source, tap.recorder);
-    else tap.pending.push(source);
-    return source;
+  // Beacon's music is the only looping source. Keep it out of the cue's analyser and
+  // recorder and its counts, and remember its gain node so its fades can be read back.
+  AudioNode.prototype.connect = function (target, ...rest) {
+    if (this instanceof AudioBufferSourceNode && this.loop) tap.musicGain = target;
+    return connect.call(this, target, ...rest);
+  };
+  const ramp = AudioParam.prototype.linearRampToValueAtTime;
+  AudioParam.prototype.linearRampToValueAtTime = function (value, time) {
+    tap.ramps.push({ param: this, value });
+    return ramp.call(this, value, time);
   };
   AudioBufferSourceNode.prototype.start = function (...args) {
+    if (this.loop) {
+      start.apply(this, args);
+      tap.music.push({ length: this.buffer.length, rate: this.buffer.sampleRate });
+      return;
+    }
+    connect.call(this, tap.analyser);
+    if (tap.recorder) connect.call(this, tap.recorder);
+    else tap.pending.push(this);
     start.apply(this, args);
     tap.starts++;
   };
   AudioBufferSourceNode.prototype.stop = function (...args) {
     stop.apply(this, args);
-    tap.stops++;
+    if (!this.loop) tap.stops++;
   };
   document.addEventListener("keydown", event => {
     if (event.isTrusted && event.code === "Space") tap.requested = performance.now();
@@ -201,7 +213,36 @@ async function playback(browser, url, expected, forcedRate) {
     await canvas.press("r");
     await beacon(canvas, false);
     assert.equal(await page.evaluate(() => window.beaconAudioProbe.starts), 1, "focus or reset replayed the cue");
-    console.log(`Beacon Web Audio smoke passed; rendered cue ${how}; key-to-software-tap ${milliseconds.toFixed(1)} ms`);
+
+    // The music started once, after unlock, as a looping 48 kHz buffer that faded in to the play gain.
+    /** @returns {Promise<{ starts: { length: number, rate: number }[], targets: number[] }>} Music starts and fades. */
+    const music = () => page.evaluate(() => {
+      const { music: starts, musicGain, ramps } = window.beaconAudioProbe;
+      return { starts, targets: ramps.filter(ramp => ramp.param === musicGain?.gain).map(ramp => ramp.value) };
+    });
+    /** @param {number} gain - Expected final target of the music's latest fade. */
+    const fadeTo = gain => page.waitForFunction(want => {
+      const { musicGain, ramps } = window.beaconAudioProbe;
+      const targets = ramps.filter(ramp => ramp.param === musicGain?.gain);
+      return Math.abs(targets.at(-1)?.value - want) < 1e-6;
+    }, gain);
+    let track = await music();
+    assert.equal(track.starts.length, 1, "the music started once");
+    assert.ok(track.starts[0].rate === 48000 && track.starts[0].length > 48000, "the music is the 48 kHz loop");
+    assert.ok(Math.abs(track.targets[0] - 0.5) < 1e-6, "the music faded in to the play gain");
+    // Space lights column 0 and a click lights beacon #2 at (2, 0); the win fades the music down.
+    await canvas.press("Space");
+    const box = await canvas.boundingBox();
+    assert.ok(box);
+    await page.mouse.click(box.x + box.width * 96 / 160, box.y + box.height * 32 / 128);
+    await fadeTo(0.2);
+    await canvas.press("r");
+    await fadeTo(0.5);
+    track = await music();
+    assert.equal(track.starts.length, 1, "restart kept the looping track instead of starting it again");
+    console.log(`Beacon Web Audio smoke passed; rendered cue ${how}; key-to-software-tap ${milliseconds.toFixed(1)} ms; ` +
+      `one ${(track.starts[0].length / 48000).toFixed(1)} s looping music track with fades ` +
+      track.targets.map(target => target.toFixed(2)).join(" → "));
   } finally {
     await page.close();
   }

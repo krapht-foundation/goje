@@ -1,0 +1,71 @@
+# RFC 0019: M18 — Live matches and distribution
+
+**Status:** Accepted. Implementation is available for local verification; native mobile and hosted staging checks are open.
+
+## Problem and goal
+
+[M17](0018-m17-versus-music-tools-and-reach.md#next-milestone) left five things for M18: live spectators and rejoin, generated mobile projects, store signing, a hosted update channel, and compressed music. This proposal uses Outpost to prove the online features and Beacon to prove the distribution features. The milestone ends with a playable game to watch and rejoin on desktop and web, and a playable package that launches offline in Android and iOS wrappers, plays imported music, and has a verified update path.
+
+## Decisions for review
+
+| Decision | Recommendation | Alternative and tradeoff |
+| --- | --- | --- |
+| Spectators | Give a room one read-only spectator seat. The spectator catches up from the match's commands, then watches the live stream. | Add a third lockstep participant. A slow observer could stall play, and every session would have to support a non-player role. |
+| Rejoin | Retain the two player slots through a 30-second transport interruption. Both players reconstruct the last mutually verified checkpoint before resuming. | Retain and resend every unacknowledged message to preserve the exact in-flight state. This needs reliable delivery across two connections and more state at the relay. |
+| Mobile | Generate pinned [Capacitor](https://capacitorjs.com/docs/basics/workflow) projects from the packaged web bundle. Use Gradle and Xcode for their respective builds and signing. | Add native Go hosts. That would replace the proven WASM renderer and input path on each platform before there is a demonstrated blocker in the wrappers. |
+| Hosted updates | Reuse the existing GitHub release workflow and the [M17 signed manifest](../specs/update-m17.md). Publish a Beacon channel before expanding it to more games. | Operate a new service. An update is a manifest and a set of immutable downloads; it does not need a server process. |
+| Music | Start with mono 48 kHz, 16-bit [FLAC](https://www.rfc-editor.org/rfc/rfc9639.html). Decode before playback into the existing clip format. | Stream or use a different decoder on each host. That would change the real-time audio path; M18 needs smaller assets on disk, not a larger music memory budget. |
+| Playable proof | Give Beacon a short light-the-beacons challenge with a clear win, timeout, and restart. Use the same challenge as the mobile, music, and update acceptance fixture. | Build separate demos for each feature. Each would prove less and add another package to maintain. |
+
+## Proposed design
+
+### Outpost: watch and rejoin
+
+The [relay](../specs/relay-m16.md) remains ignorant of game commands and state. A versioned room mode adds a read-only spectator route and time-limited slot reservations; the old routes retain their two-player behavior. The spectator code is separate from the player invitation. It grants a view, never a player seat. Each player receives a separate cryptographically random resume credential, kept in memory and presented as a control message over TLS, not in a URL or log. The relay authenticates the slot before forwarding anything, never replaces a connected player, and expires reservations. The official client attempts to rejoin after transport loss. A deliberate leave, a protocol failure, a desync, or an expired reservation ends the match rather than triggering rejoin. Browser refresh, process restart, and relay restart are not recoverable in this proposal.
+
+Outpost reuses the [match log](../specs/match-log-v1.md) rules and command validators. The host sends a bounded prefix followed by incremental batches in tick order. The host publishes a batch only when both players have verified its ending checkpoint, so the view waits for checkpoint verification and rejoining cannot retract ticks the spectator has already seen. The spectator runs the same simulation, checks hashes, and can cycle the fog views without issuing commands. Serve catch-up with a per-update work budget and an independent bounded outbound queue. Disconnect a slow observer instead of making players wait. A recording can still be watched offline. A live spectator can inspect either side; invitation controls who may watch, not what a modified client can see.
+
+When either player disconnects, both stop advancing and stop accepting orders while reconnecting. They agree on a checkpoint they both previously verified, including the initial state if no later checkpoint was verified. Each rebuilds locally from recorded commands, compares the resulting hash again, and starts a new lockstep epoch at that tick. Frames and pending orders from the previous epoch do not carry over. The UI states when play is paused and that orders after the resume point did not carry over. The replay records the surviving timeline once. If the players cannot establish a common checkpoint or the record exceeded its bounds, they end with a diagnostic and keep the playable prefix rather than accept another peer's snapshot. Set room, handshake, buffering, transfer, and catch-up limits in the accepted specifications before changing the wire. The existing [lockstep](../specs/lockstep-m16.md) and match log remain the determinism checks, not authentication of a peer or proof of who played.
+
+### Mobile wrappers and signing
+
+Generate Android and iOS projects outside the source tree, with the game's application ID, name, versions, icon, and exact `goje build` web assets. Keep the established PWA as a separate output. The wrappers load local assets in their WebViews without a development server, a remote navigation bridge, or additional plugins or permissions. Rebuilding updates the packaged web assets without overwriting a developer's native changes. Use pinned Node dependencies and native build tools in CI. No store upload happens from a repository push.
+
+Separate wrapper generation, native launch, and distribution signing. Validate Android with a release AAB signed using a disposable upload key and an emulator install from that bundle. Validate iOS WebKit and touch on a simulator; to claim distribution signing, archive with a real team identity and provisioning profile and verify the exported signed artifact. Store credentials stay with the maintainer or a protected release environment. This checkout currently selects Command Line Tools without `simctl`, and it has no Android tooling on `PATH`; run the emulator and simulator gates on equipped hosts. Store-account checks cannot be inferred from unsigned builds, and no App Store or Play Store listing is promised.
+
+### Hosted updates
+
+The existing [release job](../.github/workflows/release.yml) collects native packages on the three desktop runners and already compares the Unix web archives. Generate one Beacon `update.json` over the final set of archives, after choosing the canonical copy of the web ZIP. Sign only in a protected release job, with a key whose public half the client obtains independently. Use a fixed channel URL for the manifest and fetch the selected archive from the version named by that signed manifest, not the moving channel URL. Keep the existing checksum and version rules. A native check-and-download workflow is sufficient: it verifies the signed game name, version, size, and digest, and exposes only a verified file to the player. No automatic installation, key rotation, or wrapped web-code updates are proposed.
+
+Use a separately named staging channel and key to prove remote delivery before enabling the production channel. A successful fixture on localhost checks HTTP and signing logic but cannot establish that the hosted channel works. The current repository is public and has no published releases. Publishing a tag or release, configuring signing secrets, and submitting to stores require separate maintainer authorization.
+
+### Compressed music and Beacon
+
+Evaluate a maintained pure-Go FLAC decoder, starting with [`mewkiz/flac`](https://github.com/mewkiz/flac), before adding a module dependency. Limit compressed bytes, metadata work, per-frame allocation, and decoded frames, and reject malformed or unsupported streams without touching the current track. A track uses the existing 64-second PCM limit. A limit in stream metadata alone is not sufficient; enforce it as frames are decoded. Decode during loading, not in the device callback, and do not add a second mixer or change the score format. Import a locally authored music loop and retain its source and conversion command. Compare its FLAC size with the same WAV, record decode time and peak allocation on desktop and WASM, and check that the decoded PCM is identical. This reduces packaged asset size, not the prepared clip's memory use.
+
+Beacon uses a fixed board and fixed-tick timer. Light the marked beacons before the timer runs out, then offer restart after a win or timeout. Use keyboard and touch without making a mobile player depend on a physical keyboard. The same source and assets build for desktop, browser, and both wrappers. The challenge does not require a network or an update check to start.
+
+## Delivery and acceptance
+
+The wrapper/toolchain and decoder feasibility checks can run in parallel with spectator work once this proposal is accepted. Rejoin follows the spectator history path. Signing and hosting use the verified package artifacts. Beacon ties the slices together without holding up the earlier feature checks.
+
+| Slice | Exit check |
+| --- | --- |
+| Live spectator | Start a native Outpost host and a Chromium guest, then join from a second browser after play has started. Verify catch-up and a later shared state hash, switch fog, and prove that an observer's input or disconnect does not change the match. Run the relay checks under the race detector; exercise slow clients and caps. |
+| Rejoin | Cut the host and guest transports separately during native/browser play. Verify that both keep their own slot, resume from the same checkpoint, and reach a later matching checkpoint and a playable saved replay. Cover expiry, stale frames, wrong credentials, early disconnect, and deliberate leave. |
+| Mobile projects | Generate both projects from a clean Beacon build. Open each in its native emulator or simulator with the network disabled; play, win, and restart by touch. Confirm that existing desktop, plain web, and PWA builds still run. |
+| Store signing | Verify the Android AAB signature and launch an emulator build derived from it. Verify an iOS distribution archive and signed export with a maintainer-provided team and profile. State separately whether each store has accepted a build; submission is not an M18 gate. |
+| Hosted updates | On a real HTTPS staging channel, verify a newer Beacon manifest and one native archive from the published version. Reject an older manifest, a wrong key, and a changed archive without leaving an unverified file. Verify that publishing another version does not make the previously signed artifact URL resolve to the new archive. |
+| Compressed music | Round-trip Beacon's authored loop against its reference PCM, exercise the play and fade path on desktop and Chromium, and fuzz the bounded decode boundary. Report asset size and prepare time without changing the mixer allocation contract. |
+| Playable Beacon | Win, time out, and restart the same board on desktop and browser, then complete it by touch in both wrappers. Check that music has no effect on the result and that the game opens offline. |
+
+### Verification to date
+
+- **Outpost:** A native host and Chromium guest resumed at tick zero after an early cut. A second Chromium page caught up, switched fog, and verified shared hashes after later cuts to each player. Both match logs replayed. Co-op and the injected-desync check also passed. A native relay test verified that a live spectator received the natural final tick before the room ended.
+- **Beacon and FLAC:** Desktop and Chromium passed win, timeout, and restart; Chromium also passed the touch path. The installed web build opened with its server and network down. The decoder reproduced the authored PCM exactly and the asset is 44.7% of the equivalent WAV. The [decoder specification](../specs/music-flac-m18.md#measurements) records the timing and heap growth.
+- **Mobile:** Generated and resynced both Capacitor projects locally. The bundled web assets matched, native edits survived, and both native version fields updated. A disposable Java signing fixture passed strict verification. This did not build or sign an Android AAB, launch a native emulator or simulator, or verify an iOS distribution export. The [mobile verification guide](../specs/mobile-m18.md#verification) describes the remaining native checks.
+- **Hosted updates:** The CLI signed and checked manifests and verified downloads against local HTTPS fixtures, including the rejection cases. No staging channel has been published. The [staging guide](../specs/update-m18.md#release-workflow) lists the protected environment and authorization needed for the remote checks.
+
+## Out of scope
+
+Matchmaking, accounts, chat, more than two players, spectator voting or orders, server-authoritative simulation, prediction, resume after a restart, encrypted fog, and installing an update automatically. Also excluded are native mobile renderers, Authenticode, macOS notarization, store submission, streaming music, resampling, and additional codecs.

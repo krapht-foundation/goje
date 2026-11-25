@@ -59,6 +59,8 @@ Both are interpreted inside the scene from the recorded input, so a match played
 
 With a relay configured, the title menu adds **Host co-op**, **Host versus**, and **Join room CODE** when a room code is given. Set `GOJE_RELAY` and `GOJE_ROOM` on desktop or `relay` and `room` in the browser. Invalid addresses or room codes are ignored. The [relay](relay-m16.md) pairs players and the [lockstep protocol](lockstep-m16.md) keeps their matches in step.
 
+M18 adds [live watch and rejoin](outpost-m18.md). It does not change the following setup message or ownership rules.
+
 The title has a **Guards: Classic/Tactical** option that applies to new solo and hosted co-op matches. Tactical guards use the [opt-in skirmish rules](skirmish-m13.md#versus-and-tactics-m17). Versus ignores this option because the guest commands the guards.
 
 | State | What it shows | Keys and pointer |
@@ -76,7 +78,7 @@ In co-op, the first player owns the scouts with odd IDs and the second owns the 
 
 Only units owned by the local player can be selected or put in a control group. Commands use the [M16 encoding](skirmish-m13.md#commands-m16). Both copies validate the full tick, apply its commands in player order, then step. A command that names an unknown unit or one its sender does not own ends the match. A fallen unit the sender owns is allowed.
 
-The session runs with a delay of five, so an order takes effect after six ticks, or 100 ms at 60 Hz. The simulation trace is checked every 60 ticks, and a wait of 600 updates ends the match. At a natural result, both copies stop stepping and wait for confirmation of the final tick before closing. The camera, selection, volume, and menus are local and do not affect the trace.
+The session runs with a delay of five, so an order takes effect after six ticks, or 100 ms at 60 Hz. The simulation trace is checked every 60 ticks. The original stall limit was 600 updates; M18 allows 1,200 in an active room so that transport recovery can begin. At a natural result, both copies stop stepping and confirm the final tick before closing. The camera, selection, volume, and menus are local and do not affect the trace.
 
 ### Recording and playback
 

@@ -1,5 +1,9 @@
 {
   "version": 1,
   "rows": ["...", ".#."],
-  "placements": [{"id": 1, "kind": "beacon", "x": 0, "y": 0}]
+  "placements": [
+    {"id": 1, "kind": "beacon", "x": 0, "y": 0},
+    {"id": 2, "kind": "beacon", "x": 2, "y": 0},
+    {"id": 3, "kind": "beacon", "x": 0, "y": 1}
+  ]
 }

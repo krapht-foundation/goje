@@ -27,7 +27,8 @@ game=$tmp/beacon
 mkdir -p "$game/assets"
 cp examples/beacon/*.go "$game/"
 cp examples/beacon/assets/goje.json examples/beacon/assets/tomato.png \
-  examples/beacon/assets/tomato.json examples/beacon/assets/toggle.wav "$game/assets/"
+  examples/beacon/assets/tomato.json examples/beacon/assets/toggle.wav \
+  examples/beacon/assets/music.flac "$game/assets/"
 "$node" scripts/smoke-beacon.mjs author "$game/assets"
 "$go" run ./cmd/projectcheck "$game/assets"
 

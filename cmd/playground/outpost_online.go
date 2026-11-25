@@ -41,6 +41,7 @@ const (
 // ws:// or wss:// URL without a path; both fields are empty when not configured.
 type onlineConfig struct {
 	relay, room string
+	watch       bool
 }
 
 // cleanOnlineConfig drops what cannot be used, so that a bad launch parameter
@@ -118,14 +119,23 @@ type outpostSync interface {
 
 // onlineSync gates one player's copy of a match. It implements outpostSync.
 type onlineSync struct {
-	lock     *lockstep.Session
-	local    int
-	cmds     matchCommands
-	buf      []byte
-	waited   int // Consecutive ticks that could not run.
-	recorder *matchlog.Recorder
-	payloads [][]byte // Borrowed until Done advances the lockstep ring.
-	logErr   error
+	lock        *lockstep.Session
+	local       int
+	link        *outpostLink // Nil for in-memory sessions.
+	setup       matchSetup
+	initial     uint64
+	interrupted bool
+	saved       [3]recoverySnapshot
+	base        int // Completed ticks before this epoch.
+	proved      int // Latest regular checkpoint we verified.
+	shared      int // Latest regular checkpoint both players verified.
+	finalSent   bool
+	cmds        matchCommands
+	buf         []byte
+	waited      int // Consecutive ticks that could not run.
+	recorder    *matchlog.Recorder
+	payloads    [][]byte // Borrowed until Done advances the lockstep ring.
+	logErr      error
 	// fault changes a hash before it is sent. It is the package's onlineHashFault.
 	fault func(tick, hash uint64) uint64
 }
@@ -150,10 +160,23 @@ func (o *onlineSync) issue(c skirmish.Command) int {
 	return len(c.IDs)
 }
 
+// A transient error must not escape Update: an engine runtime stops on error,
+// but a recovering match still draws the frozen scene until it can swap it.
+func (o *onlineSync) interrupt(err error) bool {
+	if o.link != nil && isTransportChange(err) {
+		o.interrupted = true
+		return true
+	}
+	return false
+}
+
 // before applies the commands of every player for the tick, in player order,
 // when all of them have arrived.
 func (o *onlineSync) before(s *outpostSession) (bool, error) {
 	if err := o.lock.Poll(); err != nil {
+		if o.interrupt(err) {
+			return false, nil
+		}
 		return false, &onlineEnd{err}
 	}
 	payloads, ready := o.lock.Ready()
@@ -222,7 +245,7 @@ func checkOwnership(s *outpostSession, player int, c *skirmish.Command) error {
 
 // after sends the hash of the tick that ran, to be compared at checkpoints.
 func (o *onlineSync) after(hash uint64) error {
-	tick := o.lock.Tick() + 1
+	tick := uint64(o.base) + o.lock.Tick() + 1 // #nosec G115 -- base is a validated checkpoint tick.
 	if o.recorder != nil && o.logErr == nil {
 		o.logErr = o.recorder.Append(o.payloads, hash)
 	}
@@ -231,6 +254,9 @@ func (o *onlineSync) after(hash uint64) error {
 		hash = o.fault(tick, hash)
 	}
 	if err := o.lock.Done(hash); err != nil {
+		if o.interrupt(err) {
+			return nil
+		}
 		return &onlineEnd{err}
 	}
 	if tick%onlineHashInterval == 0 {
@@ -249,6 +275,7 @@ func (o *onlineSync) waiting() bool { return o.waited >= onlineWaitShown }
 // onlineLobby is a connection being made, and then waiting for the other player.
 type onlineLobby struct {
 	host   bool
+	watch  bool
 	cancel context.CancelFunc
 	result chan onlineDialed
 	conn   *netlink.Conn
@@ -266,13 +293,17 @@ type onlineDialed struct {
 
 // startLobby dials the relay in the background and returns at once, so the scene
 // keeps running while the connection is made.
-func startLobby(cfg onlineConfig, host bool) *onlineLobby {
+func startLobby(cfg onlineConfig, host, watch bool) *onlineLobby {
 	ctx, cancel := context.WithTimeout(context.Background(), onlineDialLimit)
-	target := cfg.relay + "/new"
+	target := cfg.relay + "/v2/new"
 	if !host {
-		target = cfg.relay + "/join?room=" + url.QueryEscape(cfg.room)
+		route := "/v2/join"
+		if watch {
+			route = "/v2/watch"
+		}
+		target = cfg.relay + route + "?room=" + url.QueryEscape(cfg.room)
 	}
-	l := &onlineLobby{host: host, cancel: cancel, result: make(chan onlineDialed, 1)}
+	l := &onlineLobby{host: host, watch: watch, cancel: cancel, result: make(chan onlineDialed, 1)}
 	go func() {
 		conn, err := netlink.Dial(ctx, target)
 		l.result <- onlineDialed{conn, err}
@@ -302,6 +333,12 @@ func (l *onlineLobby) poll() (ready bool, err error) {
 	if err = l.conn.Err(); err != nil {
 		l.err = err
 		return false, err
+	}
+	if l.watch {
+		if l.conn.Slot() != 2 {
+			return false, errors.New("relay returned a player slot for a viewer")
+		}
+		return true, nil
 	}
 	if !l.conn.PeerJoined() {
 		return false, nil

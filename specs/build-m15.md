@@ -107,7 +107,7 @@ Ed25519 signatures are deterministic, so signing the same archives with the same
 
 ## Limits
 
-- Desktop builds are for the host system only. There are no Android or iOS outputs; phones use the installable web app, which a tool such as Capacitor or Bubblewrap can wrap.
-- Signing is Goje's own Ed25519 signature. There is no Authenticode, Apple notarization, store signing, installer, or hosted update channel.
+- Desktop builds are for the host system only. [`goje mobile`](mobile-m18.md) generates Android and iOS wrapper projects from the web build rather than using native renderers.
+- Release signing with Ed25519 is separate from mobile distribution signing. The [hosted channel](update-m18.md) does not install or run downloads. There is no Authenticode, macOS notarization, or installer.
 - The Windows executable has no embedded icon or version resource.
 - Reproducibility holds for the same toolchain, sources, tags, and, for desktop builds, the same C compiler and system libraries.

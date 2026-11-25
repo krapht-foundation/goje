@@ -18,7 +18,7 @@ func run(config platform.Config, factory func() *scene) error {
 	mode := os.Getenv("GOJE_BENCH_MODE")
 	switch mode {
 	case "off":
-		config.Sounds = nil
+		config.Sounds, config.Music = nil, nil
 	case "idle", "burst":
 	default:
 		return fmt.Errorf("unknown Beacon audio benchmark mode %q", mode)
@@ -55,8 +55,9 @@ type benchScene struct {
 func (s *benchScene) Update(tick engine.Tick) (engine.Transition, error) {
 	// Twenty cues per simulation second overlap the 120 ms reference cue.
 	// They exercise cancellation and replacement without altering host pacing.
+	// Requested directly because a beacon lights only once per round.
 	if s.burst && tick.Number%3 == 0 {
-		tick.Input.Pressed = engine.KeySpace
+		tick.PlaySound(toggleCue)
 	}
 	return s.Scene.Update(tick)
 }

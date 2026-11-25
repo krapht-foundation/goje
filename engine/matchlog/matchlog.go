@@ -71,6 +71,7 @@ type Recorder struct {
 	empty    int // Offset of the current empty run, or -1.
 	ticks    int
 	hashes   []byte
+	marks    []recordMark
 	lastHash uint64
 	full     bool
 }
@@ -131,6 +132,7 @@ func (r *Recorder) Append(payloads [][]byte, hash uint64) error {
 	r.ticks, r.lastHash = ticks, hash
 	if ticks%Interval == 0 {
 		r.hashes = binary.LittleEndian.AppendUint64(r.hashes, hash)
+		r.marks = append(r.marks, r.mark())
 	}
 	return nil
 }
@@ -141,6 +143,16 @@ func (r *Recorder) Encode() []byte {
 	h := r.header
 	size := fixedHeader + len(h.Game) + len(h.ContentName) + len(r.body) + 8*checkpointCount(r.ticks)
 	data := make([]byte, 0, size)
+	data = appendHeader(data, h, r.ticks)
+	data = append(data, r.body...)
+	data = append(data, r.hashes...)
+	if r.ticks%Interval != 0 {
+		data = binary.LittleEndian.AppendUint64(data, r.lastHash)
+	}
+	return data
+}
+
+func appendHeader(data []byte, h Header, ticks int) []byte {
 	data = append(data, magic...)
 	var flags byte
 	if h.Tactics {
@@ -157,15 +169,10 @@ func (r *Recorder) Encode() []byte {
 	data = binary.LittleEndian.AppendUint64(data, h.Content)
 	data = binary.LittleEndian.AppendUint32(
 		data,
-		uint32(r.ticks),
+		uint32(ticks),
 	) // #nosec G115 -- bounded in Append.
 	data = append(data, h.Game...)
 	data = append(data, h.ContentName...)
-	data = append(data, r.body...)
-	data = append(data, r.hashes...)
-	if r.ticks%Interval != 0 {
-		data = binary.LittleEndian.AppendUint64(data, r.lastHash)
-	}
 	return data
 }
 

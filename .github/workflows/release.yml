@@ -2,6 +2,17 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      stage_version:
+        description: >-
+          To sign and publish Beacon on the staging channel, run on tag vVERSION and enter VERSION.
+          Leave empty to only build.
+        required: false
+        default: ''
+      previous_version:
+        description: An earlier staged version that must still verify after publishing.
+        required: false
+        default: ''
   push:
     tags: ['v*']
 
@@ -80,7 +91,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.ref_type == 'tag'
+    # Only a tag push drafts the release; a manual run on a tag must not draft it twice.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -107,3 +119,98 @@ jobs:
           cat SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "Goje $GITHUB_REF_NAME" --generate-notes -- *
+
+  # Signs and publishes Beacon on the staging channel (specs/update-m18.md). It runs
+  # only when a maintainer starts the workflow by hand on a tag and enters that tag's
+  # version, and only after the beacon-staging environment's reviewers approve it.
+  stage:
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && inputs.stage_version != ''
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: beacon-staging
+    concurrency:
+      group: beacon-staging
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: artifacts
+      - name: Sign the Beacon staging manifest
+        env:
+          STAGE_VERSION: ${{ inputs.stage_version }}
+          SIGNING_KEY: ${{ secrets.BEACON_STAGING_KEY }}
+          PUBLIC_KEY: ${{ vars.BEACON_STAGING_PUB }}
+        run: |
+          if [[ "$STAGE_VERSION" != "${GITHUB_REF_NAME#v}" ]]; then
+            echo "stage_version $STAGE_VERSION does not match the tag $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          if [[ -z "$SIGNING_KEY" || -z "$PUBLIC_KEY" ]]; then
+            echo "BEACON_STAGING_KEY and BEACON_STAGING_PUB must both be configured" >&2
+            exit 1
+          fi
+          go build -o .build/goje ./cmd/goje
+          name=goje-beacon-$STAGE_VERSION
+          # The Unix web archives must match; the Ubuntu copy is the canonical one.
+          cmp "artifacts/release-ubuntu-24.04/$name-web.zip" "artifacts/release-macos-latest/$name-web.zip"
+          mkdir stage
+          cp "artifacts/release-ubuntu-24.04/$name-web.zip" "artifacts/release-ubuntu-24.04/$name-linux-amd64.tar.gz" \
+            "artifacts/release-macos-latest/$name-darwin-arm64.tar.gz" \
+            "artifacts/release-windows-latest/$name-windows-amd64.zip" stage/
+          key=$RUNNER_TEMP/beacon-staging.key
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
+          printf '%s\n' "$PUBLIC_KEY" > "$RUNNER_TEMP/beacon-staging.pub"
+          # Fails unless the key matches the configured public half and the archives
+          # are exactly the web archive and the three desktop archives of this version.
+          .build/goje manifest -name goje-beacon -version "$STAGE_VERSION" -sign "$key" \
+            -pub "$RUNNER_TEMP/beacon-staging.pub" -platforms darwin-arm64,linux-amd64,windows-amd64 \
+            -o stage/update.json stage/goje-beacon-*
+          (cd stage && sha256sum -- goje-beacon-* > SHA256SUMS && cat SHA256SUMS update.json)
+      - name: Publish the version, then point the channel at it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE_VERSION: ${{ inputs.stage_version }}
+        run: |
+          # The versioned release must be new, so an artifact URL never changes its bytes.
+          gh release create "beacon-staging-v$STAGE_VERSION" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --title "Beacon staging $STAGE_VERSION" \
+            --notes "Beacon $STAGE_VERSION on the staging update channel." -- stage/*
+          if ! gh release view beacon-staging --repo "$GITHUB_REPOSITORY" > /dev/null; then
+            gh release create beacon-staging --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --prerelease --title "Beacon staging channel" \
+              --notes "update.json names the current Beacon staging version."
+          fi
+          gh release upload beacon-staging --repo "$GITHUB_REPOSITORY" --clobber -- stage/update.json
+
+  # Checks the published channel over HTTPS with no access to the signing key.
+  verify-stage:
+    needs: stage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - name: Verify the staging channel
+        env:
+          PUBLIC_KEY: ${{ vars.BEACON_STAGING_PUB }}
+          STAGE_VERSION: ${{ inputs.stage_version }}
+          PREVIOUS_VERSION: ${{ inputs.previous_version }}
+          REPO: ${{ github.repository }}
+        run: |
+          printf '%s\n' "$PUBLIC_KEY" > "$RUNNER_TEMP/beacon-staging.pub"
+          scripts/smoke-update.sh "$RUNNER_TEMP/beacon-staging.pub" "$STAGE_VERSION" ${PREVIOUS_VERSION:+"$PREVIOUS_VERSION"}

@@ -205,13 +205,13 @@ func TestOnlineDivergenceStopsBothPlayers(t *testing.T) {
 
 func TestCleanOnlineConfigKeepsOnlyUsableValues(t *testing.T) {
 	for _, tc := range []struct{ in, want onlineConfig }{
-		{onlineConfig{"ws://127.0.0.1:8080", "ABC234"}, onlineConfig{"ws://127.0.0.1:8080", "ABC234"}},
-		{onlineConfig{"ws://host/", "ABC234"}, onlineConfig{"ws://host", "ABC234"}},
-		{onlineConfig{"wss://relay.example", "ABC23"}, onlineConfig{"wss://relay.example", ""}},
-		{onlineConfig{"wss://relay.example", "abc234"}, onlineConfig{"wss://relay.example", ""}},
-		{onlineConfig{"http://host", "ABC234"}, onlineConfig{}},
-		{onlineConfig{"ws://host/path", "ABC234"}, onlineConfig{}},
-		{onlineConfig{"", "ABC234"}, onlineConfig{}},
+		{onlineConfig{relay: "ws://127.0.0.1:8080", room: "ABC234"}, onlineConfig{relay: "ws://127.0.0.1:8080", room: "ABC234"}},
+		{onlineConfig{relay: "ws://host/", room: "ABC234", watch: true}, onlineConfig{relay: "ws://host", room: "ABC234", watch: true}},
+		{onlineConfig{relay: "wss://relay.example", room: "ABC23"}, onlineConfig{relay: "wss://relay.example"}},
+		{onlineConfig{relay: "wss://relay.example", room: "abc234"}, onlineConfig{relay: "wss://relay.example"}},
+		{onlineConfig{relay: "http://host", room: "ABC234"}, onlineConfig{}},
+		{onlineConfig{relay: "ws://host/path", room: "ABC234"}, onlineConfig{}},
+		{onlineConfig{room: "ABC234"}, onlineConfig{}},
 	} {
 		if got := cleanOnlineConfig(tc.in); got != tc.want {
 			t.Errorf("cleanOnlineConfig(%+v) = %+v, want %+v", tc.in, got, tc.want)

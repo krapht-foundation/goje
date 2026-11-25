@@ -122,4 +122,4 @@ Measurements on Apple M4 Pro and Go 1.27.4, medians of three runs with `-benchme
 
 ## Next milestone
 
-M18 takes what remains: spectators and rejoin, generated native wrappers, store signing and a hosted update channel, compressed music, and the games that these features make possible. It gets its own RFC.
+M18 takes what remains: spectators and rejoin, generated native wrappers, store signing and a hosted update channel, compressed music, and the games that these features make possible. See [RFC 0019](0019-m18-live-matches-and-distribution.md).

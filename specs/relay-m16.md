@@ -1,5 +1,7 @@
 # Relay, M16
 
+These routes remain available unchanged. For spectator seats and player reservations, see the separate [M18 relay protocol](relay-m18.md).
+
 ## Scope and ownership
 
 The relay is the meeting point for online lockstep play. Two players connect out to it, it pairs them by a room code, and it forwards each player's messages to the other unchanged. It never reads them and knows nothing about games. The [M16 RFC](../rfcs/0017-m16-online-lockstep-play.md) records why play uses a relay instead of direct connections.

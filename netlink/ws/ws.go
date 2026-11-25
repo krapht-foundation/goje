@@ -64,6 +64,16 @@ var (
 	ErrClosed = errors.New("ws: closed by peer")
 )
 
+// CloseError is the error ReadMessage returns for a close frame. It matches
+// ErrClosed with errors.Is, and its Code lets the relay tell a deliberate
+// close (1000) from a client going away.
+type CloseError struct{ Code uint16 }
+
+func (e *CloseError) Error() string { return fmt.Sprintf("%v (status %d)", ErrClosed, e.Code) }
+
+// Is reports whether target is ErrClosed.
+func (e *CloseError) Is(target error) bool { return target == ErrClosed }
+
 // Options configures a connection. The zero value uses the defaults.
 type Options struct {
 	// Limit is the largest data payload accepted, in bytes. Zero means
@@ -255,10 +265,11 @@ func (c *Conn) closed(payload []byte) error {
 	if len(payload) >= 2 {
 		code = binary.BigEndian.Uint16(payload)
 	}
+	ce := &CloseError{Code: code}
 	if err := c.closeWith(code); err != nil {
-		return fmt.Errorf("%w (status %d): %w", ErrClosed, code, err)
+		return fmt.Errorf("%w: %w", ce, err)
 	}
-	return fmt.Errorf("%w (status %d)", ErrClosed, code)
+	return ce
 }
 
 // fail closes the connection after a read error, telling the peer why when
@@ -332,6 +343,12 @@ func (c *Conn) writeFrameLocked(op byte, p []byte, timeout time.Duration) error 
 // the connection. It is safe to call more than once and from any goroutine.
 func (c *Conn) Close() error {
 	return c.closeWith(closeNormal)
+}
+
+// CloseWith is Close with a chosen close status code, such as one in the
+// 4000 to 4999 range that applications define.
+func (c *Conn) CloseWith(code uint16) error {
+	return c.closeWith(code)
 }
 
 func (c *Conn) closeWith(code uint16) error {

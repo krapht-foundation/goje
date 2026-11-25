@@ -18,4 +18,8 @@ Online play treats the other player and the relay as untrusted. The [WebSocket s
 
 The [match log](specs/match-log-v1.md) and [music score](specs/music-m17.md) are untrusted, bounded inputs. Match playback validates commands and ownership again. A replay checkpoint is a determinism check, not proof of authenticity. A lockstep player runs the entire simulation; fog hides information in the normal interface but does not protect it from a modified client. Lockstep alone also cannot authenticate the source of commands forwarded by a relay.
 
+The [M18 relay](specs/relay-m18.md) admits one read-only spectator with its own invitation and authenticates returning players with a separate 256-bit credential per seat. A client keeps it in memory and presents it in the first control message over TLS, never in a URL or log. The relay bounds incomplete resume authentication by `-max-pending` and a 15-second deadline. A spectator can see both teams, and a peer or relay remains untrusted. [FLAC music](specs/music-flac-m18.md) is an untrusted asset with separate compressed, metadata, and decoded-size limits.
+
 [Signed updates](specs/update-m17.md) require a developer public key obtained independently of the download. Keep private signing keys out of project roots, bundles, and logs. The updater verifies the signed metadata, version, size, and artifact digest; it does not install or run a download.
+
+The [Beacon staging channel](specs/update-m18.md) and the [iOS archive workflow](specs/mobile-m18.md#verification) require separate protected release environments. Do not expose the channel's signing key or the store identity and provisioning profile to build or test jobs that do not need them.

@@ -121,4 +121,4 @@ session, err := lockstep.New(cfg, conn)
 
 `Dial` returns after the relay's welcome, so `conn.Slot()` is the `Local` of your configuration: 0 for the host and 1 for the guest. Host messages sent before the guest joins are dropped. Close the connection after leaving the match. Use TLS on public relays, and do not treat lockstep hashes as peer authentication or as a way to conceal fog from a modified client.
 
-The [outpost](playground.md#play-the-outpost-online) is a complete example of a lobby, a match, and the screens for how a match ends. Its `outpost_online.go` is the part that is not specific to the outpost's rules.
+The [Outpost example](playground.md#play-the-outpost-online) uses the [versioned room transport](../specs/relay-m18.md) for a read-only spectator and timed player-seat recovery. The relay still does not run or restore the game. Outpost pins each lockstep session to a relay epoch and reconstructs its own state at an [agreed checkpoint](../specs/outpost-m18.md#recovery) before starting a fresh session. The `/new` and `/join` routes above retain their original behavior; they do not hold reservations.

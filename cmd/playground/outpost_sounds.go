@@ -131,10 +131,13 @@ func (a *outpostApp) updateMusic(tick engine.Tick) {
 		on = !a.player.Done()
 	case stateMatchWatch:
 		on = !a.matchPlayer.done()
+	case stateLiveWatch:
+		on = a.session != nil && a.session.outcome == outcomePlaying &&
+			(a.live.recvErr == nil || a.live.applied < a.live.inbox.end)
 	case stateOnlineEnded:
 	}
 	gain := a.world.volume * 0.35
-	if a.state == statePaused || a.state == stateOnline && a.onlineMenu {
+	if a.state == statePaused || a.state == stateOnline && (a.onlineMenu || a.recovery != nil) {
 		gain *= 0.3
 	}
 	switch {
