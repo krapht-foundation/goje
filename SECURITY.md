@@ -11,3 +11,7 @@ Email the [Krapht Foundation contact](mailto:mostafa.sh.coderino@gmail.com) with
 Include the affected revision or version, platform, a description of the impact and conditions, and a safe way to verify the issue. Redact credentials and personal data. Contact us before sending sensitive attachments so we can agree on a secure transfer method.
 
 Maintainers will triage reports privately and coordinate fixes and disclosure with the reporter. If you find a problem in a dependency, notify its maintainers through their security channel as well. Do not access other people's data or disrupt services while investigating.
+
+## Online play
+
+Online play treats the other player and the relay as untrusted. The [WebSocket subset](specs/websocket-m16.md), the [relay](specs/relay-m16.md), and the [lockstep protocol](specs/lockstep-m16.md) bound every size, rate, and wait, and reject malformed input with an error instead of acting on it. A match applies only commands that name units their sender owns, and it ends when the players' state hashes differ. The relay forwards messages without encrypting or authenticating them, so serve it behind TLS and do not treat a room code as a secret beyond the few minutes in which a room waits for its guest. Report a way to crash, stall, or desynchronize a player or the relay privately.

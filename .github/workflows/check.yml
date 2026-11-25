@@ -96,5 +96,9 @@ jobs:
         run: make smoke-input
       - name: Compare the Go mixer with the Web Audio graph
         run: make smoke-mixer
+      - name: Check the relay against Chromium's WebSocket
+        run: make smoke-ws
+      - name: Play the online outpost between a native host and Chromium
+        run: make smoke-online
       - name: Build and package Beacon with goje
         run: xvfb-run -a make smoke-goje-build

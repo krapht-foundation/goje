@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"github.com/krapht-foundation/goje/engine"
+	"github.com/krapht-foundation/goje/engine/grid"
 	"github.com/krapht-foundation/goje/engine/replay"
 	"github.com/krapht-foundation/goje/engine/save"
+	"github.com/krapht-foundation/goje/examples/skirmish"
 	"github.com/krapht-foundation/goje/font"
 	"github.com/krapht-foundation/goje/platform"
 )
@@ -249,6 +251,56 @@ func TestOutpostOrdersAndModes(t *testing.T) {
 	}
 	if attacks != 6 {
 		t.Fatalf("only %d of 6 scouts are alive after the orders", attacks)
+	}
+}
+
+// TestOutpostIssuerReceivesEveryCommand checks the seam an online match uses:
+// with an issuer set, orders and holds reach it as commands and leave the
+// simulation alone, and its count still marks the order as heard.
+func TestOutpostIssuerReceivesEveryCommand(t *testing.T) {
+	s := newOutpostSession(t)
+	var issued []byte
+	s.issuer = func(c skirmish.Command) int {
+		issued = c.AppendTo(issued)
+		return len(c.IDs)
+	}
+	s.selectAll(t)
+	// The sounds clear the flag each tick, so the move is given outside Update.
+	px, py := s.logical(3.5, 4.5, 0)
+	s.order(engine.MousePress{X: px, Y: py, Valid: true}, skirmish.Move)
+	if !s.ordered {
+		t.Fatal("an issued move did not mark an order for the sounds")
+	}
+	s.update(t, engine.Input{Pressed: engine.KeyH})
+	s.update(t, engine.Input{Pressed: engine.KeyA})
+	ax, ay := s.logical(2.5, 4.5, 0)
+	s.update(
+		t,
+		engine.Input{PrimaryPress: engine.MousePress{X: ax, Y: ay, Valid: true}, PrimaryHeld: true},
+	)
+	s.update(t, engine.Input{PrimaryRelease: engine.MousePress{X: ax, Y: ay, Valid: true}})
+	commands, err := skirmish.DecodeCommands(nil, issued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := make([]skirmish.CommandKind, 0, len(commands))
+	for _, c := range commands {
+		if !slices.Equal(c.IDs, s.selection) {
+			t.Fatalf("command %+v does not name the selection %v", c, s.selection)
+		}
+		kinds = append(kinds, c.Kind)
+	}
+	want := []skirmish.CommandKind{skirmish.CommandOrder, skirmish.CommandHold, skirmish.CommandOrder}
+	if !slices.Equal(kinds, want) || commands[0].Order.Kind != skirmish.Move ||
+		!commands[1].Hold || commands[2].Order != (skirmish.Order{Kind: skirmish.AttackMove, Goal: grid.Cell{X: 2, Y: 4}}) {
+		t.Fatalf("issued %+v", commands)
+	}
+	for _, id := range s.selection {
+		if u, _ := s.sim.Unit(id); u.Hold() {
+			t.Fatalf("scout %d took a command that went to the issuer", id)
+		} else if _, ok := s.sim.Goal(u); ok {
+			t.Fatalf("scout %d has an order that went to the issuer", id)
+		}
 	}
 }
 

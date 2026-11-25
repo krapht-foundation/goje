@@ -55,6 +55,22 @@ The eight sounds are `cmd/playground/sounds/*.wav`, made with the Sound Maker's 
 
 Both are interpreted inside the scene from the recorded input, so a match played by touch or pad replays exactly. The scene's own state for this, the cursor, the previous buttons, the control group the shoulders are at, and whether the touch buttons are shown, is part of the hash and the snapshot.
 
+## Online play (M16)
+
+When the host is configured with a relay, the title menu gains **Host online game** and, when a room code is also given, **Join room CODE**. The relay is `GOJE_RELAY` on desktop and the `relay` query parameter in the browser, and the room is `GOJE_ROOM` or the `room` parameter. A value that is not a `ws://` or `wss://` address without a path, or a room that is not six characters of the code alphabet, is ignored. The [relay](relay-m16.md) pairs the players and the [lockstep protocol](lockstep-m16.md) keeps their matches in step. The design is in [RFC 0017](../rfcs/0017-m16-online-lockstep-play.md).
+
+The outpost gains three states:
+
+| State | What it shows | Keys and pointer |
+| --- | --- | --- |
+| Lobby | The connection being made, and for a host the room code and a wait for the guest. | **Escape** or a gamepad's Start button cancels and returns to the title. |
+| Online | The match, with the partner's scouts in teal, a notice while it waits for the other player, and a menu: Resume, Sound, Leave the match. | The match controls, except that **R** does nothing. **Escape**, Start, or the Menu button opens the menu over a match that keeps running. |
+| Ended | One or more lines that say why the match ended: the other player left, stopped responding, sent invalid data, the games no longer agree, or the connection was lost. | **Enter**, **Escape**, Start, or a tap returns to the title. |
+
+A match has two players, and the guards stay under the simulation's control, so it is cooperative. The first player commands the scouts with odd IDs and the second those with even IDs. Selection, a box, and a control group contain only the player's own scouts. A command that a player gives is encoded as an [M16 command](skirmish-m13.md#commands-m16), sent through the session, and applied at the scheduled tick by every copy in player order, the player's own included, so each copy changes its units only through commands that every copy has. A received command that names a unit that does not exist, is not a scout, or is not the sender's ends the match, because an honest copy never sends one. A scout that fell after the command was issued is allowed.
+
+The session runs at the lockstep delay of five, so a command takes effect six ticks, 100 ms, after it was issued. The match checks the hash of the simulation, `Sim.Trace`, every 60 ticks and ends when the limit of 600 ticks without the other player's commands passes. Selection, the camera, the volume, and the menus are local and are not in the hash. A match is not recorded, saved, or restored, and a match started with the **Start** entry is unchanged by any of this.
+
 ## What a recording and a save hold
 
 A match is the `outpostSession` scene. It reads only the input it is given and its own state, so it is replayable under the rules in [Make a scene replayable](../docs/replays.md#make-a-scene-replayable). `StateHash` digests the simulation's trace, which includes the explored cells, the selection and groups, the pending mode, a drag in progress, the zoom, the camera center, and the state of the touch buttons and the gamepad cursor. The recorder samples it at its checkpoint interval, and playback fails with a divergence error at the first checkpoint that differs.
@@ -80,6 +96,8 @@ A host without storage plays without saving: Save and Load report that saving is
 
 ## Verification
 
+- Headless tests in `cmd/playground` cover two players' copies of a match over an in-memory network with and without latency agreeing on every checked tick and selecting only their own scouts, a player who stops being stalled out, forged commands being rejected, a changed hash stopping both players, and the launch parameters.
+- `make smoke-online` plays a match between a native host with no window and the WebAssembly build in Chromium through a real relay, requires fifteen hashes to be logged by both and to be equal, and then injects a changed hash into the host and requires both players to report it.
 - Headless tests in `cmd/playground` cover box, click, Shift, and group selection, every order and mode, a drag that never releases, snapshot restore at several ticks continuing identically, damaged snapshots, the recorded fight with a pinned trace and a divergence from a changed input, the app flow with an in-memory store, and a draw that allocates nothing.
 - Further headless tests cover fog hiding the guards until a scout sees them and never listing a guard the scouts cannot see, the sounds of the recorded fight, their range, rate limit, determinism, and independence from the volume, a gamepad moving a cursor and clicking, touch buttons giving commands without starting a drag, a match played by pad alone replaying and restoring exactly, and Start opening and closing the pause menu.
 - `make smoke-desktop` runs `--outpost`, which scripts the title, the recorded fight to a victory, a restart, a drag selection with the box drawn, hold, pause, save, load, quitting, playing back the recording, a touch tap that shows the buttons, a gamepad cursor, and Start pausing, checking text, markers, bolts, and that the guards and their ground are not drawn at the start in the native back buffer.

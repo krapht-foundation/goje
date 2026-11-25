@@ -14,6 +14,8 @@ The [text and HUD guide](text-and-ui.md) shows how to draw text and build menus,
 
 The [audio guide](audio.md) explains how to play overlapping and positional sounds, and the [vision guide](vision.md) how to give units line of sight and draw fog of war. The [building guide](building.md) shows how to turn a game into a web bundle and a package for macOS or Linux with `goje build` and `goje package`.
 
+The [online play guide](online.md) explains how to keep several copies of a deterministic game in step with lockstep, and how to connect players through the relay. The [playground guide](playground.md#play-the-outpost-online) describes playing the outpost together from desktop and the browser.
+
 ## What Goje aims to provide
 
 - A game framework and reusable tools for building a playground inside your own game. The first [playground prototype](playground.md#use-the-playground-in-your-game) supports replaying a configured encounter.

@@ -86,6 +86,7 @@ func smokeCases() []smokeCase {
 // files that the plain playground build does not contain.
 func extraSmokeCases() []smokeCase {
 	return []smokeCase{
+		{"--online-host", runOnlineHostSmoke, "online outpost hosted from a native window"},
 		{"--sprite", runSpriteSmoke, "exported scout clip airborne with its painted cyan stripe " +
 			"on motion ticks 13 and 16, planted on tick 17, and reset"},
 		{

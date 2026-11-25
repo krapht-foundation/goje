@@ -10,6 +10,7 @@ import (
 	"github.com/krapht-foundation/goje/engine"
 	"github.com/krapht-foundation/goje/engine/replay"
 	"github.com/krapht-foundation/goje/engine/save"
+	"github.com/krapht-foundation/goje/netlink"
 	"github.com/krapht-foundation/goje/platform"
 	"github.com/krapht-foundation/goje/ui"
 )
@@ -30,6 +31,9 @@ const (
 	statePlaying
 	statePaused
 	stateWatching
+	stateLobby       // Connecting to the relay and waiting for the other player.
+	stateOnline      // An online match, which never pauses.
+	stateOnlineEnded // The reason an online match or lobby ended.
 )
 
 // Pause menu entries.
@@ -48,6 +52,15 @@ const (
 	titleStart = iota
 	titleLoad
 	titleWatch
+	titleHost
+	titleJoin
+)
+
+// Online menu entries, shown over a match that keeps running.
+const (
+	onlineResume = iota
+	onlineSound
+	onlineLeave
 )
 
 // outpostApp is the whole game: a title menu, a match, a pause menu over it, and
@@ -77,6 +90,12 @@ type outpostApp struct {
 	// is the touch button that opens the pause menu or leaves a replay.
 	start, prevStart bool
 	menuButton       ui.Button
+
+	lobby      *onlineLobby // The connection being made, or nil.
+	osync      *onlineSync  // The gate of the online match, or nil.
+	conn       *netlink.Conn
+	onlineMenu bool     // The menu is open over an online match.
+	endLines   []string // The lines of the end screen.
 }
 
 func newOutpostApp(world *outpostWorld) *outpostApp {
@@ -102,9 +121,16 @@ func (a *outpostApp) Exit() { a.stopMatch() }
 func (a *outpostApp) toTitle() {
 	a.stopMatch()
 	a.state = stateTitle
+	items := []string{"Start", "Load", "Watch last replay"}
+	if online := a.world.online; online.relay != "" {
+		items = append(items, "Host online game")
+		if online.room != "" {
+			items = append(items, "Join room "+online.room)
+		}
+	}
 	a.menu = ui.Menu{
-		Bounds: image.Rect(100, 92, 220, 140),
-		Items:  []string{"Start", "Load", "Watch last replay"},
+		Bounds: image.Rect(100, 92, 220, 92+16*len(items)),
+		Items:  items,
 		Style:  ui.DefaultStyle(),
 	}
 }
@@ -147,10 +173,27 @@ func (a *outpostApp) cycleVolume() {
 }
 
 // click plays a menu sound.
-func (a *outpostApp) click(cue int) {
+func (a *outpostApp) click() {
 	if a.sound != nil && a.world.volume > 0 {
-		a.sound.Play(cue, a.world.volume, 0)
+		a.sound.Play(cueClick, a.world.volume, 0)
 	}
+}
+
+// closeOnline leaves an online match and closes its connection and lobby.
+func (a *outpostApp) closeOnline() {
+	if a.lobby != nil {
+		a.lobby.close()
+		a.lobby = nil
+	}
+	if a.osync != nil {
+		noteClose("leave the match", a.osync.lock.Leave())
+		a.osync = nil
+	}
+	if a.conn != nil {
+		noteClose("close the connection", a.conn.Close())
+		a.conn = nil
+	}
+	a.onlineMenu = false
 }
 
 func (a *outpostApp) say(text string) { a.notice, a.noticeLeft = text, outpostNoticeTicks }
@@ -204,6 +247,7 @@ func (a *outpostApp) finishRecording() []byte {
 }
 
 func (a *outpostApp) stopMatch() {
+	a.closeOnline()
 	if a.match == nil {
 		return
 	}
@@ -321,6 +365,12 @@ func (a *outpostApp) Update(tick engine.Tick) (engine.Transition, error) {
 		err = a.updatePaused(in)
 	case stateWatching:
 		err = a.updateWatching(in)
+	case stateLobby:
+		a.updateLobby(in)
+	case stateOnline:
+		err = a.updateOnline(in)
+	case stateOnlineEnded:
+		a.updateOnlineEnded(in)
 	}
 	return engine.Transition{}, err
 }
@@ -328,7 +378,7 @@ func (a *outpostApp) Update(tick engine.Tick) (engine.Transition, error) {
 func (a *outpostApp) updateTitle(in engine.Input) error {
 	choice, _ := a.menu.Update(in)
 	if choice >= 0 {
-		a.click(cueClick)
+		a.click()
 	}
 	switch choice {
 	case titleStart:
@@ -337,6 +387,12 @@ func (a *outpostApp) updateTitle(in engine.Input) error {
 		a.load()
 	case titleWatch:
 		a.watch(a.lastReplay())
+	case titleHost:
+		a.stopMatch()
+		a.lobby, a.state = startLobby(a.world.online, true), stateLobby
+	case titleJoin:
+		a.stopMatch()
+		a.lobby, a.state = startLobby(a.world.online, false), stateLobby
 	}
 	return nil
 }
@@ -344,7 +400,7 @@ func (a *outpostApp) updateTitle(in engine.Input) error {
 func (a *outpostApp) updatePlaying(in engine.Input) error {
 	touchMenu := a.session.controls.touchUI && a.menuButton.Update(in)
 	if a.start || touchMenu || (in.Pressed.Has(engine.KeyEscape) && !a.session.cancelable()) {
-		a.click(cueClick)
+		a.click()
 		a.toPause()
 		return nil
 	}
@@ -371,7 +427,7 @@ func (a *outpostApp) updatePaused(in engine.Input) error {
 		choice = pauseResume
 	}
 	if choice >= 0 {
-		a.click(cueClick)
+		a.click()
 	}
 	switch choice {
 	case pauseResume:
@@ -434,7 +490,20 @@ func (a *outpostApp) Draw(canvas engine.Canvas) {
 		face.Draw(canvas, "OUTPOST", 97, 36, 3, white)
 		face.Draw(canvas, "Commands, replays, and saves", 76, 66, 1, skirmishAlarmQuiet)
 		a.menu.Draw(canvas, face)
-		face.Draw(canvas, "Arrows and Enter, a gamepad, or touch", 49, 150, 1, skirmishAlarmQuiet)
+		face.Draw(
+			canvas,
+			"Arrows and Enter, a gamepad, or touch",
+			49,
+			float32(92+16*len(a.menu.Items)+10),
+			1,
+			skirmishAlarmQuiet,
+		)
+	case stateLobby:
+		a.drawLobby(canvas, face)
+	case stateOnline:
+		a.drawOnline(canvas, face)
+	case stateOnlineEnded:
+		a.drawOnlineEnded(canvas, face)
 	case statePlaying:
 		a.recLabel.Draw(canvas, face)
 		if a.session.controls.touchUI {

@@ -51,6 +51,8 @@ type outpostWorld struct {
 	// volume scales every sound. It is a setting of the player, not of the match, so
 	// it is not recorded, hashed, or saved.
 	volume float32
+	// online is where the relay is, for online play. It is empty when not configured.
+	online onlineConfig
 }
 
 // loadOutpost reads the outpost level and computes the content check from its bytes.
@@ -106,7 +108,10 @@ func newOutpost(
 		return nil, platform.Config{}, err
 	}
 	config.Sounds = sounds
-	return &outpostWorld{board: board, meta: meta, face: face, store: store, volume: 1}, config, nil
+	return &outpostWorld{
+		board: board, meta: meta, face: face, store: store, volume: 1,
+		online: cleanOnlineConfig(onlineConfigFromEnvironment()),
+	}, config, nil
 }
 
 // newSession returns a match scene that starts from the level, or from the

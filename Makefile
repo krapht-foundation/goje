@@ -51,7 +51,7 @@ test: ## Run headless Go tests
 
 test-wasm: ## Run the simulation tests as WebAssembly under Node
 	GOOS=js GOARCH=wasm $(GO) test -exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" \
-		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./font ./ui ./engine/replay ./engine/save ./engine ./engine/vision ./audio ./internal/sound ./cmd/playground
+		./engine/fixed ./engine/collide ./internal/collidebench ./examples/skirmish ./internal/skirmishbench ./font ./ui ./engine/replay ./engine/save ./engine ./engine/vision ./engine/lockstep ./netlink/... ./audio ./internal/sound ./cmd/playground
 
 test-race: ## Run Go tests with the native race detector
 	$(GO) test -race ./...
@@ -295,6 +295,19 @@ smoke-mixer: ## Compare the Go mixer with the Web Audio graph on the same overla
 smoke-goje-build: build-level-editor build-tile-maker ## Build and package Beacon with cmd/goje and play both outputs
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" NODE="$(NODE)" PYTHON="$(PYTHON)" scripts/smoke-goje-build.sh
 
+.PHONY: smoke-ws smoke-online benchmark-lockstep
+smoke-ws: ## Check the relay and the WebSocket subset against Chromium's own WebSocket
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-ws.mjs
+
+smoke-online: build-web ## Play the online outpost between a native host and Chromium, then inject a divergence
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs --fault
+
+benchmark-lockstep: ## Measure one lockstep tick for two players natively and as WebAssembly under Node
+	$(GO) test -run '^$$' -bench . -benchmem ./engine/lockstep
+	GOOS=js GOARCH=wasm $(GO) test -run '^$$' -bench . -benchmem \
+		-exec="$$($(GO) env GOROOT)/lib/wasm/go_js_wasm_exec" ./engine/lockstep
+
 .PHONY: benchmark-mixer
 benchmark-mixer: ## Measure mixing 16 voices into one 512-frame buffer natively and as WebAssembly under Node
 	$(GO) test -run '^$$' -bench 'MixerRender|Queue' -benchmem ./audio ./internal/sound
@@ -338,6 +351,8 @@ check-example: ## Build the reference playground from a separate module on deskt
 		cp cmd/playground/authored.go cmd/playground/yard.go cmd/playground/skirmish.go cmd/playground/goje.json "$$tmp/"; \
 		cp cmd/playground/outpost.go cmd/playground/outpost_app.go cmd/playground/outpost_session.go "$$tmp/"; \
 		cp cmd/playground/outpost_controls.go cmd/playground/outpost_sounds.go cmd/playground/inputprobe.go "$$tmp/"; \
+		cp cmd/playground/outpost_online.go cmd/playground/outpost_online_app.go "$$tmp/"; \
+		cp cmd/playground/outpost_online_config.go cmd/playground/outpost_online_config_js.go "$$tmp/"; \
 		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
 		cd "$$tmp"; export GOWORK=off; \

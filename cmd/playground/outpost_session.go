@@ -76,6 +76,36 @@ type outpostSession struct {
 	ordered   bool                    // An order was given since the last tick's sounds.
 	lastCue   [outpostCueCount]uint64 // The tick of the last voice of each cue, or zero.
 	announced outpostOutcome          // The outcome whose sound has been played.
+
+	// issuer, when set, receives every command instead of the simulation, and
+	// returns how many units took it or, when it cannot know yet, how many it
+	// names. The command's IDs alias the selection, so it must not keep them.
+	// An online match sets it; see rfcs/0017-m16-online-lockstep-play.md.
+	issuer func(skirmish.Command) int
+
+	// sync is set in an online match. It decides when a tick may run and gives it
+	// the commands of every player. owns reports which scouts the local player may
+	// select, and is nil when all of them are theirs.
+	sync outpostSync
+	owns func(id uint64) bool
+}
+
+// issue is the only way the session changes units. Single-player matches apply
+// c at once, so their traces and replays are those of direct calls.
+func (s *outpostSession) issue(c skirmish.Command) int {
+	if s.issuer != nil {
+		return s.issuer(c)
+	}
+	return s.sim.Apply(c)
+}
+
+// attack issues an attack on target by the selection.
+func (s *outpostSession) attack(target uint64) {
+	s.ordered = s.issue(skirmish.Command{
+		Kind:  skirmish.CommandOrder,
+		IDs:   s.selection,
+		Order: skirmish.Order{Kind: skirmish.Attack, Target: target},
+	}) > 0 || s.ordered
 }
 
 // outpostHUD holds the text of the HUD. The strings are rebuilt in Update when a
@@ -103,6 +133,9 @@ func (s *outpostSession) Enter() error {
 	}
 	s.scratch = make([]uint64, 0, skirmish.MaxUnits)
 	s.layoutHUD()
+	if s.sync != nil {
+		s.hud.resultHint.Text = "Esc opens the menu"
+	}
 	s.controls.layout()
 	s.prune()
 	if s.restore != nil {
@@ -126,14 +159,28 @@ func (s *outpostSession) cancelable() bool { return s.mode != modeNone || s.drag
 
 func (s *outpostSession) Update(tick engine.Tick) (engine.Transition, error) {
 	in := s.effective(tick.Input)
-	if in.Pressed.Has(engine.KeyR) {
+	if in.Pressed.Has(engine.KeyR) && s.sync == nil {
 		return engine.Restart(), nil
 	}
 	s.keys(in)
 	s.pointer(in)
 	moveCourtyardCamera(&s.camera, &s.zoomLevel, in, s.homeX, s.homeY)
+	if s.sync != nil {
+		// The camera, selection, and menus run every tick; the simulation runs only
+		// when every player's commands for the tick have arrived.
+		run, err := s.sync.before(s)
+		if err != nil || !run {
+			s.updateHUD()
+			return engine.Transition{}, err
+		}
+	}
 	if err := s.sim.Step(); err != nil {
 		return engine.Transition{}, err
+	}
+	if s.sync != nil {
+		if err := s.sync.after(s.sim.Trace()); err != nil {
+			return engine.Transition{}, err
+		}
 	}
 	s.prune()
 	s.refresh()
@@ -215,7 +262,7 @@ func (s *outpostSession) endDrag() {
 	s.scratch = s.scratch[:0]
 	if math.Hypot(d.currentX-d.startX, d.currentY-d.startY) < outpostDragMin {
 		if id, hit := s.pick(d.startX, d.startY); hit {
-			if u, ok := s.sim.Unit(id); ok && u.Alive && u.Team == skirmish.Scouts {
+			if u, ok := s.sim.Unit(id); ok && u.Alive && u.Team == skirmish.Scouts && s.mine(id) {
 				s.scratch = append(s.scratch, id)
 			}
 		}
@@ -224,7 +271,7 @@ func (s *outpostSession) endDrag() {
 		top, bottom := min(d.startY, d.currentY), max(d.startY, d.currentY)
 		for i := range s.sim.Units() {
 			u := &s.sim.Units()[i]
-			if !u.Alive || u.Team != skirmish.Scouts {
+			if !u.Alive || u.Team != skirmish.Scouts || !s.mine(u.ID) {
 				continue
 			}
 			c := u.Center()
@@ -253,6 +300,9 @@ func (s *outpostSession) endDrag() {
 }
 
 // pick returns the ID of the item under a logical point, if any.
+// mine reports whether the local player may select the scout.
+func (s *outpostSession) mine(id uint64) bool { return s.owns == nil || s.owns(id) }
+
 func (s *outpostSession) pick(x, y float64) (uint64, bool) {
 	px, py := s.camera.ToProjected(x, y)
 	return engine.PickWorld(s.items, courtyardProjection, px, py)
@@ -272,17 +322,16 @@ func (s *outpostSession) order(at engine.MousePress, kind skirmish.OrderKind) {
 	}
 	if id, hit := s.pick(at.X, at.Y); hit {
 		if u, ok := s.sim.Unit(id); ok && u.Alive && u.Team == skirmish.Guards {
-			s.ordered = s.sim.OrderGroup(
-				s.selection,
-				skirmish.Order{Kind: skirmish.Attack, Target: id},
-			) > 0 ||
-				s.ordered
+			s.attack(id)
 			return
 		}
 	}
 	if cell, ok := s.cellUnder(at.X, at.Y); ok {
-		s.ordered = s.sim.OrderGroup(s.selection, skirmish.Order{Kind: kind, Goal: cell}) > 0 ||
-			s.ordered
+		s.ordered = s.issue(skirmish.Command{
+			Kind:  skirmish.CommandOrder,
+			IDs:   s.selection,
+			Order: skirmish.Order{Kind: kind, Goal: cell},
+		}) > 0 || s.ordered
 	}
 }
 
@@ -295,8 +344,8 @@ func (s *outpostSession) toggleHold() {
 			all = false
 		}
 	}
-	for _, id := range s.selection {
-		s.sim.SetHold(id, !all)
+	if len(s.selection) > 0 {
+		s.issue(skirmish.Command{Kind: skirmish.CommandHold, IDs: s.selection, Hold: !all})
 	}
 }
 
@@ -312,11 +361,7 @@ func (s *outpostSession) focus(pointer engine.Pointer) {
 	case pointer.Inside:
 		if id, hit := s.pick(pointer.X, pointer.Y); hit {
 			if target, found := s.sim.Unit(id); found && target.Alive && target.Team == skirmish.Guards {
-				s.ordered = s.sim.OrderGroup(
-					s.selection,
-					skirmish.Order{Kind: skirmish.Attack, Target: id},
-				) > 0 ||
-					s.ordered
+				s.attack(id)
 				return
 			}
 		}
@@ -340,11 +385,7 @@ func (s *outpostSession) focus(pointer engine.Pointer) {
 		}
 	}
 	if best != 0 {
-		s.ordered = s.sim.OrderGroup(
-			s.selection,
-			skirmish.Order{Kind: skirmish.Attack, Target: best},
-		) > 0 ||
-			s.ordered
+		s.attack(best)
 	}
 }
 
