@@ -54,8 +54,18 @@ function screenshot() {
 function tap(x, y) {
   const px = Math.round(x * pointsPerPixel), py = Math.round(y * pointsPerPixel);
   if (platform === "android") execFileSync("adb", ["-s", device, "shell", "input", "tap", `${px}`, `${py}`]);
-  // A raw touch needs no accessibility hit test, which fails for a game canvas on a slow runner.
-  else execFileSync(axe, ["touch", "-x", `${px}`, "-y", `${py}`, "--down", "--up", "--udid", device]);
+  else {
+    // The simulator's accessibility translation can fail for a while after the app opens on a slow hosted runner.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        execFileSync(axe, ["touch", "-x", `${px}`, "-y", `${py}`, "--down", "--up", "--udid", device], { stdio: "pipe" });
+        return;
+      } catch (error) {
+        if (attempt === 8) throw error;
+        execFileSync("sleep", ["10"]);
+      }
+    }
+  }
 }
 
 /**
