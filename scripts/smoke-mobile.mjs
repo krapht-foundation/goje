@@ -54,7 +54,8 @@ function screenshot() {
 function tap(x, y) {
   const px = Math.round(x * pointsPerPixel), py = Math.round(y * pointsPerPixel);
   if (platform === "android") execFileSync("adb", ["-s", device, "shell", "input", "tap", `${px}`, `${py}`]);
-  else execFileSync(axe, ["tap", "-x", `${px}`, "-y", `${py}`, "--udid", device]);
+  // A raw touch needs no accessibility hit test, which fails for a game canvas on a slow runner.
+  else execFileSync(axe, ["touch", "-x", `${px}`, "-y", `${py}`, "--down", "--up", "--udid", device]);
 }
 
 /**
