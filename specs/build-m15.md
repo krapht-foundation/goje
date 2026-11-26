@@ -48,7 +48,7 @@ The page has one canvas with the ID `goje` and `tabindex="0"`, which fills the p
 
 - The bundle hash is the SHA-256 digest, in lowercase hexadecimal, of the lines that `SHA256SUMS` would hold for every other file of `DIR/web/`, sorted by name. Any change to the bundle changes `sw.js`, so the browser installs the new worker.
 - Its cache is named `goje SCOPE HASH`, where `SCOPE` is the registration scope URL. On install it fetches `./` and every other file of the directory into the cache, bypassing the HTTP cache. On activation it deletes every other cache whose name starts with `goje SCOPE `, and no other cache, so games at other paths of the same origin keep theirs.
-- It answers each GET request from the cache, ignoring the query string, and falls back to the network for anything else. It does not take over open pages: a new version is used once every page of the old one is closed.
+- It answers each GET request from the cache, ignoring the query string, and falls back to the network for anything else. It does not take over open pages: a new version is used once every page of the old one is closed. Reloading a page does not count as closing it, so a player must close every tab or window of the game before the next one opens the new version. A page that was not yet controlled by the old worker, such as the very first visit, receives the new version on its next load.
 
 `DIR/desktop/GOOS-GOARCH/`, built with cgo for the host:
 

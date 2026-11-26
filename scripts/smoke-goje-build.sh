@@ -53,7 +53,8 @@ rm "$game/run_smoke.go" "$game/run_bench.go"
   done
 )
 "$node" scripts/smoke-beacon.mjs build "$tmp/dist1/web"
-"$node" scripts/smoke-pwa.mjs "$tmp/dist1/web"
+(cd "$game" && "$goje" build -o "$tmp/next" -name beacon-next -target web)
+"$node" scripts/smoke-pwa.mjs "$tmp/dist1/web" "$tmp/next/web"
 
 release=$tmp/dist1/release
 files=(SHA256SUMS SHA256SUMS.sig update.json beacon-1.0.0-web.zip "beacon-1.0.0-$host.tar.gz")

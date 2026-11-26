@@ -27,7 +27,9 @@ The staging workflow already publishes immutable Beacon archives for each deskto
 
 ### Web update behavior
 
-Publish the web package behind HTTPS on a staging path that is not linked from the project README. Verify that the first visit installs the service worker, that a repeat visit works with the network off, and that publishing a newer version reaches a returning visitor without clearing site data. If the current service worker can keep serving an outdated build indefinitely, fix that in the [shell](../cmd/goje/shell/index.html) and extend the existing offline smoke to cover the version change. Keep the behavior consistent with the [M15 build specification](../specs/build-m15.md).
+Publish the web package behind HTTPS on a staging path that is not linked from the project README. Verify that the first visit installs the service worker, that a repeat visit works with the network off, and that publishing a newer version reaches a returning visitor without clearing site data.
+
+The version change itself is checked locally by the Beacon build smoke, which publishes a second bundle at the same origin. The [service worker](../specs/build-m15.md) does not take over open pages, so a controlled page keeps its version, even across a reload, until every tab or window has closed, and the next page then receives the new version. That is intentional, because replacing the cache under a running game could mix two builds. The [building guide](../docs/building.md) now says that reloading is not enough. The hosted check confirms that a real origin and its cache headers do not change this behavior; it does not need a fix unless it does.
 
 ### Release procedure
 
