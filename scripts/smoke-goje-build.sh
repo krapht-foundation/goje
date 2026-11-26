@@ -83,6 +83,10 @@ diff -r "$tmp/dist1/desktop/$host" "$extracted/desktop"
 if [[ $goos == darwin ]]; then
   plutil -lint "$extracted/desktop/beacon.app/Contents/Info.plist"
   test -x "$extracted/desktop/beacon.app/Contents/MacOS/beacon"
+  # A binary that demands a newer macOS than Info.plist promises refuses to start on the promised systems.
+  want=$(plutil -extract LSMinimumSystemVersion raw "$extracted/desktop/beacon.app/Contents/Info.plist")
+  minos=$(otool -l "$extracted/desktop/beacon.app/Contents/MacOS/beacon" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "minos" { print $2; exit }')
+  [[ $minos == "$want" ]] || { echo "executable requires macOS $minos, Info.plist promises $want" >&2; exit 1; }
 else
   test -x "$extracted/desktop/beacon"
   test -f "$extracted/desktop/beacon.desktop"

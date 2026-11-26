@@ -195,7 +195,10 @@ func (g *game) buildDesktop(ctx context.Context) error {
 	}
 	contents := filepath.Join(dir, g.name+".app", "Contents")
 	executable := filepath.Join(contents, "MacOS", g.name)
-	if err := g.goBuild(ctx, executable, goos, "CGO_ENABLED=1"); err != nil {
+	// Without a target, clang stamps the host's macOS version on the binary, so a build on a newer
+	// runner refuses to start on the systems that Info.plist promises. They share minMacOS.
+	err := g.goBuild(ctx, executable, goos, "CGO_ENABLED=1", "MACOSX_DEPLOYMENT_TARGET="+minMacOS)
+	if err != nil {
 		return err
 	}
 	if err := writeFiles(contents, map[string][]byte{
@@ -364,6 +367,10 @@ self.addEventListener("fetch", event => {
 });
 `
 
+// minMacOS is the oldest macOS release the desktop build supports. It is the deployment
+// target of the executable and the LSMinimumSystemVersion of its bundle.
+const minMacOS = "12.0"
+
 // infoPlist describes the bundle. Name, version, and ID are validated, so they need no escaping.
 // Apple bundle versions take only the numeric core of the version.
 func infoPlist(name, version, id string) []byte {
@@ -395,12 +402,12 @@ func infoPlist(name, version, id string) []byte {
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>12.0</string>
+	<string>%[4]s</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>
 </plist>
-`, name, core, id)
+`, name, core, id, minMacOS)
 }
 
 // icns wraps a 512 × 512 PNG: the magic, the big-endian file length, then one
