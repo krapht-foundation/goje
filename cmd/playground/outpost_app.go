@@ -33,9 +33,10 @@ const (
 	statePaused
 	stateWatching
 	stateLobby       // Connecting to the relay and waiting for the other player.
-	stateOnline      // An online match, which never pauses.
+	stateOnline      // An online match, which pauses only during recovery.
 	stateOnlineEnded // The reason an online match or lobby ended.
 	stateMatchWatch  // Watching an online command log without a connection.
+	stateLiveWatch   // Watching a live match without taking a player slot.
 )
 
 // Pause menu entries.
@@ -106,6 +107,10 @@ type outpostApp struct {
 	lobby      *onlineLobby // The connection being made, or nil.
 	osync      *onlineSync  // The gate of the online match, or nil.
 	conn       *netlink.Conn
+	live       *liveWatch
+	view       viewSender
+	viewLabel  string
+	recovery   *outpostRecovery
 	onlineMenu bool     // The menu is open over an online match.
 	endLines   []string // The lines of the end screen.
 }
@@ -146,7 +151,11 @@ func (a *outpostApp) toTitle() {
 		top, row = 76, 12
 		items = append(items, "Host co-op", "Host versus")
 		if online.room != "" {
-			items = append(items, "Join room "+online.room)
+			action := "Join room "
+			if online.watch {
+				action = "Watch room "
+			}
+			items = append(items, action+online.room)
 		}
 	}
 	a.menu = ui.Menu{
@@ -207,20 +216,30 @@ func (a *outpostApp) click() {
 }
 
 // closeOnline leaves an online match and closes its connection and lobby.
+// A viewer leaving does not end the room.
 func (a *outpostApp) closeOnline() {
 	if a.lobby != nil {
 		a.lobby.close()
 		a.lobby = nil
 	}
+	if a.recovery != nil {
+		a.recovery.close()
+		a.recovery = nil
+	}
 	if a.osync != nil {
 		a.finishMatchLog()
-		noteClose("leave the match", a.osync.lock.Leave())
+		if a.conn == nil {
+			noteClose("leave the match", a.osync.lock.Leave())
+		} else {
+			noteClose("end the room", a.conn.EndRoom())
+		}
 		a.osync = nil
 	}
 	if a.conn != nil {
 		noteClose("close the connection", a.conn.Close())
 		a.conn = nil
 	}
+	a.live, a.view, a.viewLabel = nil, viewSender{}, ""
 	a.onlineMenu = false
 }
 
@@ -398,6 +417,8 @@ func (a *outpostApp) Update(tick engine.Tick) (engine.Transition, error) {
 		err = a.updateWatching(in)
 	case stateMatchWatch:
 		a.updateMatchWatch(in)
+	case stateLiveWatch:
+		a.updateLiveWatch(in)
 	case stateLobby:
 		a.updateLobby(in)
 	case stateOnline:
@@ -428,14 +449,14 @@ func (a *outpostApp) updateTitle(in engine.Input) error {
 		a.watchMatch()
 	case titleHostCoop, titleHostVersus:
 		a.stopMatch()
-		a.lobby, a.state = startLobby(a.world.online, true), stateLobby
+		a.lobby, a.state = startLobby(a.world.online, true, false), stateLobby
 		a.lobby.setup.tactics = a.tactics
 		if choice == titleHostVersus {
 			a.lobby.setup = matchSetup{mode: matchlog.Versus}
 		}
 	case titleJoin:
 		a.stopMatch()
-		a.lobby, a.state = startLobby(a.world.online, false), stateLobby
+		a.lobby, a.state = startLobby(a.world.online, false, a.world.online.watch), stateLobby
 	}
 	return nil
 }
@@ -572,6 +593,8 @@ func (a *outpostApp) Draw(canvas engine.Canvas) {
 		face.Draw(canvas, "Esc leaves the replay", 100, 169, 1, skirmishAlarmQuiet)
 	case stateMatchWatch:
 		a.drawMatchWatch(canvas)
+	case stateLiveWatch:
+		a.drawLiveWatch(canvas, face)
 	}
 	if a.noticeLeft > 0 {
 		face.Draw(canvas, a.notice, 8, 160, 1, color.NRGBA{R: 255, G: 235, B: 87, A: 255})

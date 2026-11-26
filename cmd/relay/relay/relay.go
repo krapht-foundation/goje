@@ -37,7 +37,8 @@ const (
 // Config holds the relay's limits. A zero field takes the default given in
 // its comment.
 type Config struct {
-	// MaxRooms bounds open rooms, including rooms waiting for a guest; 256.
+	// MaxRooms bounds open rooms of both versions, including rooms waiting
+	// for a guest; 256.
 	MaxRooms int
 	// Origins is the allow-list for browser Origin headers; empty allows all.
 	Origins []string
@@ -48,8 +49,18 @@ type Config struct {
 	// Rate is each connection's sustained limit in messages per second, with
 	// bursts of up to one second's worth; 240.
 	Rate int
-	// MaxMessage is the largest message a client may send, in bytes; 2048.
+	// MaxMessage is the largest message payload a client may send, in bytes;
+	// 2048. A v2 message adds a 9-byte header to it.
 	MaxMessage int
+	// Rejoin holds a v2 player's slot for this long after its transport is
+	// lost; 30 s.
+	Rejoin time.Duration
+	// MaxPending bounds /v2/resume connections that have not yet presented
+	// their credential; 64.
+	MaxPending int
+	// ViewQueue bounds the messages waiting for a spectator; a spectator
+	// that falls this far behind is disconnected; 64.
+	ViewQueue int
 	// Logger receives room events, never message contents; slog.Default().
 	Logger *slog.Logger
 }
@@ -70,6 +81,15 @@ func (c *Config) setDefaults() {
 	if c.MaxMessage <= 0 {
 		c.MaxMessage = 2048
 	}
+	if c.Rejoin <= 0 {
+		c.Rejoin = 30 * time.Second
+	}
+	if c.MaxPending <= 0 {
+		c.MaxPending = 64
+	}
+	if c.ViewQueue <= 0 {
+		c.ViewQueue = 64
+	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
 	}
@@ -83,7 +103,12 @@ type Server struct {
 
 	mu     sync.Mutex
 	rooms  map[string]*room
-	closed bool
+	rooms2 map[string]*room2 // v2 rooms by invitation code
+	views  map[string]*room2 // v2 rooms by spectator code
+	tokens map[[tokenLen]byte]tokenRef
+	// pending counts resume connections not yet authenticated.
+	pending int
+	closed  bool
 }
 
 // room is one match's meeting point. Fields other than the atomics are
@@ -105,13 +130,21 @@ type room struct {
 // New returns a relay with cfg's limits.
 func New(cfg Config) *Server {
 	cfg.setDefaults()
-	s := &Server{cfg: cfg, mux: http.NewServeMux(), start: time.Now(), rooms: map[string]*room{}}
+	s := &Server{
+		cfg: cfg, mux: http.NewServeMux(), start: time.Now(), rooms: map[string]*room{},
+		rooms2: map[string]*room2{}, views: map[string]*room2{}, tokens: map[[tokenLen]byte]tokenRef{},
+	}
 	s.mux.HandleFunc("GET /new", s.handleNew)
 	s.mux.HandleFunc("GET /join", s.handleJoin)
+	s.mux.HandleFunc("GET /v2/new", s.handleNew2)
+	s.mux.HandleFunc("GET /v2/join", s.handleJoin2)
+	s.mux.HandleFunc("GET /v2/watch", s.handleWatch)
+	s.mux.HandleFunc("GET /v2/resume", s.handleResume)
 	return s
 }
 
-// ServeHTTP routes GET /new and GET /join?room=CODE.
+// ServeHTTP routes GET /new, GET /join?room=CODE, and the v2 routes of
+// specs/relay-m18.md.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
@@ -126,9 +159,16 @@ func (s *Server) Close() {
 	for _, rm := range s.rooms {
 		rooms = append(rooms, rm)
 	}
+	rooms2 := make([]*room2, 0, len(s.rooms2))
+	for _, rm := range s.rooms2 {
+		rooms2 = append(rooms2, rm)
+	}
 	s.mu.Unlock()
 	for _, rm := range rooms {
 		s.closeRoom(rm, -1, "shutdown")
+	}
+	for _, rm := range rooms2 {
+		s.closeRoom2(rm, "shutdown")
 	}
 }
 
@@ -139,7 +179,7 @@ func (s *Server) wsOptions() ws.Options {
 
 func (s *Server) handleNew(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	if s.closed || len(s.rooms) >= s.cfg.MaxRooms {
+	if s.closed || len(s.rooms)+len(s.rooms2) >= s.cfg.MaxRooms {
 		s.mu.Unlock()
 		http.Error(w, "the relay is full", http.StatusServiceUnavailable)
 		return
@@ -220,18 +260,20 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	// The host's messages are forwarded only once paired is set, so the guest
-	// receives its Welcome first and the host learns of the guest before any
-	// guest message.
+	// receives its Welcome first. paired is set before PeerJoined goes out,
+	// or a host that answers PeerJoined at once could have its first message
+	// dropped as sent before pairing. The guest's messages are read only
+	// after PeerJoined is written, so the host learns of the guest first.
 	if err := c.WriteMessage(append([]byte{msgWelcome, 1}, code...)); err != nil {
 		s.closeRoom(rm, -1, "welcome failed")
 		return
 	}
+	rm.last.Store(int64(time.Since(s.start)))
+	rm.paired.Store(true)
 	if err := rm.conns[0].WriteMessage([]byte{msgPeerJoined}); err != nil {
 		s.closeRoom(rm, -1, "host unreachable")
 		return
 	}
-	rm.last.Store(int64(time.Since(s.start)))
-	rm.paired.Store(true)
 	s.mu.Lock()
 	if !rm.closed {
 		rm.timer.Reset(s.cfg.Idle)
@@ -342,11 +384,13 @@ func (s *Server) newCodeLocked() (string, error) {
 		for i := range b {
 			b[i] = codeAlphabet[randomIndex(len(codeAlphabet))]
 		}
-		if code := string(b[:]); s.rooms[code] == nil {
+		// v1 codes, v2 invitation codes, and v2 spectator codes never collide.
+		if code := string(b[:]); s.rooms[code] == nil && s.rooms2[code] == nil && s.views[code] == nil {
 			return code, nil
 		}
 	}
-	return "", fmt.Errorf("relay: no unused room code after 8 attempts with %d rooms", len(s.rooms))
+	return "", fmt.Errorf("relay: no unused room code after 8 attempts with %d rooms",
+		len(s.rooms)+len(s.rooms2))
 }
 
 // randomIndex returns a uniform random index below n, which is at most 256.

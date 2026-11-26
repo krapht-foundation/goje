@@ -28,8 +28,6 @@ If the package directory has a `goje.json`, the command checks it as `projectche
 
 The web build is an installable web app. Served over HTTPS, or from `localhost`, the page registers the service worker `sw.js`, which stores every file of the game on the first visit, so the game starts again without a network. Players can install it from the browser's menu, or add it to the home screen on a phone, to start it full-screen like an app. When you upload a new build, browsers fetch the new files in the background and use them once the old version's pages are closed. The service worker caches only its own directory, so several games can share a site under different paths. The icon is also offered as a maskable icon, which Android crops to a circle or other shape, so keep a custom icon's subject inside the central 80% circle, as the default tomato does.
 
-To publish to Google Play or the App Store, wrap the web app with a tool such as [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap), which makes an Android Trusted Web Activity from the URL of your deployed `manifest.webmanifest`, or [Capacitor](https://capacitorjs.com/), which packages the files of `dist/web/` into Android and iOS projects. Goje does not generate or test those projects.
-
 `dist/desktop/darwin-arm64/NAME.app` on a Mac is an application bundle. Players drag it into Applications and open it. It is not signed or notarized, so macOS refuses to open it the first time. Players then open **System Settings → Privacy & Security** and choose **Open Anyway**, once. If the app came from a downloaded archive, they can instead run `xattr -dr com.apple.quarantine NAME.app` in Terminal.
 
 `dist/desktop/linux-amd64/` on Linux holds the executable `NAME`, a launcher `NAME.desktop`, and the icon `NAME.png`. Players can run `./NAME` directly. To add it to the desktop's application menu, they copy the executable into a directory on their `PATH`, such as `~/.local/bin`, the launcher into `~/.local/share/applications`, and the icon into `~/.local/share/icons/hicolor/512x512/apps`. The executable needs OpenGL 3.3 and the X11 libraries that GLFW uses.
@@ -114,8 +112,10 @@ func checkForUpdate(ctx context.Context, current string) (*update.Manifest, erro
 
 `update.Verify` accepts only a manifest that your key signed, byte for byte, and `update.Newer` refuses the same or an older version, so a replayed old manifest is not an update. To fetch an archive, call `update.Download` with its entry from the manifest; it stops at the signed size and fails if the digest differs, and you discard whatever it wrote if it fails. The [update specification](../specs/update-m17.md) states every rule. Goje does not install the download: show the player where it is, or open your release page.
 
+For a hosted channel, [`goje manifest` and `goje update`](../specs/update-m18.md) combine archives from multiple build hosts, sign the final manifest, and check or download one newer build over HTTPS. The check uses a key you obtained independently of the server. The Beacon staging workflow is opt-in; configure and authorize it before using its published URLs.
+
 ## Limits
 
 - The desktop build is for the system you run the command on. It needs cgo and works on macOS, Linux, and Windows; elsewhere use `-target web`. Cross-compiling the desktop build is not supported.
-- Signing uses your own Ed25519 key. There is no Authenticode, Apple notarization, store signing, installer, automatic installation, or hosted update channel.
-- There are no native Android or iOS builds. Phones and tablets use the installable web app, which you can wrap as described above.
+- Goje does not generate native Android or iOS projects. Players on phones use the installable web build.
+- Goje does not provide Authenticode, macOS notarization, an installer, or automatic installation of a verified update.

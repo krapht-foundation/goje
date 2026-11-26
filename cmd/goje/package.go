@@ -204,17 +204,11 @@ func writeChecksums(
 ) error {
 	files := make([]update.File, 0, len(archives))
 	for _, archive := range archives {
-		hash := sha256.New()
-		if err := copyFile(hash, archive); err != nil {
+		file, err := describe(archive)
+		if err != nil {
 			return err
 		}
-		info, err := os.Stat(archive)
-		if err != nil {
-			return fmt.Errorf("stat %s: %w", archive, err)
-		}
-		files = append(files, update.File{
-			Name: filepath.Base(archive), Size: info.Size(), SHA256: hex.EncodeToString(hash.Sum(nil)),
-		})
+		files = append(files, file)
 	}
 	slices.SortFunc(files, func(a, b update.File) int { return strings.Compare(a.Name, b.Name) })
 	var sums []byte
@@ -230,4 +224,19 @@ func writeChecksums(
 		out["SHA256SUMS.sig"], out["update.json"] = ed25519.Sign(key, sums), manifest
 	}
 	return writeFiles(release, out)
+}
+
+// describe returns the manifest entry of an archive: its base name, size, and digest.
+func describe(archive string) (update.File, error) {
+	hash := sha256.New()
+	if err := copyFile(hash, archive); err != nil {
+		return update.File{}, err
+	}
+	info, err := os.Stat(archive)
+	if err != nil {
+		return update.File{}, fmt.Errorf("stat %s: %w", archive, err)
+	}
+	return update.File{
+		Name: filepath.Base(archive), Size: info.Size(), SHA256: hex.EncodeToString(hash.Sum(nil)),
+	}, nil
 }

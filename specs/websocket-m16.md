@@ -39,13 +39,15 @@ A connection accepts exactly these frames:
 
 Every other frame is a protocol error. The reader checks, in this order and before it reads the payload or allocates anything: the three reserved bits are zero; the opcode is binary, close, ping, or pong, so text (1), continuation (0), and unknown opcodes are rejected; FIN is set, so fragmented messages are rejected; frames to a server are masked and frames to a client are not; the length is in its shortest form (16-bit lengths are at least 126, 64-bit lengths are at least 65536 and have the top bit clear); a control frame is at most 125 bytes and a close frame is not one byte; and a data frame is not longer than the limit.
 
-`ReadMessage(buf)` returns the payload of the next binary frame, read into `buf` when its capacity suffices and into a new slice of the payload's length otherwise. While it waits, it answers each ping with a pong carrying the same payload and skips pongs. It answers a close frame with a close frame carrying the same status, or 1000 when the payload is empty, closes the connection, and returns an error wrapping `ws.ErrClosed`.
+`ReadMessage(buf)` returns the payload of the next binary frame, read into `buf` when its capacity suffices and into a new slice of the payload's length otherwise. While it waits, it answers each ping with a pong carrying the same payload and skips pongs. It answers a close frame with a close frame carrying the same status, or 1000 when the payload is empty, closes the connection, and returns a `ws.CloseError` that matches `ws.ErrClosed` and exposes the received code.
 
 Any read error closes the connection, after a courtesy close frame with status 1009 for a frame over the limit, 1002 for any other protocol error, and 1001 for a timeout or transport error. A connection is not usable after a read error, because the error may have struck in the middle of a frame.
 
 `WriteMessage(msg)` sends one binary frame with the shortest length form and does not retain `msg`. A client masks each frame with a fresh key from `crypto/rand`. `Options.Limit` does not limit writes: the relay writes messages one byte longer than it accepts.
 
 `Close` sends a close frame with status 1000 and closes the connection without waiting for the answer. It never waits behind a blocked write: when another goroutine is writing, it skips the close frame and closes the connection, which ends that write. The close frame itself has a one-second deadline.
+
+`CloseWith(code)` uses the same deadline and sends the specified code. The [v2 relay](relay-m18.md) uses the code to distinguish a deliberate leave from transport loss.
 
 ### Deadlines and concurrency
 

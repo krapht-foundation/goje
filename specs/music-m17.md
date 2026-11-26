@@ -56,7 +56,7 @@ The same score gives the same samples on every host Goje supports; the computati
 
 ## Requesting music
 
-- `platform.Config.Music` holds up to 16 prepared tracks, usually from `RenderScore`, identified by zero-based index. A game with only music and no sounds still gets an audio host.
+- `platform.Config.Music` holds up to 16 prepared tracks from `RenderScore` or [`DecodeFLAC`](music-flac-m18.md), identified by zero-based index. A game with only music and no sounds still gets an audio host.
 - `Tick.PlayMusic(track, gain, fadeMS)`, `Tick.StopMusic(fadeMS)`, and `Tick.SetMusicGain(gain, fadeMS)` forward to the output when it implements `engine.MusicOutput`, and do nothing otherwise. The host's output always implements it. `engine.SoundOutput` is unchanged.
 - Gain is linear, 0 to 1, clamped with NaN as 0. Fades are milliseconds, clamped to 0 through 10,000 (`audio.MaxFadeMS`).
 - Music is output, like sound: replays and simulation never depend on it.

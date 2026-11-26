@@ -37,7 +37,9 @@ Mute and volume belong to the game. Multiply the gain you pass by your volume se
 
 ## Play music
 
-A track is a loop rendered from a score: a small JSON file of a tempo, a loop length in sixteenth-note steps, and up to four channels of notes. Write one in the Sound Maker's Music panel, or by hand following the [music specification](../specs/music-m17.md), and render it once at startup. Pass the tracks, at most 16, in `platform.Config.Music`; the index is the track number.
+A music track is a prepared mono 48 kHz clip that the host loops. You can render a score at startup as shown below, or load a mono 48 kHz, 16-bit FLAC with `audio.DecodeFLAC`. FLAC saves space in the bundle; after decode it uses the same memory and playback path as a score. The [FLAC specification](../specs/music-flac-m18.md) gives the limits and the Beacon conversion recipe. Pass at most 16 tracks in `platform.Config.Music`; the index is the track number.
+
+Write a score in the Sound Maker's Music panel, or by hand following the [score specification](../specs/music-m17.md):
 
 ```go
 //go:embed theme.json

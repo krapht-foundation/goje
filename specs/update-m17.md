@@ -44,5 +44,5 @@ One key can sign several games, so the caller checks the returned name against i
 
 - There is no expiry or timestamp, so a client offline from new releases cannot tell that it was shown an old manifest; it only refuses to treat it as newer.
 - There is no key rotation or revocation. A lost key means a new key embedded in a new build.
-- Goje hosts no update channel and installs nothing. The game fetches `update.json` from where the developer publishes it, and decides what to do with a verified download.
-- Authenticode, Apple notarization, and store signing are not done.
+- This format does not choose a host or install a download. The [M18 hosted channel](update-m18.md) builds on the same manifest wire format.
+- Ed25519 signatures do not replace Authenticode or macOS notarization.

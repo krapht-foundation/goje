@@ -39,6 +39,7 @@ type matchWatch struct {
 	reader matchlog.Reader
 	cmds   matchCommands
 	ticks  int
+	base   int
 }
 
 func (m *matchWatch) done() bool { return m.reader.Tick() == m.ticks }
@@ -49,7 +50,7 @@ func (m *matchWatch) before(s *outpostSession) (bool, error) {
 		return false, nil
 	}
 	if err := m.cmds.apply(s, payloads); err != nil {
-		return false, fmt.Errorf("tick %d: %w", m.reader.Tick(), err)
+		return false, fmt.Errorf("tick %d: %w", m.base+m.reader.Tick(), err)
 	}
 	return true, nil
 }
@@ -57,7 +58,7 @@ func (m *matchWatch) before(s *outpostSession) (bool, error) {
 func (m *matchWatch) after(hash uint64) error {
 	if want, ok := m.reader.Checkpoint(); ok && hash != want {
 		return &replay.DivergenceError{
-			Tick:   m.reader.Tick(),
+			Tick:   m.base + m.reader.Tick(),
 			Detail: fmt.Sprintf("match log has %016x, playback has %016x", want, hash),
 		}
 	}

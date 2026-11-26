@@ -20,6 +20,8 @@ import (
 const usageText = `usage: goje build|package [-o DIR] [-name NAME] [-version V] [-id BUNDLE_ID]
 	[-tags TAGS] [-icon PNG] [-target web|desktop|all] [-sign KEYFILE] [PACKAGE]
        goje keygen [-o PREFIX]
+       goje manifest -name NAME -version V -sign KEYFILE -pub PUBFILE [-platforms LIST] [-o FILE] ARCHIVE...
+       goje update -manifest URL -artifacts URL_PATTERN -key PUBFILE -name NAME -current V [-file NAME -o DIR]
 `
 
 var (
@@ -55,8 +57,15 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, log io.Writer) error {
-	if len(args) > 0 && args[0] == "keygen" {
-		return keygen(args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "keygen":
+			return keygen(args[1:])
+		case "manifest":
+			return manifest(args[1:])
+		case "update":
+			return checkUpdate(ctx, args[1:], log)
+		}
 	}
 	opts, err := parse(args, runtime.GOOS, log)
 	if err != nil {
@@ -92,7 +101,9 @@ func run(ctx context.Context, args []string, log io.Writer) error {
 func parse(args []string, goos string, log io.Writer) (options, error) {
 	if len(args) == 0 || (args[0] != "build" && args[0] != "package") {
 		return options{}, fmt.Errorf(
-			"%w: the first argument must be build, package, or keygen", errUsage)
+			"%w: the first argument must be build, package, keygen, manifest, or update",
+			errUsage,
+		)
 	}
 	opts := options{command: args[0]}
 	set := flag.NewFlagSet("goje "+args[0], flag.ContinueOnError)

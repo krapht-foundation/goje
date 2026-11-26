@@ -51,7 +51,8 @@ func injectFault() {
 type onlineHostSmoke struct {
 	app    *outpostApp
 	versus bool
-	n      int // Ticks since the match started.
+	n      int // Updates since starting from checkpoint zero.
+	epoch  uint64
 	menu   []engine.Input
 	cancel context.CancelFunc
 	hosted bool // Host was chosen; the title after that is the way to the log.
@@ -115,10 +116,21 @@ func (k *onlineHostSmoke) input() engine.Input {
 			k.fail(errors.New("the last online match did not play: " + app.notice))
 		}
 	case stateOnline:
+		if app.recovery != nil {
+			break
+		}
+		if epoch := app.osync.link.epoch; epoch != k.epoch {
+			k.epoch = epoch
+			if app.osync.base == 0 {
+				k.n = 0 // The first move must be sent again after a rewind to zero.
+			}
+		}
 		k.track(app.session)
 		n := k.n
 		k.n++
-		tick := app.osync.lock.Tick()
+		tick := uint64(
+			app.osync.base,
+		) + app.osync.lock.Tick() // #nosec G115 -- checkpoint is nonnegative.
 		switch {
 		case n == 0:
 			return engine.Input{
@@ -169,7 +181,7 @@ func (k *onlineHostSmoke) input() engine.Input {
 			k.finished = true
 			k.cancel()
 		}
-	case statePlaying, statePaused, stateWatching, stateLobby:
+	case statePlaying, statePaused, stateWatching, stateLobby, stateLiveWatch:
 	}
 	return engine.Input{}
 }

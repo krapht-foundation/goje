@@ -11,6 +11,8 @@
  * commands the scouts while the guest commands the guards; unless a team wins first, the host leaves
  * through the menu at tick 720. Each side then watches the match log from its title menu, and the
  * replay must verify every tick that side recorded; the guest also switches the replay's fog with Tab.
+ * With `--live`, join from a second browser page, cut each player transport, and verify that the
+ * spectator's history still matches later checkpoints, accepts a fog switch, and can leave.
  * The WebAssembly build must exist in .build/web (make build-web). The protocol is in
  * specs/lockstep-m16.md.
  */
@@ -18,7 +20,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +31,8 @@ import { servePlayground } from "./playground-server.mjs";
 
 const fault = process.argv.includes("--fault");
 const versus = process.argv.includes("--versus");
+const live = process.argv.includes("--live");
+assert.ok(!live || versus, "--live requires --versus");
 assert.ok(!(fault && versus), "--fault and --versus are separate runs");
 const minimumCheckpoints = 10;
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -47,6 +51,41 @@ function freePort() {
       probe.close(() => resolve(port));
     });
   });
+}
+
+/**
+ * Give one player its own loopback TCP route so the smoke can break its connection without
+ * changing Outpost's state or affecting the other player or watcher.
+ * @param {number} target - Relay port.
+ * @returns {Promise<{address: string, cut: () => void, close: () => Promise<void>}>} The route.
+ */
+async function playerRoute(target) {
+  const clients = new Set();
+  const proxy = createServer(client => {
+    const upstream = createConnection(target, "127.0.0.1");
+    clients.add(client);
+    client.on("error", () => client.destroy());
+    upstream.on("error", () => upstream.destroy());
+    client.on("close", () => { clients.delete(client); upstream.destroy(); });
+    upstream.on("close", () => client.destroy());
+    client.pipe(upstream).pipe(client);
+  });
+  await new Promise((resolve, reject) => {
+    proxy.once("error", reject);
+    proxy.listen(0, "127.0.0.1", resolve);
+  });
+  const cut = () => {
+    assert.equal(clients.size, 1, "The player did not have one transport to cut");
+    for (const client of clients) client.destroy();
+  };
+  return {
+    address: `ws://127.0.0.1:${proxy.address().port}`,
+    cut,
+    close: () => new Promise(resolve => {
+      for (const client of clients) client.destroy();
+      proxy.close(resolve);
+    }),
+  };
 }
 
 /**
@@ -113,6 +152,7 @@ const directory = mkdtempSync(join(tmpdir(), "goje-online-"));
 /** @type {import("node:child_process").ChildProcess[]} */
 const children = [];
 let server, browser, hostLines = [], guestOutput = [];
+const routes = [];
 try {
   const relayBinary = join(directory, "relay"), hostBinary = join(directory, "host");
   execFileSync(go, ["build", "-o", relayBinary, "./cmd/relay"], { cwd: root, stdio: "inherit" });
@@ -126,7 +166,11 @@ try {
   children.push(relay);
   await watch(relay).waitFor(/relay listening/, 10_000);
 
-  const environment = { ...process.env, GOJE_RELAY: relayAddress };
+  if (live) {
+    routes.push(await playerRoute(port));
+    routes.push(await playerRoute(port));
+  }
+  const environment = { ...process.env, GOJE_RELAY: routes[0]?.address ?? relayAddress };
   if (fault) environment.GOJE_ONLINE_FAULT = "100";
   if (versus) environment.GOJE_ONLINE_VERSUS = "1";
   const host = spawn(hostBinary, ["--online-host"], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
@@ -143,7 +187,8 @@ try {
   const errors = [];
   page.on("console", message => guestLines.push(message.text()));
   page.on("pageerror", error => errors.push(error.message));
-  const url = `http://127.0.0.1:${server.address().port}/?fixture=outpost&relay=${encodeURIComponent(relayAddress)}&room=${code}`;
+  const base = `http://127.0.0.1:${server.address().port}/?fixture=outpost`;
+  const url = `${base}&relay=${encodeURIComponent(routes[1]?.address ?? relayAddress)}&room=${code}`;
   await page.goto(url, { timeout: 15_000 });
   const canvas = page.locator("#goje");
   await canvas.waitFor();
@@ -193,6 +238,12 @@ try {
   const mode = versus ? 1 : 0;
   await guestLog(new RegExp(`Online match started player=1 mode=${mode}\\b`), 20_000);
   await hostLog.waitFor(new RegExp(`Online match started player=0 mode=${mode}\\b`), 10_000);
+  if (live) {
+    assert.equal(checkpoints(hostLines).size, 0, "Early cut missed the first checkpoint");
+    routes[0].cut();
+    await hostLog.waitFor(/Online match rejoined player=0 tick=0 epoch=2\b/, 25_000);
+    await guestLog(/Online match rejoined player=1 tick=0 epoch=2\b/, 25_000);
+  }
 
   if (fault) {
     await guestLog(/Online match ended/, 30_000);
@@ -214,6 +265,58 @@ try {
     const [middleX, middleY] = await at(Math.floor(16 * (goalX - goalY) + 144), Math.floor(8 * (goalX + goalY) + 20));
     await page.mouse.click(middleX, middleY, { button: "right" });
     const won = /Online match completed result=(\w+) tick=(\d+)/, ended = /Online match ended reason=(.*)/;
+    if (live) {
+      const [, viewCode] = await hostLog.waitFor(/Online spectator invitation code=([A-Z2-9]{6})/, 2_000);
+      assert.notEqual(viewCode, code);
+      await guestLog(/Online sync tick=120 /, 20_000);
+      const observer = await (await browser.newContext({ viewport: { width: 640, height: 400 } })).newPage();
+      const viewed = new Map();
+      const viewLines = [];
+      observer.on("console", message => {
+        const line = message.text();
+        viewLines.push(line);
+        const checkpoint = /Live view verified tick=(\d+) hash=([0-9a-f]+)/.exec(line);
+        if (checkpoint) viewed.set(Number(checkpoint[1]), checkpoint[2]);
+      });
+      observer.on("pageerror", error => errors.push(error.message));
+      await observer.goto(`${base}&relay=${encodeURIComponent(relayAddress)}&watch=${viewCode}`, { timeout: 15_000 });
+      const viewCanvas = observer.locator("#goje");
+      await viewCanvas.waitFor();
+      const viewBox = await viewCanvas.boundingBox();
+      await sleep(850);
+      await observer.mouse.click(viewBox.x + viewBox.width / 2, viewBox.y + viewBox.height * (76 + 12 * 7 + 6) / 200);
+      /** @param {() => boolean} ready - Whether the observer reached the expected checkpoint/state. */
+      const waiting = async ready => {
+        const deadline = Date.now() + 18_000;
+        while (!ready()) {
+          assert.ok(Date.now() < deadline, `Spectator did not make progress:\n${viewLines.slice(-12).join("\n")}`);
+          assert.deepEqual(errors, [], "A player or the spectator raised an error");
+          await sleep(50);
+        }
+      };
+      await waiting(() => [...viewed.keys()].some(tick => tick >= 120));
+      await observer.keyboard.press("Tab");
+      await waiting(() => viewLines.some(line => /Live view fog team=/.test(line)));
+
+      for (const [slot, route] of routes.entries()) {
+        route.cut();
+        const epoch = slot + 3;
+        const [, hostTick] = await hostLog.waitFor(new RegExp(`Online match rejoined player=0 tick=(\\d+) epoch=${epoch}\\b`), 25_000);
+        const [, guestTick] = await guestLog(new RegExp(`Online match rejoined player=1 tick=(\\d+) epoch=${epoch}\\b`), 25_000);
+        assert.equal(hostTick, guestTick, "Players rebuilt different checkpoints");
+        const next = Number(hostTick) + 120;
+        const pattern = new RegExp(`Online sync tick=${next} hash=([0-9a-f]+)`);
+        const [, hash] = await guestLog(pattern, 25_000);
+        const [, hostHash] = await hostLog.waitFor(pattern, 25_000);
+        assert.equal(hash, hostHash);
+        await waiting(() => viewed.has(next));
+        assert.equal(viewed.get(next), hash, `Spectator diverged after rejoin in epoch ${epoch}`);
+      }
+      await observer.keyboard.press("Escape");
+      await observer.close();
+      console.log("Live Outpost smoke passed: both players rejoined before the first checkpoint; a spectator " +
+        "caught up, switched fog, and verified a later shared checkpoint after a cut to each player.");
+    }
     const finished = Date.now() + 60_000;
     while (Date.now() < finished && !guestLines.some(line => won.test(line))) {
       if (versus ? guestLines.some(line => ended.test(line)) : checkpoints(guestLines).size >= 14) break;
@@ -286,6 +389,7 @@ try {
 } finally {
   await browser?.close();
   await new Promise(resolve => server ? server.close(resolve) : resolve());
+  await Promise.all(routes.map(route => route.close()));
   for (const child of children) child.kill();
   rmSync(directory, { recursive: true, force: true });
 }

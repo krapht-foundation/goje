@@ -40,6 +40,10 @@ func run() error {
 		"close a room not joined within this time")
 	flag.IntVar(&cfg.Rate, "rate", 240, "messages per second allowed on each connection")
 	flag.IntVar(&cfg.MaxMessage, "max-message", 2048, "largest client message in bytes")
+	flag.DurationVar(&cfg.Rejoin, "rejoin", 30*time.Second,
+		"hold a v2 player's slot this long after its connection is lost")
+	flag.IntVar(&cfg.MaxPending, "max-pending", 64, "most v2 resumes waiting to authenticate")
+	flag.IntVar(&cfg.ViewQueue, "view-queue", 64, "messages a spectator may fall behind")
 	flag.Parse()
 	cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 

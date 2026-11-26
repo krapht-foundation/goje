@@ -274,7 +274,7 @@ smoke-beacon: build-level-editor build-tile-maker ## Author and play an independ
 			cmp "sprite/testdata/$$asset" "examples/beacon/assets/$$asset"; \
 		done; \
 		cp examples/beacon/assets/tomato.png examples/beacon/assets/tomato.json "$$tmp/assets/"; \
-		cp examples/beacon/assets/toggle.wav "$$tmp/assets/"; \
+		cp examples/beacon/assets/toggle.wav examples/beacon/assets/music.flac "$$tmp/assets/"; \
 		$(NODE) scripts/smoke-beacon.mjs author "$$tmp/assets"; \
 		$(GO) run ./cmd/projectcheck "$$tmp/assets"; \
 		go_version=$$($(GO) list -m -f '{{.GoVersion}}'); \
@@ -319,10 +319,10 @@ smoke-goje-build: build-level-editor build-tile-maker ## Build and package Beaco
 smoke-ws: ## Check the relay and the WebSocket subset against Chromium's own WebSocket
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-ws.mjs
 
-smoke-online: build-web ## Play co-op and versus from native and Chromium hosts, verify replays, and inject a divergence
+smoke-online: build-web ## Play co-op and versus, inject a divergence, and verify live watch, rejoin, and replays
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs
 	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs --fault
-	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs --versus
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_CACHE)" GO="$(GO)" $(NODE) scripts/smoke-online.mjs --versus --live
 
 benchmark-lockstep: ## Measure one lockstep tick for two players natively and as WebAssembly under Node
 	$(GO) test -run '^$$' -bench . -benchmem ./engine/lockstep
@@ -373,6 +373,7 @@ check-example: ## Build the reference playground from a separate module on deskt
 		cp cmd/playground/outpost.go cmd/playground/outpost_app.go cmd/playground/outpost_session.go "$$tmp/"; \
 		cp cmd/playground/outpost_controls.go cmd/playground/outpost_sounds.go cmd/playground/inputprobe.go "$$tmp/"; \
 		cp cmd/playground/outpost_online.go cmd/playground/outpost_online_app.go cmd/playground/outpost_match_watch.go "$$tmp/"; \
+		cp cmd/playground/outpost_live_watch.go cmd/playground/outpost_online_proof.go cmd/playground/outpost_rejoin.go "$$tmp/"; \
 		cp cmd/playground/outpost_online_config.go cmd/playground/outpost_online_config_js.go "$$tmp/"; \
 		cp cmd/playground/outpost_music.json "$$tmp/"; \
 		cp -R cmd/playground/levels cmd/playground/art cmd/playground/sounds "$$tmp/"; \

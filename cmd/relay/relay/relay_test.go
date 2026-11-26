@@ -196,12 +196,54 @@ func TestForwarding(t *testing.T) {
 
 func TestHostMessagesBeforePairingAreDropped(t *testing.T) {
 	r := start(t, Config{})
-	h, code := host(t, r)
-	send(t, h, []byte("early"))
+	ctx, cancel := context.WithTimeout(t.Context(), clientOpts.ReadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.Replace(r.url, "ws:", "http:", 1)+"/new", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	h, ok := resp.Body.(io.ReadWriteCloser)
+	if resp.StatusCode != http.StatusSwitchingProtocols || !ok {
+		t.Fatalf("host upgrade: %s", resp.Status)
+	}
+	stop := context.AfterFunc(ctx, func() { _ = h.Close() })
+	defer stop()
+	recv := func(want string) {
+		t.Helper()
+		buf := make([]byte, len(want))
+		if _, err := io.ReadFull(h, buf); err != nil || string(buf) != want {
+			t.Fatalf("host got % x, want % x: %v", buf, want, err)
+		}
+	}
+	write := func(frame string) {
+		t.Helper()
+		if _, err := io.WriteString(h, frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recv("\x82\x08\x01\x00")
+	var room [6]byte
+	if _, err := io.ReadFull(h, room[:]); err != nil {
+		t.Fatal(err)
+	}
+	code := string(room[:])
+	// Pong proves the relay processed the previous data frame before the join.
+	write("\x82\x85\x00\x00\x00\x00early\x89\x80\x00\x00\x00\x00")
+	recv("\x8a\x00")
 	g := dial(t, r.url+"/join?room="+strings.ToLower(code))
 	read(t, g)
-	read(t, h)
-	send(t, h, []byte("late"))
+	recv("\x82\x01\x02")
+	write("\x82\x84\x00\x00\x00\x00late")
 	if m := read(t, g); string(m) != "\x04late" {
 		t.Fatalf("guest got %q", m)
 	}

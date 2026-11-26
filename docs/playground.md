@@ -53,9 +53,15 @@ Start a relay with `go run ./cmd/relay -addr 127.0.0.1:8089`. Start the host wit
 
 Orders take effect a tenth of a second after you give them. **Escape** opens a local menu to change the sound or leave, but does not pause the remote player. After the match, choose **Watch last online match** from the title menu on either machine. Use the camera controls freely; **Tab** or **Fog** switches the viewing team. Watching does not need a relay.
 
+### Watch live or rejoin
+
+The host sees a separate **Watch code** in the lobby and during play. A browser spectator opens the same Outpost URL with `watch=CODE` in place of `room=CODE`. A desktop spectator sets `GOJE_WATCH=CODE` instead of `GOJE_ROOM`. Choose **Watch room CODE** to occupy the one spectator seat. The view catches up to the last checkpoint both players verified, and can show either team's fog. It cannot give orders. **Tab** or **Fog** switches teams; **Escape** leaves without stopping the match.
+
+If a player briefly loses the connection, play freezes while the game automatically tries to rejoin. Keep the window or tab open. When both players are back, they resume at the last checkpoint both verified and discard later orders. Reloading loses the in-memory credential, so that player cannot rejoin before the reservation expires. A deliberate leave ends play immediately. The [live play specification](../specs/outpost-m18.md) describes the time limits and what is saved.
+
 ## Use the playground in your game
 
-The [Beacon example](../examples/beacon/game.go) is a small, top-down 2D game built on the public `project`, `level`, `engine`, `platform`, and `sprite` packages. It owns its layout, rendering, and input rules, and it does not import the reference courtyard. Try the included project with `go run ./examples/beacon`.
+The [Beacon example](../specs/beacon-m18.md) is a small top-down game built with Goje's public packages. It owns its level, rendering, and input rules; it does not import the courtyard. Run `go run ./examples/beacon` and light all three beacons in ten seconds. The clock starts on your first action.
 
 To start a separate module, run these commands from the Goje checkout:
 
@@ -74,9 +80,9 @@ go mod tidy
 go run .
 ```
 
-The local `replace` selects the unreleased Goje revision. Use a published version without `replace` once one is available. Click the beacon or press **Space** to toggle it. Use the arrow keys or **WASD** to move the tomato in the lane below the board, and press **R** to reset both. The game validates the placement and loads the atlas before opening a window. Reset recreates only scene state.
+The local `replace` selects the unreleased Goje revision. Use a published version without `replace` once one is available. Tap or click a beacon to light it. With a keyboard, move the tomato with the arrow keys or **WASD**, then press **Space** to light the beacons above it. After a win or timeout, tap or press **R** to restart. The game validates the board and loads its art and FLAC music before opening a window.
 
-To use your own assets, open `assets/arena.json` in Level Builder and move the `beacon` to another walkable cell. Save the export as `assets/arena.json` in your module. Use the Tile Maker to draw a PNG and save it as `assets/floor.png`. You can rename either file if you update [`assets/goje.json`](../examples/beacon/assets/goje.json). The example requires exactly one `beacon` and a board of at most 4 × 2 cells. Validate the pair before rebuilding:
+To use your own assets, open `assets/arena.json` in Level Builder and move a `beacon` to another walkable cell. Save the export as `assets/arena.json` in your module. Use the Tile Maker to draw a PNG and save it as `assets/floor.png`. You can rename either file if you update [`assets/goje.json`](../examples/beacon/assets/goje.json). Place at least one beacon on a board of at most 4 × 2 cells. Validate the pair before rebuilding:
 
 ```sh
 (cd "$goje_root" && go run ./cmd/projectcheck ../my-playground/assets)

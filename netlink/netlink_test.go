@@ -25,6 +25,7 @@ type fakeTransport struct {
 	gate    chan struct{}
 	err     error
 	closed  chan struct{}
+	lost    bool
 }
 
 func newFake() *fakeTransport { return &fakeTransport{closed: make(chan struct{})} }
@@ -39,7 +40,10 @@ func (f *fakeTransport) write(msg []byte) error {
 	return f.err
 }
 
-func (f *fakeTransport) close() { close(f.closed) }
+func (f *fakeTransport) close(lost bool) {
+	f.lost = lost
+	close(f.closed)
+}
 
 func (f *fakeTransport) writes() [][]byte {
 	f.mu.Lock()
@@ -48,7 +52,7 @@ func (f *fakeTransport) writes() [][]byte {
 }
 
 func startConn(tr *fakeTransport, slot int) *Conn {
-	c := newConn(tr, slot, "ABCDEF")
+	c := newConn(tr, welcome{slot: slot, code: "ABCDEF"})
 	go c.writeLoop()
 	return c
 }
@@ -65,11 +69,11 @@ func waitClosed(tb testing.TB, tr *fakeTransport) {
 func TestRing(t *testing.T) {
 	r := newRing(3)
 	for i := range 3 {
-		if !r.push([]byte{byte(i)}) {
+		if !r.push(nil, []byte{byte(i)}) {
 			t.Fatalf("push %d failed", i)
 		}
 	}
-	if r.push([]byte{9}) {
+	if r.push(nil, []byte{9}) {
 		t.Fatal("push into a full ring succeeded")
 	}
 	for round := range 5 {
@@ -77,27 +81,27 @@ func TestRing(t *testing.T) {
 			t.Fatalf("front %d, want %d", got, round)
 		}
 		r.pop()
-		r.push([]byte{byte(round + 3)})
+		r.push(nil, []byte{byte(round + 3)})
 	}
 	msg := make([]byte, 100)
 	if n := testing.AllocsPerRun(100, func() {
 		r.pop()
-		r.push(msg)
+		r.push(nil, msg)
 	}); n != 0 {
 		t.Errorf("%v allocations per push once warm", n)
 	}
 }
 
 func TestParseWelcome(t *testing.T) {
-	slot, code, err := parseWelcome([]byte("\x01\x01ABC234"))
-	if err != nil || slot != 1 || code != "ABC234" {
-		t.Fatalf("parseWelcome = %d %q %v", slot, code, err)
+	w, err := parseWelcome([]byte("\x01\x01ABC234"))
+	if err != nil || w != (welcome{slot: 1, code: "ABC234"}) {
+		t.Fatalf("parseWelcome = %+v %v", w, err)
 	}
 	for _, bad := range []string{
 		"", "\x01\x00ABC23", "\x01\x00ABC2345", "\x02\x00ABC234",
 		"\x01\x02ABC234", "\x01\x00ABC10O", "\x01\x00abc234",
 	} {
-		if _, _, err := parseWelcome([]byte(bad)); !errors.Is(err, ErrProtocol) {
+		if _, err := parseWelcome([]byte(bad)); !errors.Is(err, ErrProtocol) {
 			t.Errorf("parseWelcome(%q) = %v", bad, err)
 		}
 	}
@@ -158,7 +162,7 @@ func TestReceive(t *testing.T) {
 
 func TestReceiveRejects(t *testing.T) {
 	for _, m := range []string{"", "\x04", "\x01\x00ABCDEF", "\x02x", "\x03x", "\x05", "\xFF"} {
-		c := newConn(newFake(), 1, "ABCDEF")
+		c := newConn(newFake(), welcome{slot: 1, code: "ABCDEF"})
 		if err := c.receive([]byte(m)); !errors.Is(err, ErrProtocol) {
 			t.Errorf("receive(%q) = %v", m, err)
 		}
@@ -214,7 +218,13 @@ func TestWriteError(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitClosed(t, tr)
-	if err := c.Send([]byte("x")); err == nil || !strings.Contains(err.Error(), "broken pipe") {
+	if !tr.lost {
+		t.Error("a lost transport closed as a deliberate leave")
+	}
+	if err := c.Send(
+		[]byte("x"),
+	); !errors.Is(err, ErrLost) ||
+		!strings.Contains(err.Error(), "broken pipe") {
 		t.Fatalf("Send after a write error = %v", err)
 	}
 	if _, _, err := c.Recv(); err == nil {
@@ -224,7 +234,7 @@ func TestWriteError(t *testing.T) {
 
 func TestSteadyStateAllocations(t *testing.T) {
 	tr := newFake()
-	c := newConn(tr, 1, "ABCDEF")
+	c := newConn(tr, welcome{slot: 1, code: "ABCDEF"})
 	msg := append([]byte{msgData}, make([]byte, 100)...)
 	cycle := func() {
 		if err := c.receive(msg); err != nil {
