@@ -23,7 +23,7 @@ M19 rehearses a public preview of Beacon for native desktop and web without publ
 
 ### Real-machine smoke
 
-The staging workflow already publishes immutable Beacon archives for each desktop system and the web build. For each system, download the published archive as a player would, check it against the signed manifest with `goje update`, extract it, and launch it. Beacon already exposes a smoke mode for win, timeout, and restart; run it on the real display and also play one round by hand with keyboard, and in the browser with touch. Record how the system reacted to an unsigned program, including the macOS **Open Anyway** step and Windows SmartScreen, so that the signing decision has data. These checks are manual because the hosted runners lack the hardware, and the rehearsal records their results in the procedure rather than adding unattended jobs.
+The staging workflow already publishes immutable Beacon archives for each desktop system and the web build. For each system, download the published archive as a player would, check it against the signed manifest with `goje update`, extract it, and launch it. The shipped archives do not contain Beacon's smoke host, which is behind build tags, so a person plays a round by hand with the keyboard, and in the browser by touch, to check win, timeout, and restart. A checkout of the tagged commit can also run the native smoke on the same machine. Record how the system reacted to an unsigned program, including the macOS **Open Anyway** step and Windows SmartScreen, so that the signing decision has data. These checks are manual because the hosted runners lack the hardware, and the rehearsal records their results in the procedure rather than adding unattended jobs.
 
 ### Web update behavior
 
@@ -33,7 +33,7 @@ The version change itself is checked locally by the Beacon build smoke, which pu
 
 ### Release procedure
 
-Write a human-facing runbook in `runbook/` that covers choosing a version, staging, verifying on real machines, checking the web update, deciding go or no-go, and rolling back by publishing a newer fixed version, since a signed channel never accepts an older one. It links to the specifications for the rules and states which steps require maintainer authorization. The independent trial starts from the runbook and the guides, not from a conversation with the authors.
+Write a human-facing [runbook](../runbook/release.md) that covers choosing a version, staging, verifying on real machines, checking the web update, deciding go or no-go, and rolling back by publishing a newer fixed version, since a signed channel never accepts an older one. It links to the specifications for the rules and states which steps require maintainer authorization. The independent trial starts from the runbook and the guides, not from a conversation with the authors.
 
 ### Evidence record
 
