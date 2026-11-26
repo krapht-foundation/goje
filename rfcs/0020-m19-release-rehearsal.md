@@ -49,6 +49,19 @@ Record results in this RFC's verification section in the same form as M18: the m
 | Procedure | A maintainer follows the runbook to stage a new Beacon version without help from its author, and publishes the go or no-go list. |
 | Regression | `make check`, the race tests, and `make smoke-goje-build` still pass, and the hosted CI jobs pass on the commit. |
 
+### Verification to date
+
+| Source | System | Hardware | Archive digest | First-run prompts | Result |
+| --- | --- | --- | --- | --- | --- |
+| CI artifact, [run 45863820117](https://github.com/krapht-foundation/goje/actions/runs/45863820117), commit `b00a86f` | macOS 15.5, arm64, MacBook | Apple M4 Pro, built-in speakers | `sha256:bd9aaa115ab2887a6f99c87e0ed2b8190fb5fae62f9b8400065257e805e7c453` | None. The archive was downloaded with `gh` and extracted with `tar`, so it carried no download mark; the Gatekeeper path is not yet checked. | Launched, played, and exited with status 0. Audio was clean. |
+
+The rehearsal found two defects that the hosted runners could not show, and both are fixed on `main`:
+
+- **Deployment target.** The first macOS artifact was built on a macOS 26 runner, and its executable required macOS 26.0 although `Info.plist` promised 12.0. macOS 15.5 refused to open it with "You can't use this version of the application with this version of macOS." The desktop build now sets the deployment target to the same `12.0`, and the Beacon build smoke compares the two. See the [build specification](../specs/build-m15.md).
+- **Audio period.** miniaudio's default 10 ms device period crackled on the built-in speakers although every callback arrived on time and took under 150 µs. A 40 ms period played cleanly. See the [mixer specification](../specs/audio-mixer-m15.md#hosts).
+
+Windows x64, Linux, the web origin, the staged release, the first-run prompts, and the independent trial have no entries yet. Those platforms remain verified only on hosted runners.
+
 ## Out of scope
 
 Native Android and iOS distributions, Authenticode, macOS notarization, installers, automatic installation of a verified update, key rotation, a production channel, new gameplay, and new engine features. Signing can enter a later milestone if the recorded first-run behavior shows that players cannot reasonably get past it.
