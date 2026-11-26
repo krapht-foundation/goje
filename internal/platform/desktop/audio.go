@@ -32,6 +32,12 @@ type mix struct {
 	frames     []float32 // grows to the largest callback, then is reused
 }
 
+// playbackPeriodMS is the device period. miniaudio's 10 ms default crackled on the built-in
+// speakers of a MacBook even though every callback arrived on time and took under 150 µs, so
+// the cause lies below the mixer. A 40 ms period played cleanly there, at the cost of up to
+// about 40 ms more delay before a sound starts.
+const playbackPeriodMS = 40
+
 // openSpeaker starts default output for queue. Without a usable device it logs
 // and returns nil; the queue stays disabled so the game runs silently.
 func openSpeaker(ctx context.Context, logger *slog.Logger, queue *sound.Queue) *speaker {
@@ -46,6 +52,7 @@ func openSpeaker(ctx context.Context, logger *slog.Logger, queue *sound.Queue) *
 	config.SampleRate = audio.SampleRate
 	config.Playback.Format = malgo.FormatF32
 	config.Playback.Channels = 2
+	config.PeriodSizeInMilliseconds = playbackPeriodMS
 	m := &mix{
 		queue:      queue,
 		clips:      queue.Clips(),
