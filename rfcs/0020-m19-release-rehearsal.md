@@ -60,7 +60,18 @@ The rehearsal found two defects that the hosted runners could not show, and both
 - **Deployment target.** The first macOS artifact was built on a macOS 26 runner, and its executable required macOS 26.0 although `Info.plist` promised 12.0. macOS 15.5 refused to open it with "You can't use this version of the application with this version of macOS." The desktop build now sets the deployment target to the same `12.0`, and the Beacon build smoke compares the two. See the [build specification](../specs/build-m15.md).
 - **Audio period.** miniaudio's default 10 ms device period crackled on the built-in speakers although every callback arrived on time and took under 150 µs. A 40 ms period played cleanly. See the [mixer specification](../specs/audio-mixer-m15.md#hosts).
 
-Windows x64, Linux, the web origin, the staged release, the first-run prompts, and the independent trial have no entries yet. Those platforms remain verified only on hosted runners.
+### Web origin
+
+The web build ran on a real HTTPS origin: GitHub Pages at `https://krapht-foundation.github.io/goje/beacon-check/`, served from a temporary `web-check` branch with Pages enabled for the check. The page was an unlinked sub-path, so the service worker scope was `/goje/beacon-check/` rather than the origin root. Headless Chromium used a fresh profile and the CI web archive from candidate 3, whose SHA-256 is `7fb09089204bb1a6…`. The older bundle was the CI archive. The newer bundle was a local build of the same game under another name, standing in for a later release. The check passed:
+
+- The first visit installed the worker with the expected scope and one cache named for the bundle hash. The host's `Cache-Control` was `max-age=600` for the page and the WebAssembly file.
+- A repeat visit was controlled and drew the game. Chromium reported no installability errors.
+- With the network off, a reload started from the service worker and drew the game.
+- After the newer bundle was published, it was live on the host in 23 seconds. `registration.update()` installed the new worker, which waited. A reload still showed the old version. After every page closed, the next visit showed the new version and only the new cache remained.
+
+This agrees with the local smoke, and the host's cache headers did not change the behavior. The check covered Chromium on macOS only. Safari, Firefox, a touch device, and an installed-app window were not checked. Pages was disabled and the temporary branch deleted afterwards; the site returns 404.
+
+Windows x64, Linux, the staged release, the first-run prompts, and the independent trial have no entries yet. Those platforms remain verified only on hosted runners.
 
 ## Out of scope
 
