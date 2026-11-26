@@ -61,3 +61,7 @@ Rejoin follows the spectator history path. Signing and hosting use the verified 
 ## Out of scope
 
 Matchmaking, accounts, chat, more than two players, spectator voting or orders, server-authoritative simulation, prediction, resume after a restart, encrypted fog, and installing an update automatically. Native Android and iOS distributions, including wrappers and store signing or submission, are deferred. Authenticode, macOS notarization, streaming music, resampling, and additional codecs are also out of scope.
+
+## Next milestone
+
+M19 rehearses a Beacon preview release for native desktop and web on real machines, an HTTPS origin, and an independent trial. See [RFC 0020](0020-m19-release-rehearsal.md).
